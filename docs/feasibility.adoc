@@ -129,6 +129,54 @@ AVFoundation liefert bereits dekodierte Pixel.
 Das Original-JPEG des Geräts wäre nur über UVC-Zugriff auf USB-Ebene (libusb) erreichbar.
 Für die Archivierung ist das relevant, weil jede Rekompression Verluste addiert.
 
+=== USB-Deskriptoren (Gerät)
+
+Gelesen per libusb (`prototype/dump_descriptors.py`), nur lesend.
+
+*Nachgewiesen:*
+
+* USB 2.10, High-Speed, eine Konfiguration, vier Interfaces, 200 mA.
+* Interface 0: Video Control mit Interrupt-Endpunkt `0x81`.
+* Interface 1: Video Streaming, isochroner Endpunkt `0x82` (5120 Byte je Intervall).
+* Interface 2 und 3: Audio Control und Audio Streaming (Mikrofon, Endpunkt `0x83`).
+* *Kein HID-Interface.*
+Scanner-Taste und Fußschalter kommen daher nicht als HID-Ereignis an.
+* 5696x4272 und alle größeren Formate gibt es *nur als MJPEG*.
+Unkomprimiert reicht das Gerät bis 2592x1944.
+* Das Standbild-Descriptor-Feld nennt nur 4000x3000.
+Die volle Auflösung kommt über den Videostream, nicht über einen Standbild-Trigger.
+* Zwei herstellerspezifische Extension Units (GUIDs `92423946-d00c-e34a-8783-3133f9eaaa3b` und `82066163-7050-ab49-b8cc-b3855e8d221d`).
+Diese wurden bewusst nicht angesprochen.
+
+*Wahrscheinlich* (Deutung der Control-Bitmasken nach UVC-1.1-Spezifikation, nicht gegengeprüft):
+
+* Processing Unit: Brightness, Contrast, Hue, Saturation, Sharpness, Gamma, WB-Temperatur, Backlight, Gain, Netzfrequenz, WB-Temperatur automatisch.
+* Camera Terminal: AE-Modus, Belichtungszeit absolut, Zoom absolut, Pan/Tilt absolut.
+Kein Fokus-Control.
+
+=== Zugriff auf die Controls (Gerät)
+
+*Nachgewiesen:*
+AVFoundation unterstützt unter macOS nur die Belichtungsmodi `locked` und `continuousAutoExposure`.
+Fokus und Weißabgleich werden nicht angeboten.
+
+*Nachgewiesen:*
+UVC-Class-Anfragen per libusb an das Video-Control-Interface scheitern mit „Access denied (insufficient permissions)“.
+Der Treiber von Apple besitzt das Interface.
+Standard-Anfragen (`GET_STATUS`) funktionieren.
+
+*Nachgewiesen:*
+Weder Scanner-Taste noch Fußschalter erscheinen als HID-Gerät, neues USB-Gerät oder neues Interface.
+Der Konfigurationsdeskriptor ist mit und ohne angeschlossenen Fußschalter byteweise identisch.
+Zwei Minuten Beobachtung des IORegistry-Teilbaums (`prototype/watch_usb.sh`) mit mehrfachem Drücken beider Bedienelemente zeigte keine Änderung.
+
+*Ungeklärt:*
+Ob Taste oder Fußschalter über einen UVC-Status-Interrupt (Endpunkt `0x81`) etwas senden.
+Das würde das Beanspruchen des Video-Control-Interfaces erfordern und wurde bewusst nicht getestet.
+
+*Ungeklärt:*
+Ob sich die Controls über IOKit (`IOUSBInterfaceInterface::ControlRequest`, wie das Open-Source-Werkzeug uvc-util) lesen und setzen lassen.
+
 == Offizielles SDK (Hersteller)
 
 *Nachgewiesen* (aus Repository und Dokumentation, nicht ausgeführt):
