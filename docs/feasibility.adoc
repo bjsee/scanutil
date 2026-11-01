@@ -174,8 +174,42 @@ Zwei Minuten Beobachtung des IORegistry-Teilbaums (`prototype/watch_usb.sh`) mit
 Ob Taste oder Fußschalter über einen UVC-Status-Interrupt (Endpunkt `0x81`) etwas senden.
 Das würde das Beanspruchen des Video-Control-Interfaces erfordern und wurde bewusst nicht getestet.
 
+*Nachgewiesen:*
+Über IOKit (`IOUSBInterfaceInterface::ControlRequest` ohne `USBInterfaceOpen`, Vorgehen wie beim Open-Source-Werkzeug uvc-util) lassen sich die Standard-Controls *lesen*.
+Quelle: `prototype/uvc_controls.c`, nur `GET_CUR`, `GET_MIN`, `GET_MAX`, `GET_RES` und `GET_DEF`.
+
+[cols="2,1,1,1,1,1"]
+|===
+| Control | aktuell | min | max | Schritt | Default
+
+| Brightness | 8 | 0 | 15 | 1 | 8
+| Contrast | 10 | 0 | 15 | 1 | 10
+| Hue | 8 | 0 | 15 | 1 | 8
+| Saturation | 8 | 0 | 15 | 1 | 8
+| Sharpness | 12 | 0 | 15 | 1 | 12
+| Gamma | 8 | 0 | 15 | 1 | 8
+| Weißabgleich-Temperatur (K) | 6500 | 2500 | 8500 | 100 | 6500
+| Weißabgleich automatisch | 1 | 0 | 1 | 1 | 1
+| Backlight-Kompensation | 0 | 0 | 1 | 1 | 0
+| Gain | 0 | 0 | 15 | 1 | 0
+| Netzfrequenz (0 aus, 1 50 Hz, 2 60 Hz) | 2 | 0 | 2 | 1 | 1
+| AE-Modus | 8 | 1 | 8 | 9 | 8
+| Belichtungszeit (100 µs) | 330 | 100 | 10000 | 1 | 330
+| Zoom absolut | 0 | 0 | 16384 | 1 | 0
+|===
+
+*Wahrscheinlich:*
+Die im Gerät eingestellte Schärfe (12 von 15) ist die Ursache der gemessenen Nachschärfung.
+Das ist nicht geprüft, sondern aus Wert und Messung geschlossen.
+
 *Ungeklärt:*
-Ob sich die Controls über IOKit (`IOUSBInterfaceInterface::ControlRequest`, wie das Open-Source-Werkzeug uvc-util) lesen und setzen lassen.
+Die aktuelle Netzfrequenz steht auf 60 Hz, der Default auf 50 Hz.
+Für Deutschland wäre 50 Hz richtig, bei falscher Einstellung droht Flackern unter Kunstlicht.
+Unklar ist, ob die CZUR-Software diesen Wert gesetzt hat und ob er dauerhaft im Gerät bleibt.
+
+*Ungeklärt:*
+Ob sich die Controls schreiben lassen und ob die Werte flüchtig sind.
+Es wurde bisher nichts geschrieben.
 
 == Offizielles SDK (Hersteller)
 
