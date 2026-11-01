@@ -1,0 +1,183 @@
+= Machbarkeitsstudie CZUR ET24 Pro
+:toc:
+:icons: font
+
+Stand: 2026-11-01.
+Phase 1 ist nicht abgeschlossen.
+Dieses Dokument hält fest, was belegt ist und was nicht.
+
+== Kennzeichnung
+
+Jede Aussage trägt eine Herkunft:
+
+* *Hersteller*: Angabe aus Herstellerdokumentation, nicht am Gerät geprüft.
+* *Gerät*: am Gerät des Vereins gemessen.
+* *Dritte*: Angabe aus fremden Quellen, nicht selbst geprüft.
+
+Der Status lautet *Nachgewiesen*, *Wahrscheinlich*, *Ungeklärt* oder *Nicht möglich*.
+
+== Testumgebung
+
+* macOS 26.6.2, Apple Silicon (arm64).
+* ET24 Pro per USB, CZUR-App nicht gestartet.
+* Im Hintergrund lief der Prozess `com.czur.device-helper`, ein privilegierter Helfer der CZUR-Software.
+* Kameraberechtigung für das Terminal wurde erteilt.
+
+== Ergebnisse
+
+=== Erkennung (Gerät)
+
+*Nachgewiesen:*
+Das Gerät meldet USB-Kennung `04fc:6333` und erscheint in macOS als UVC-Kamera mit dem Namen „CZUR".
+Es sind weder Treiber noch CZUR-Software nötig.
+Die Kennung stimmt mit dem Exemplar im Test von cnx-software (Dritte) überein.
+
+=== Aufnahmeformate (Gerät)
+
+*Nachgewiesen:*
+AVFoundation listet 32 Formate von 320x240 bis 7424x5568.
+Darunter ist `5696x4272`, die beworbene Maximalauflösung.
+Ab 5696x4272 liegt die Bildrate bei 4,5 fps.
+Quelle: `prototype/list_formats.swift`.
+
+=== Aufnahme in 5696x4272 (Gerät)
+
+*Nachgewiesen:*
+`prototype/capture_frame.swift` liefert einen Pixelbuffer mit 5696x4272 Pixeln ohne laufende CZUR-Software.
+
+Wichtiger Stolperstein:
+macOS setzt `activeFormat` beim Start der Session auf 1920x1080 zurück.
+Das gewünschte Format muss *nach* `startRunning()` erneut gesetzt werden.
+Ohne diesen Schritt kommt trotz anderslautender Anforderung ein 1920x1080-Bild an.
+
+=== Vergleich mit dem CZUR-Originalscan (Gerät)
+
+Dieselbe Vorlage, Buch unverändert.
+Der CZUR-Scan misst 3273x2529 Pixel (JPEG, 320 dpi laut JFIF, etwa 2,5 MB).
+Er ist zugeschnitten und entzerrt.
+
+*Nachgewiesen:*
+Der Merkmalsabgleich (SIFT mit RANSAC) liefert in vier Bildregionen einen Maßstab von 1,00 (0,999 bis 1,008).
+Der CZUR-Scan liegt damit pixelgenau im Raster unserer 5696x4272-Aufnahme.
+CZUR hat weder hochskaliert noch eine größere Rohauflösung verwendet.
+Quelle: `prototype/align_compare.py`.
+
+*Wahrscheinlich:*
+CZUR schärft nach.
+Die Laplace-Varianz des CZUR-Scans liegt in vier Textregionen um 20 bis 35 Prozent über der unserer unbearbeiteten Aufnahme.
+Im Ausschnitt ist die Detailtreue gleichwertig, der CZUR-Scan wirkt etwas kontrastreicher.
+Die Messung ist auf vier kleine Ausschnitte beschränkt.
+
+=== Echte Sensorauflösung (Gerät)
+
+*Ungeklärt:*
+Ob 5696x4272 echte 24 Megapixel Detail trägt, ist offen.
+Eine Kantenmessung an der Papierkante zeigt echten Detailgewinn bis 4608x3456.
+Zwischen 4608x3456 und 5696x4272 ist kein zusätzlicher Gewinn messbar.
+Das passt zu einer Hochskalierung ebenso wie zu einer optischen Grenze des Objektivs.
+Die Messung beruht auf einer einzelnen Kante und ist anfällig für Schärfung und JPEG-Artefakte.
+
+*Wahrscheinlich:*
+Die Stufen oberhalb von 5696x4272 (6144x4608 bis 7424x5568) werden von der Firmware hochgerechnet und nachgeschärft.
+In der Aufnahme mit 7424x5568 treten Halos auf, und die Kante ist schärfer, als eine Hochskalierung von 5696x4272 zulässt.
+Das ist nicht belegt.
+
+Für eine belastbare Antwort ist eine Vorlage mit feinen Linienpaaren nötig, etwa ein USAF-1951-Chart.
+
+==== Testchart-Messung (Gerät, Tintenstrahldruck)
+
+Chart: `testcharts/resolution_chart_A4.pdf`, Tintenstrahldruck, je Format zwei Aufnahmen.
+Slanted-Edge-Messung an vier 25-mm-Quadraten (`prototype/slanted_edge_mtf.py`).
+
+[cols="1,1,1,1"]
+|===
+| Format | px/mm | MTF50 (lp/mm) | MTF10 (lp/mm)
+
+| 2592x1944 | 5,7 | 3,6 bis 3,8 | etwa 7,0
+| 4608x3456 | 10,1 | 3,75 | etwa 7,1
+| 5696x4272 | 12,5 | 3,70 (reproduzierbar) | etwa 5,9
+| 7424x5568 | 16,3 | 6,5 | 18,7
+|===
+
+*Nachgewiesen:*
+Die MTF50 ist bei 2592, 4608 und 5696 gleich (etwa 3,7 lp/mm).
+Mehr Pixel bringen bei diesem Aufbau keine messbar höhere Kantenschärfe.
+
+*Ungeklärt:*
+Ob das Limit vom Objektiv oder von der Tintenkante des Ausdrucks kommt.
+Die Balkengruppen ab etwa 4 lp/mm sind im Tintenstrahldruck zu einem Balken verlaufen, in allen Formaten gleich.
+Der Test kann deshalb keine höhere Auflösung zeigen.
+Die Frage nach echten 24 Megapixeln bleibt offen.
+
+*Wahrscheinlich:*
+Die Formate 2592 und 4608 werden vom Gerät mit Nachschärfung berechnet.
+Ihre MTF10 liegt über der Nyquist-Grenze (2592: 0,5 Zyklen je Pixel entsprechen 2,9 lp/mm, gemessen 7,0 lp/mm).
+5696x4272 zeigt die geringste Nachschärfung.
+7424x5568 ist stark überschärft, eine MTF10 von 18,7 lp/mm ist physikalisch nicht möglich.
+
+*Nachgewiesen:*
+Das Sichtfeld ist bei 2592, 4608 und 5696 gleich.
+Die Maßstäbe 5,70, 10,13 und 12,52 px/mm verhalten sich wie die Bildbreiten (je 0,0022 px/mm je Bildpixel).
+Die Formate lassen sich also durch Skalieren aufeinander abbilden.
+
+=== Datenpfad (Gerät)
+
+*Wahrscheinlich:*
+Das Gerät hängt an USB 2.0 High-Speed (480 Mbit/s).
+Bei 5696x4272 und 4,5 fps ist das nur mit komprimierten Daten (MJPEG) möglich.
+AVFoundation liefert bereits dekodierte Pixel.
+Das Original-JPEG des Geräts wäre nur über UVC-Zugriff auf USB-Ebene (libusb) erreichbar.
+Für die Archivierung ist das relevant, weil jede Rekompression Verluste addiert.
+
+== Offizielles SDK (Hersteller)
+
+*Nachgewiesen* (aus Repository und Dokumentation, nicht ausgeführt):
+
+* Es gibt ein macOS-arm64-Paket (`sdk-open_macos_arm64_v0.1.0.77.Release.pkg`, 421 MB), Release vom 24.10.2026.
+* Der Quelltext der Runtime steht unter Apache-2.0.
+* Das Release-Paket enthält proprietäre „CZUR-provided default Provider capabilities".
+* Die Nutzung erfordert einen API-Key der Open Platform.
+* Das Changelog zu v0.0.6 nennt ein „Testkontingent auf 200 Aufrufe begrenzt".
+
+*Ungeklärt:*
+
+* Preise und Kontingent nach der Testphase.
+* Ob der ET24 Pro unterstützt wird.
+* Ob `capture.take` die volle Auflösung liefert.
+* Ob alle Funktionen offline laufen.
+
+Das SDK ist als Hauptlösung nur sinnvoll, wenn diese Fragen positiv beantwortet werden.
+Angesichts des UVC-Befunds ist es derzeit nicht nötig.
+Die Installation verändert das System und wurde nicht durchgeführt.
+
+== Community-Projekt czur-scanner-wrapper (Dritte)
+
+*Nachgewiesen:*
+
+* Lizenz MIT.
+* Der Wrapper steuert die CZUR-GUI per `xdotool` und überwacht Ausgabeordner.
+* `czur_direct.py` und `czcv_bindings.py` liegen unter `experimental/` und sind ungenutzt.
+* Beide laden Linux-Bibliotheken (`libczur_linux_app.so`, `libczcv_scan.so.1`) per ctypes.
+* Der Autor berichtet von Segfaults und Qt-Abhängigkeiten.
+
+Für macOS sind die Dateien nicht verwendbar.
+Die Behauptung des Autors, der Scanner brauche proprietäre Firmware-Initialisierung, ist durch den UVC-Befund auf macOS widerlegt:
+Aufnahme in 5696x4272 gelingt ohne Initialisierung durch CZUR-Software.
+Der Beleg gilt für diesen Rechner und diesen Zustand, bei dem der CZUR-Helfer im Hintergrund lief.
+
+== Offene Punkte
+
+. Echte Detailauflösung mit Testchart klären.
+. Funktionieren Hardware-Taste und Fußschalter über UVC oder zusätzliche Interfaces?
+. Laserlinien: sind sie ansteuerbar oder nur in CZUR-Software auswertbar?
+. Original-MJPEG per libusb abgreifen, falls nötig.
+. Verhalten ohne den CZUR-Helfer prüfen (Neustart ohne CZUR-Installation nicht getestet).
+. Stabilität: Dauerbetrieb über Hunderte Aufnahmen.
+. Belichtung und Fokus: welche UVC-Controls sind verfügbar?
+
+== Vorläufige Bewertung
+
+Eine Unabhängigkeit von der CZUR-Software für die Bildaufnahme erscheint realistisch.
+Das wichtigste Akzeptanzkriterium, eine Aufnahme mit 5696x4272 Pixeln ohne laufende CZUR-Software, ist erfüllt.
+Offen ist, ob damit die volle Detailqualität eines CZUR-Scans erreicht wird.
+Die vorliegenden Messungen sprechen für Gleichwertigkeit bis auf die Nachschärfung, die sich in der eigenen Verarbeitung nachbilden lässt.
