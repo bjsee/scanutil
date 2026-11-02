@@ -30,46 +30,30 @@ public final class ET24Scanner: ScannerPort, @unchecked Sendable {
         return formats.sorted { $0.width * $0.height > $1.width * $1.height }
     }
 
-    public func previewFrames(format: ScanFormat) -> AsyncThrowingStream<PreviewFrame, Error> {
-        AsyncThrowingStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
-            guard busy.acquire() else {
-                continuation.finish(throwing: ScannerError.deviceBusy)
-                return
-            }
-            guard let device = Self.findDevice() else {
-                busy.release()
-                continuation.finish(throwing: ScannerError.deviceNotFound)
-                return
-            }
-            let job = PreviewJob(deviceID: device.uniqueID, format: format, continuation: continuation, onStopped: { [busy] in busy.release() })
-            continuation.onTermination = { _ in job.stop() }
-            job.start()
+    public func openSession(format: ScanFormat, settings: CaptureSettings) async throws -> any ScanSession {
+        guard busy.acquire() else { throw ScannerError.deviceBusy }
+        var restore: (@Sendable () -> Void)?
+        do {
+            try await Self.requestAccess()
+            guard let device = Self.findDevice() else { throw ScannerError.deviceNotFound }
+            let info = DeviceInfo(name: device.localizedName, identifier: device.uniqueID)
+            restore = try Self.applySharpness(settings.sharpness)
+            Trace.log("open: Schärfe gesetzt")
+            let session = LiveSession(
+                device: info, format: format, settings: settings,
+                onClosed: { [busy, restore] in
+                    restore?()
+                    busy.release()
+                }
+            )
+            try await session.start()
+            Trace.log("open: Strom läuft")
+            return session
+        } catch {
+            restore?()
+            busy.release()
+            throw error
         }
-    }
-
-    public func capture(format: ScanFormat, settings: CaptureSettings) async throws -> Capture {
-        // Läuft noch die Vorschau, kurz auf deren Freigabe warten.
-        var waited = 0
-        while !busy.acquire() {
-            guard waited < 60 else { throw ScannerError.deviceBusy }
-            try await Task.sleep(for: .milliseconds(50))
-            waited += 1
-        }
-        defer { busy.release() }
-
-        try await Self.requestAccess()
-        guard let device = Self.findDevice() else { throw ScannerError.deviceNotFound }
-        let info = DeviceInfo(name: device.localizedName, identifier: device.uniqueID)
-
-        let restore = try Self.applySharpness(settings.sharpness)
-        defer { restore() }
-
-        let job = FrameJob(deviceID: device.uniqueID, format: format)
-        let frame = try await job.run()
-        return Capture(
-            imageData: frame.png, width: frame.width, height: frame.height,
-            metadata: CaptureMetadata(device: info, requestedFormat: format, capturedAt: Date(), sharpness: settings.sharpness)
-        )
     }
 
     // MARK: Hilfen
@@ -84,107 +68,26 @@ public final class ET24Scanner: ScannerPort, @unchecked Sendable {
         }
     }
 
-    private static func findDevice() -> AVCaptureDevice? {
+    static func findDevice() -> AVCaptureDevice? {
         AVCaptureDevice.DiscoverySession(deviceTypes: [.external], mediaType: .video, position: .unspecified).devices
             .first { $0.modelID.contains(vendorToken) && $0.modelID.contains(productToken) }
     }
 
-    /// Setzt die Schärfe und liefert eine Funktion, die den vorherigen Wert wiederherstellt.
-    private static func applySharpness(_ wanted: Int?) throws -> () -> Void {
+    /// Setzt die Schärfe und liefert eine Funktion, die den Standardwert des Geräts wiederherstellt.
+    /// Der Standardwert statt des vorherigen Werts, damit ein Absturz mit Schärfe 0 nicht zum „vorherigen“ Wert wird.
+    private static func applySharpness(_ wanted: Int?) throws -> @Sendable () -> Void {
         guard let wanted else { return {} }
-        var previous: Int32 = 0, min: Int32 = 0, max: Int32 = 0
-        let readStatus = cuvc_get_sharpness(&previous, &min, &max)
+        var current: Int32 = 0, min: Int32 = 0, max: Int32 = 0, defaultValue: Int32 = 0
+        let readStatus = cuvc_get_sharpness(&current, &min, &max, &defaultValue)
         guard readStatus == 0 else { throw ScannerError.controlFailed(name: "Schärfe", code: Int(readStatus)) }
         let setStatus = cuvc_set_sharpness(Int32(wanted))
         guard setStatus == 0 else { throw ScannerError.controlFailed(name: "Schärfe", code: Int(setStatus)) }
-        return { _ = cuvc_set_sharpness(previous) }
+        let restoreValue = defaultValue
+        return { _ = cuvc_set_sharpness(restoreValue) }
     }
 }
 
-/// Eine einzelne Aufnahme. Hält die AVFoundation-Objekte und löst die Fortsetzung genau einmal aus.
-private final class FrameJob: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
-    struct Frame: Sendable { let png: Data; let width: Int; let height: Int }
-
-    /// Frames, die verworfen werden, bevor eines übernommen wird (Belichtung und Format müssen sich einpendeln).
-    private static let framesToSkip = 8
-
-    private let deviceID: String
-    private let format: ScanFormat
-    private let queue = DispatchQueue(label: "scanutil.et24.capture")
-    private let session = AVCaptureSession()
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<Frame, Error>?
-    private var received = 0
-    private var finished = false
-
-    init(deviceID: String, format: ScanFormat) {
-        self.deviceID = deviceID
-        self.format = format
-    }
-
-    func run() async throws -> Frame {
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Frame, Error>) in
-            lock.lock(); continuation = cont; lock.unlock()
-            queue.async { [self] in
-                do { try start() } catch { finish(.failure(error)) }
-            }
-            queue.asyncAfter(deadline: .now() + 30) { [self] in finish(.failure(ScannerError.timeout)) }
-        }
-    }
-
-    private func start() throws {
-        guard let device = AVCaptureDevice(uniqueID: deviceID) else { throw ScannerError.deviceNotFound }
-        guard let avFormat = device.formats.first(where: {
-            let d = CMVideoFormatDescriptionGetDimensions($0.formatDescription)
-            return Int(d.width) == format.width && Int(d.height) == format.height
-        }) else { throw ScannerError.formatUnavailable(format) }
-
-        let input = try AVCaptureDeviceInput(device: device)
-        let output = AVCaptureVideoDataOutput()
-        guard session.canAddInput(input), session.canAddOutput(output) else { throw ScannerError.deviceNotFound }
-        session.addInput(input)
-        session.addOutput(output)
-        output.setSampleBufferDelegate(self, queue: queue)
-        session.startRunning()
-
-        // macOS setzt das Format beim Start auf das Preset zurück: erst danach das gewünschte setzen.
-        try device.lockForConfiguration()
-        device.activeFormat = avFormat
-        device.unlockForConfiguration()
-    }
-
-    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard !isFinished, let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        // Nur Frames in der gewünschten Größe zählen, die Anfangsframes haben noch die Preset-Größe.
-        guard CVPixelBufferGetWidth(buffer) == format.width, CVPixelBufferGetHeight(buffer) == format.height else { return }
-        received += 1
-        guard received > Self.framesToSkip else { return }
-        do {
-            let context = CIContext()
-            let image = CIImage(cvPixelBuffer: buffer)
-            guard let cg = context.createCGImage(image, from: image.extent, format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!) else {
-                throw ScannerError.encodingFailed
-            }
-            finish(.success(Frame(png: try PNGEncoding.data(from: cg), width: cg.width, height: cg.height)))
-        } catch {
-            finish(.failure(error))
-        }
-    }
-
-    private var isFinished: Bool { lock.lock(); defer { lock.unlock() }; return finished }
-
-    private func finish(_ result: Result<Frame, Error>) {
-        lock.lock()
-        guard !finished, let cont = continuation else { lock.unlock(); return }
-        finished = true
-        continuation = nil
-        lock.unlock()
-        session.stopRunning()
-        cont.resume(with: result)
-    }
-}
-
-/// Verhindert zwei gleichzeitige Aufnahmen. Synchron, damit die Sperre nicht über ein `await` gehalten wird.
+/// Verhindert zwei gleichzeitige Sitzungen. Synchron, damit die Sperre nicht über ein `await` gehalten wird.
 private final class BusyFlag: @unchecked Sendable {
     private let lock = NSLock()
     private var isBusy = false
@@ -202,73 +105,189 @@ private final class BusyFlag: @unchecked Sendable {
     }
 }
 
-/// Laufende Vorschau. Gibt das Gerät beim Stoppen frei und meldet das über `onStopped`.
-private final class PreviewJob: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
-    private let deviceID: String
-    private let format: ScanFormat
-    private let continuation: AsyncThrowingStream<PreviewFrame, Error>.Continuation
-    private let onStopped: @Sendable () -> Void
-    private let queue = DispatchQueue(label: "scanutil.et24.preview")
-    private let session = AVCaptureSession()
-    private let context = CIContext()
-    private let lock = NSLock()
-    private var stopped = false
+private struct UncheckedBuffer: @unchecked Sendable {
+    let buffer: CVPixelBuffer
+}
 
-    init(deviceID: String, format: ScanFormat, continuation: AsyncThrowingStream<PreviewFrame, Error>.Continuation, onStopped: @escaping @Sendable () -> Void) {
-        self.deviceID = deviceID
+/// Dauerhafte Sitzung im Aufnahmeformat. Jedes Bild des Stroms speist die Vorschau (verkleinert),
+/// ein Scan nimmt das nächste Bild in voller Größe.
+private final class LiveSession: NSObject, ScanSession, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
+    let device: DeviceInfo
+    let format: ScanFormat
+    let previewFrames: AsyncStream<PreviewFrame>
+
+    /// Breite der Vorschaubilder in Pixeln.
+    private static let previewWidth = 1536.0
+
+    private let settings: CaptureSettings
+    private let onClosed: @Sendable () -> Void
+    private let previewContinuation: AsyncStream<PreviewFrame>.Continuation
+    private let queue = DispatchQueue(label: "scanutil.et24.session")
+    private let avSession = AVCaptureSession()
+    private let ciContext = CIContext()
+    private let lock = NSLock()
+
+    private var readyContinuation: CheckedContinuation<Void, Error>?
+    private var isReady = false
+    private var isClosed = false
+    private var waiters: [UUID: CheckedContinuation<UncheckedBuffer, Error>] = [:]
+    private var frameCount = 0
+
+    init(device: DeviceInfo, format: ScanFormat, settings: CaptureSettings, onClosed: @escaping @Sendable () -> Void) {
+        self.device = device
         self.format = format
-        self.continuation = continuation
-        self.onStopped = onStopped
+        self.settings = settings
+        self.onClosed = onClosed
+        let (stream, continuation) = AsyncStream<PreviewFrame>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        previewFrames = stream
+        previewContinuation = continuation
+        super.init()
     }
 
-    func start() {
-        queue.async { [self] in
-            do { try configureAndRun() } catch {
-                continuation.finish(throwing: error)
-                stop()
+    // MARK: Start
+
+    /// Startet den Strom und kehrt zurück, sobald das erste Bild in der Aufnahmegröße da ist.
+    func start() async throws {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            lock.withLock { readyContinuation = cont }
+            queue.async { [self] in
+                do { try configure() } catch { failStart(error) }
             }
+            queue.asyncAfter(deadline: .now() + 20) { [self] in failStart(ScannerError.timeout) }
         }
     }
 
-    private func configureAndRun() throws {
-        guard let device = AVCaptureDevice(uniqueID: deviceID) else { throw ScannerError.deviceNotFound }
-        guard let avFormat = device.formats.first(where: {
+    private func configure() throws {
+        guard let avDevice = AVCaptureDevice(uniqueID: device.identifier) else { throw ScannerError.deviceNotFound }
+        guard let avFormat = avDevice.formats.first(where: {
             let d = CMVideoFormatDescriptionGetDimensions($0.formatDescription)
             return Int(d.width) == format.width && Int(d.height) == format.height
         }) else { throw ScannerError.formatUnavailable(format) }
-        let input = try AVCaptureDeviceInput(device: device)
+
+        let input = try AVCaptureDeviceInput(device: avDevice)
         let output = AVCaptureVideoDataOutput()
         output.alwaysDiscardsLateVideoFrames = true
-        guard session.canAddInput(input), session.canAddOutput(output) else { throw ScannerError.deviceNotFound }
-        session.addInput(input)
-        session.addOutput(output)
+        guard avSession.canAddInput(input), avSession.canAddOutput(output) else { throw ScannerError.deviceNotFound }
+        avSession.addInput(input)
+        avSession.addOutput(output)
         output.setSampleBufferDelegate(self, queue: queue)
-        session.startRunning()
-        // Das Format muss nach dem Start gesetzt werden, siehe docs/hardware-access.adoc.
-        try device.lockForConfiguration()
-        device.activeFormat = avFormat
-        device.unlockForConfiguration()
+        avSession.startRunning()
+
+        // macOS setzt das Format beim Start auf das Preset zurück: erst danach das gewünschte setzen.
+        try avDevice.lockForConfiguration()
+        avDevice.activeFormat = avFormat
+        avDevice.unlockForConfiguration()
+        Trace.log("session: Format gesetzt")
     }
+
+    private func failStart(_ error: Error) {
+        let cont = lock.withLock { () -> CheckedContinuation<Void, Error>? in
+            let c = readyContinuation
+            readyContinuation = nil
+            return c
+        }
+        guard let cont else { return }
+        avSession.stopRunning()
+        previewContinuation.finish()
+        cont.resume(throwing: error)
+    }
+
+    // MARK: Bilder
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        // Frames in Preset-Größe (vor dem Formatwechsel) überspringen.
-        guard CVPixelBufferGetWidth(buffer) == format.width else { return }
+        // Bilder vor dem Formatwechsel haben noch die Preset-Größe und zählen nicht.
+        guard CVPixelBufferGetWidth(buffer) == format.width, CVPixelBufferGetHeight(buffer) == format.height else { return }
+
+        let (ready, pending, closed) = lock.withLock { () -> (CheckedContinuation<Void, Error>?, [CheckedContinuation<UncheckedBuffer, Error>], Bool) in
+            frameCount += 1
+            let r = readyContinuation
+            readyContinuation = nil
+            isReady = true
+            let p = Array(waiters.values)
+            waiters.removeAll()
+            return (r, p, isClosed)
+        }
+        guard !closed else { return }
+        if frameCount == 1 { Trace.log("session: erstes Bild in Aufnahmegröße") }
+        ready?.resume()
+        for waiter in pending { waiter.resume(returning: UncheckedBuffer(buffer: buffer)) }
+
+        // Vorschau: auf Vorschaubreite verkleinern. Das Original bleibt unberührt.
         let image = CIImage(cvPixelBuffer: buffer)
-        guard let cg = context.createCGImage(image, from: image.extent) else { return }
-        continuation.yield(PreviewFrame(image: cg))
+        let scale = Self.previewWidth / image.extent.width
+        let small = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        if let cg = ciContext.createCGImage(small, from: small.extent) {
+            previewContinuation.yield(PreviewFrame(image: cg))
+        }
     }
 
-    func stop() {
-        let alreadyStopped = lock.withLock { () -> Bool in
-            let was = stopped
-            stopped = true
-            return was
+    // MARK: ScanSession
+
+    func capture() async throws -> Capture {
+        let requested = Date()
+        Trace.log("capture: Auslöser")
+        let id = UUID()
+        let frame: UncheckedBuffer = try await withCheckedThrowingContinuation { cont in
+            let alreadyClosed = lock.withLock { () -> Bool in
+                if isClosed { return true }
+                waiters[id] = cont
+                return false
+            }
+            if alreadyClosed {
+                cont.resume(throwing: ScannerError.deviceNotFound)
+                return
+            }
+            queue.asyncAfter(deadline: .now() + 10) { [self] in
+                let timedOut = lock.withLock { waiters.removeValue(forKey: id) }
+                timedOut?.resume(throwing: ScannerError.timeout)
+            }
         }
-        guard !alreadyStopped else { return }
-        queue.async { [self] in
-            session.stopRunning()
-            onStopped()
+        Trace.log("capture: Bild erhalten")
+        let encoded = try await Task.detached(priority: .userInitiated) { [ciContext] in
+            let image = CIImage(cvPixelBuffer: frame.buffer)
+            guard let cg = ciContext.createCGImage(image, from: image.extent, format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!) else {
+                throw ScannerError.encodingFailed
+            }
+            return (try PNGEncoding.data(from: cg), cg.width, cg.height)
+        }.value
+        Trace.log("capture: PNG kodiert (\(encoded.0.count / 1000) kB)")
+        return Capture(
+            imageData: encoded.0, width: encoded.1, height: encoded.2,
+            metadata: CaptureMetadata(device: device, requestedFormat: format, capturedAt: requested, sharpness: settings.sharpness)
+        )
+    }
+
+    func close() async {
+        let (first, pending) = lock.withLock { () -> (Bool, [CheckedContinuation<UncheckedBuffer, Error>]) in
+            if isClosed { return (false, []) }
+            isClosed = true
+            let p = Array(waiters.values)
+            waiters.removeAll()
+            return (true, p)
         }
+        guard first else { return }
+        for waiter in pending { waiter.resume(throwing: ScannerError.deviceNotFound) }
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            queue.async { [self] in
+                avSession.stopRunning()
+                previewContinuation.finish()
+                onClosed()
+                done.resume()
+            }
+        }
+    }
+}
+
+/// Abschaltbare Zeitmessung. Ausgabe auf stderr, wenn `SCANUTIL_TRACE` gesetzt ist.
+enum Trace {
+    static let enabled = ProcessInfo.processInfo.environment["SCANUTIL_TRACE"] != nil
+    private static let start = ContinuousClock.now
+
+    static func log(_ label: String) {
+        guard enabled else { return }
+        let d = ContinuousClock.now - start
+        let ms = Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15
+        FileHandle.standardError.write(Data(String(format: "[trace %8.0f ms] %@\n", ms, label).utf8))
     }
 }

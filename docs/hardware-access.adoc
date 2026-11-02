@@ -19,6 +19,36 @@ AVFoundation liefert Frames in allen von ihm gemeldeten Formaten.
 
 Referenz: `prototype/capture_frame.swift`.
 
+== Dauerhafte Sitzung statt Einzelaufnahme
+
+Eine neue Sitzung je Aufnahme dauert etwa 4,2 Sekunden.
+Gemessen (`SCANUTIL_TRACE=1`, `scanutil-cli capture --count`):
+
+[cols="2,1"]
+|===
+| Phase bei Einzelaufnahme | Zeit
+
+| Sitzung starten und Format setzen | 0,35 s
+| bis zum ersten Bild im neuen Format | 0,6 bis 1,1 s
+| acht Bilder verwerfen (4 bis 5 Bilder je Sekunde) | 1,9 bis 2,4 s
+| PNG kodieren | 0,7 s
+| Speichern | 0,03 s
+|===
+
+*Nachgewiesen:*
+Hält man die Sitzung dauerhaft im Aufnahmeformat (5696x4272) und nimmt das nächste Bild des laufenden Stroms, dauert eine Aufnahme 0,8 bis 0,9 Sekunden.
+Davon entfallen etwa 0,1 bis 0,4 Sekunden auf das Warten auf das nächste Bild und etwa 0,7 bis 0,9 Sekunden auf die PNG-Kodierung.
+Die erste Aufnahme einer Sitzung dauert etwa 1,3 Sekunden, das Öffnen der Sitzung einmalig etwa 1,5 Sekunden.
+Die Vorschau wird aus demselben Strom verkleinert abgeleitet und läuft mit der Bildrate des Geräts (4 bis 5 Bilder je Sekunde).
+
+*Ungeklärt:*
+Ob die Belichtung nach einem Wechsel der Vorlage schnell genug einpendelt, wenn die nächste Aufnahme sofort folgt.
+Die PNG-Kodierung ließe sich aus dem Auslösepfad herausnehmen.
+
+*Folgerung:*
+Die Schärfe wird für die ganze Sitzung auf 0 gesetzt und beim Schließen auf den Standardwert des Geräts zurückgesetzt, nicht auf den vorherigen Wert.
+Bleibt die Schärfe nach einem Absturz auf 0 stehen, wird sie beim nächsten Schließen trotzdem auf den Standard (12) gesetzt.
+
 == Stolpersteine
 
 [cols="1,2"]

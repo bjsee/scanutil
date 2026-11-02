@@ -29,7 +29,6 @@ public final class AppModel {
     public private(set) var scans: [ScanItem] = []
     public private(set) var message: String?
     public private(set) var captureFormat: ScanFormat?
-    public private(set) var previewFormat: ScanFormat?
     /// Dauer des letzten Scans vom Tastendruck bis zur archivierten Miniatur, ohne den Neustart der Vorschau.
     public private(set) var lastScanDuration: Duration?
 
@@ -39,6 +38,7 @@ public final class AppModel {
     private let scanner: any ScannerPort
     private let store: ArchiveStore
     private let thumbnailSize: Int
+    private var session: (any ScanSession)?
     private var previewTask: Task<Void, Never>?
 
     public init(scanner: any ScannerPort, store: ArchiveStore, thumbnailSize: Int = 1600) {
@@ -49,75 +49,67 @@ public final class AppModel {
 
     // MARK: Verbinden
 
-    /// Verbindet den Scanner, wählt Formate, lädt vorhandene Scans und startet die Vorschau.
+    /// Verbindet den Scanner, öffnet die Sitzung im Aufnahmeformat und lädt vorhandene Scans.
+    /// Die Vorschau kommt aus derselben Sitzung wie die Aufnahme.
     public func connect() async {
-        guard status != .connecting, status != .capturing else { return }
+        guard status != .connecting, status != .capturing, session == nil else { return }
         status = .connecting
         message = nil
         do {
             device = try await scanner.connect()
             let formats = try await scanner.availableFormats()
-            captureFormat = Self.captureFormat(from: formats)
-            previewFormat = Self.previewFormat(from: formats)
-            guard captureFormat != nil, previewFormat != nil else { throw ScannerError.deviceNotFound }
+            guard let format = Self.captureFormat(from: formats) else { throw ScannerError.deviceNotFound }
+            captureFormat = format
             await loadExistingScans()
+            let opened = try await scanner.openSession(format: format, settings: .archival)
+            session = opened
+            startPreview(from: opened)
             status = .ready
-            startPreview()
         } catch {
             status = .failed(error.localizedDescription)
         }
     }
 
-    /// Formate: Aufnahme in 5696x4272, falls angeboten, sonst das größte. Nicht blind das größte,
+    /// Beendet die Sitzung und setzt die Geräteeinstellungen zurück. Vor dem Beenden der App aufrufen.
+    public func disconnect() async {
+        previewTask?.cancel()
+        previewTask = nil
+        let closing = session
+        session = nil
+        await closing?.close()
+        previewImage = nil
+        status = .disconnected
+    }
+
+    /// Format: Aufnahme in 5696x4272, falls angeboten, sonst das größte. Nicht blind das größte,
     /// weil die Stufen darüber vom Gerät hochgerechnet und nachgeschärft werden (docs/feasibility.adoc).
     static func captureFormat(from formats: [ScanFormat]) -> ScanFormat? {
         formats.first { $0.width == 5696 && $0.height == 4272 }
             ?? formats.max { $0.width * $0.height < $1.width * $1.height }
     }
 
-    /// Vorschau: ein Format um 1,5 bis 2 Megapixel im Seitenverhältnis 4:3, sonst das nächstkleinere.
-    static func previewFormat(from formats: [ScanFormat]) -> ScanFormat? {
-        let target = 1536 * 1152
-        let candidates = formats.filter { $0.width * 3 == $0.height * 4 }
-        let pool = candidates.isEmpty ? formats : candidates
-        return pool.min { abs($0.width * $0.height - target) < abs($1.width * $1.height - target) }
-    }
-
     // MARK: Vorschau
 
-    public func startPreview() {
-        guard previewTask == nil, let format = previewFormat else { return }
-        previewTask = Task { [scanner] in
-            do {
-                for try await frame in scanner.previewFrames(format: format) {
-                    if Task.isCancelled { break }
-                    self.previewImage = frame.image
-                }
-            } catch {
-                self.message = error.localizedDescription
+    private func startPreview(from session: any ScanSession) {
+        previewTask?.cancel()
+        previewTask = Task {
+            for await frame in session.previewFrames {
+                if Task.isCancelled { break }
+                self.previewImage = frame.image
             }
-            self.previewTask = nil
         }
-    }
-
-    public func stopPreview() async {
-        let task = previewTask
-        task?.cancel()
-        await task?.value
-        previewTask = nil
     }
 
     // MARK: Scannen
 
-    /// Hält die Vorschau an, nimmt in voller Auflösung auf (Schärfe 0), archiviert das Original und startet die Vorschau neu.
+    /// Nimmt das nächste Bild der laufenden Sitzung in voller Auflösung auf und archiviert das Original.
     public func scan() async {
-        guard status == .ready, let format = captureFormat else { return }
+        guard status == .ready, let session else { return }
         status = .capturing
         message = nil
         let started = ContinuousClock.now
-        await stopPreview()
         do {
-            let capture = try await scanner.capture(format: format, settings: .archival)
+            let capture = try await session.capture()
             let record = try store.store(capture)
             let store = self.store, size = thumbnailSize
             let thumb = await Task.detached { store.thumbnail(for: record, maxPixelSize: size) }.value
@@ -125,11 +117,9 @@ public final class AppModel {
             lastScanDuration = ContinuousClock.now - started
             status = .ready
         } catch {
-            // Das Gerät ist meist noch da, der Fehler gehört an den Anfang der Oberfläche, nicht in einen Dialog.
             message = error.localizedDescription
             status = .ready
         }
-        startPreview()
     }
 
     // MARK: Archiv

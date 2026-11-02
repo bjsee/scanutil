@@ -40,10 +40,20 @@ do {
         let format = option("--format", in: args).flatMap(parseFormat) ?? (args.contains("--mock") ? ScanFormat(width: 640, height: 480) : ScanFormat(width: 5696, height: 4272))
         let sharpness = option("--sharpness", in: args).flatMap(Int.init) ?? CaptureSettings.archival.sharpness
         _ = try await scanner.connect()
-        let capture = try await scanner.capture(format: format, settings: CaptureSettings(sharpness: sharpness))
-        let record = try store.store(capture)
-        print("gespeichert: \(store.originalURL(for: record).path)")
-        print("  \(record.original.width)x\(record.original.height), \(record.original.bytes) Bytes, SHA-256 \(record.original.sha256)")
+        let count = option("--count", in: args).flatMap(Int.init) ?? 1
+        let t0 = ContinuousClock.now
+        let session = try await scanner.openSession(format: format, settings: CaptureSettings(sharpness: sharpness))
+        print("Sitzung geöffnet in \(ContinuousClock.now - t0)")
+        defer { Task { await session.close() } }
+        for i in 1...count {
+            let t1 = ContinuousClock.now
+            let capture = try await session.capture()
+            let t2 = ContinuousClock.now
+            let record = try store.store(capture)
+            let t3 = ContinuousClock.now
+            print("[\(i)] \(record.original.width)x\(record.original.height), Aufnahme \(t2 - t1), Speichern \(t3 - t2), SHA-256 \(record.original.sha256.prefix(12))…")
+        }
+        await session.close()
         print("  Schärfe bei Aufnahme: \(sharpness.map(String.init) ?? "unverändert")")
 
     case "verify":

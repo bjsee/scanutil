@@ -29,7 +29,7 @@ struct AppModelTests {
         #expect(model.device?.name == "Mock-Scanner")
         #expect(model.captureFormat != nil)
         #expect(await eventually { model.previewImage != nil })
-        await model.stopPreview()
+        await model.disconnect()
     }
 
     @Test func connectFailureShowsMessage() async {
@@ -50,7 +50,7 @@ struct AppModelTests {
         #expect(scanner.calls[0].settings == .archival)
         let record = try #require(model.lastScan?.record)
         #expect(try ArchiveStore(root: dir).verify(record))
-        await model.stopPreview()
+        await model.disconnect()
     }
 
     @Test func scanMeasuresDuration() async {
@@ -59,15 +59,30 @@ struct AppModelTests {
         #expect(model.lastScanDuration == nil)
         await model.scan()
         #expect(model.lastScanDuration != nil)
-        await model.stopPreview()
+        await model.disconnect()
     }
 
-    @Test func scanRestartsPreview() async {
-        let (model, _, dir) = makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+    @Test func previewKeepsRunningDuringScan() async {
+        let (model, scanner, dir) = makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
         await model.connect()
         await model.scan()
+        await model.scan()
+        // Eine Sitzung für alle Scans, kein Neuaufbau dazwischen.
+        #expect(scanner.openedSessions == 1)
+        #expect(scanner.closedSessions == 0)
         #expect(await eventually { model.previewImage != nil })
-        await model.stopPreview()
+        await model.disconnect()
+        #expect(scanner.closedSessions == 1)
+    }
+
+    @Test func disconnectClosesSessionAndStopsScanning() async {
+        let (model, scanner, dir) = makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        await model.connect()
+        await model.disconnect()
+        #expect(model.status == .disconnected)
+        #expect(model.previewImage == nil)
+        await model.scan()
+        #expect(scanner.calls.isEmpty)
     }
 
     @Test func scanFailureKeepsReadyAndShowsMessage() async {
@@ -77,7 +92,7 @@ struct AppModelTests {
         #expect(model.status == .ready)
         #expect(model.scans.isEmpty)
         #expect(model.message == ScannerError.timeout.localizedDescription)
-        await model.stopPreview()
+        await model.disconnect()
     }
 
     @Test func scanIgnoredWhenNotReady() async {
@@ -90,12 +105,14 @@ struct AppModelTests {
     @Test func connectLoadsExistingScansNewestFirst() async throws {
         let (model, _, dir) = makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
         let store = ArchiveStore(root: dir)
-        let capture = try await MockScanner().capture(format: ScanFormat(width: 320, height: 240), settings: .archival)
+        let session = try await MockScanner().openSession(format: ScanFormat(width: 320, height: 240), settings: .archival)
+        let capture = try await session.capture()
+        await session.close()
         let first = try store.store(capture, now: Date(timeIntervalSince1970: 1000))
         let second = try store.store(capture, now: Date(timeIntervalSince1970: 2000))
         await model.connect()
         #expect(model.scans.map(\.id) == [second.id, first.id])
-        await model.stopPreview()
+        await model.disconnect()
     }
 
     @Test func captureFormatPrefers5696OverLarger() {
@@ -108,14 +125,7 @@ struct AppModelTests {
         #expect(AppModel.captureFormat(from: formats) == ScanFormat(width: 1280, height: 720))
     }
 
-    @Test func previewFormatPicksNearTwoMegapixelFourToThree() {
-        let formats = [ScanFormat(width: 1920, height: 1080), ScanFormat(width: 1536, height: 1152),
-                       ScanFormat(width: 5696, height: 4272), ScanFormat(width: 640, height: 480)]
-        #expect(AppModel.previewFormat(from: formats) == ScanFormat(width: 1536, height: 1152))
-    }
-
     @Test func noFormatsMeansNoSelection() {
         #expect(AppModel.captureFormat(from: []) == nil)
-        #expect(AppModel.previewFormat(from: []) == nil)
     }
 }

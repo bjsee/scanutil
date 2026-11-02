@@ -11,7 +11,9 @@ struct ArchiveStoreTests {
     }
 
     private func sampleCapture() async throws -> Capture {
-        try await MockScanner().capture(format: ScanFormat(width: 320, height: 240), settings: .archival)
+        let session = try await MockScanner().openSession(format: ScanFormat(width: 320, height: 240), settings: .archival)
+        defer { Task { await session.close() } }
+        return try await session.capture()
     }
 
     @Test func storesOriginalWithChecksum() async throws {

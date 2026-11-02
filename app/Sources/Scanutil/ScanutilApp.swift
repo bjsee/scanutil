@@ -6,10 +6,25 @@ import SwiftUI
 
 /// Macht aus der Binärdatei ein reguläres Programm mit Tastaturfokus. Ohne das bekommt eine nicht gebündelte
 /// App keine Tasteneingaben, sie landen im Terminal, aus dem sie gestartet wurde.
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    var model: AppModel?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// Schließt vor dem Beenden die Scanner-Sitzung, damit die Schärfe im Gerät wieder auf den Standardwert kommt.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let model else { return .terminateNow }
+        Task {
+            await model.disconnect()
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 }
 
@@ -29,6 +44,7 @@ struct ScanutilApp: App {
     var body: some Scene {
         WindowGroup("Scanutil") {
             ContentView(model: model)
+                .onAppear { delegate.model = model }
         }
     }
 }

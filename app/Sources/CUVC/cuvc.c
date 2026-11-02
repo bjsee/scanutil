@@ -59,16 +59,17 @@ static int read_value(IOUSBInterfaceInterface300 **interface, uint8_t interface_
     return 0;
 }
 
-typedef struct { int *value, *min, *max; } GetContext;
+typedef struct { int *value, *min, *max, *def; } GetContext;
 static int get_body(IOUSBInterfaceInterface300 **interface, uint8_t number, void *context) {
     GetContext *c = context;
     int status = read_value(interface, number, 0x81, c->value);
     if (!status && c->min) status = read_value(interface, number, 0x82, c->min);
     if (!status && c->max) status = read_value(interface, number, 0x83, c->max);
+    if (!status && c->def) status = read_value(interface, number, 0x87, c->def);
     return status;
 }
-int cuvc_get_sharpness(int *value, int *min, int *max) {
-    GetContext c = { value, min, max };
+int cuvc_get_sharpness(int *value, int *min, int *max, int *def) {
+    GetContext c = { value, min, max, def };
     return with_interface(get_body, &c);
 }
 
