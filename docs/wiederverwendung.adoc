@@ -138,6 +138,16 @@ Wer Code *einbindet oder linkt*, müsste die eigene Anwendung unter eine kompati
 Da das Projekt quelloffen sein soll, ist eine GPL-Anwendung kein Hindernis.
 Es ist aber eine Entscheidung, die vor dem ersten Einbinden fällt.
 
+== Entscheidung des Vereins (2026-11-02)
+
+. *Foliobruma* wird nicht geforkt und nicht eingebunden.
+Es dient bei Bedarf als Nachschlagewerk, wie einzelne Dinge dort gelöst sind.
+. Die übrigen Werkzeuge (pyScanTailor-CLI, ScanTailor Spectre, unpaper, OCRmyPDF, Tesseract) werden als *externe Prozesse* aufgerufen, wo das sinnvoll ist.
+Sie werden nicht in den eigenen Code eingebunden oder gelinkt.
+
+Begründung und Folgen stehen in `adr/0002-externe-werkzeuge-als-prozesse.adoc`.
+Die Fork-Option aus dem folgenden Abschnitt ist damit verworfen.
+
 == Auswirkung auf die Architektur
 
 Foliobruma zeigt, dass eine native SwiftUI-App mit Apple-Frameworks allein einen großen Teil des MVP abdeckt.

@@ -1,0 +1,33 @@
+= ADR 0002: Externe Werkzeuge als Prozesse, Foliobruma nur als Referenz
+:icons: font
+
+*Status:* Entschieden (Verein, 2026-11-02).
+
+== Kontext
+
+Die Prüfung vorhandener Projekte (`wiederverwendung.adoc`) zeigt viel nutzbare Funktion.
+Mehrere Werkzeuge stehen unter der GPL.
+Foliobruma ist sehr jung, hat einen Betreuer und enthält Cloud-Code.
+
+== Entscheidung
+
+* Foliobruma wird nicht geforkt und nicht eingebunden.
+Bei Bedarf wird nachgeschlagen, wie dort Dinge gelöst sind.
+* Werkzeuge zur Bildkorrektur und OCR werden als *eigenständige Prozesse* aufgerufen, wo das sinnvoll ist.
+Gemeint sind pyScanTailor-CLI, ScanTailor Spectre, unpaper, OCRmyPDF und Tesseract.
+
+== Folgen
+
+* Die GPL-Werkzeuge zwingen die eigene Anwendung nicht unter die GPL, solange sie nur als Prozess laufen.
+* Jedes Werkzeug ist austauschbar, sobald es hinter einer eigenen Schnittstelle sitzt.
+* Die Anwendung muss die Werkzeuge finden und ihre Versionen prüfen können, zum Beispiel für `just doctor`-ähnliche Diagnose.
+* Eingabe und Ausgabe laufen über Dateien oder Streams, nicht über Bibliotheksaufrufe.
+Die Dateiformate müssen daher offen und reproduzierbar sein.
+* Die Qualität der einzelnen Werkzeuge an historischen Vorlagen ist noch ungeprüft.
+Ein Werkzeug wird erst fest eingeplant, wenn es an einer echten Vorlage getestet wurde.
+* Es fällt keine Cloud-Abhängigkeit an.
+
+== Verworfen
+
+* *Fork von Foliobruma:* Alter, Betreuerlage, Cloud-Code und fehlende Archivfunktionen.
+* *Einbinden oder Linken von GPL-Code:* würde die eigene Lizenz festlegen und die Austauschbarkeit senken.
