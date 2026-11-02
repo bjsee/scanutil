@@ -58,6 +58,20 @@ swift test
 Die CZUR-App muss beendet sein.
 Beim ersten Start fragt macOS nach dem Kamerazugriff.
 
+=== Oberfläche starten
+
+[source,sh]
+----
+cd app
+scripts/bundle.sh              # baut build/Scanutil.app (lokal signiert)
+open build/Scanutil.app
+----
+
+Die Oberfläche zeigt die Live-Vorschau, die Leertaste oder die Schaltfläche „Scannen“ nimmt in 5696x4272 mit Schärfe 0 auf.
+Originale liegen unter `~/Pictures/Scanutil-Archiv`, über die Umgebungsvariable `SCANUTIL_ARCHIVE` ist der Ort änderbar.
+Mit `SCANUTIL_MOCK=1` läuft die App ohne Scanner.
+Beenden mit Cmd-Q setzt die Schärfe im Gerät auf den Standardwert zurück.
+
 == Prototyp
 
 Verzeichnis `prototype/`, nur für macOS mit Apple Silicon.
