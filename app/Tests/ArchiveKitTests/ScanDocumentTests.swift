@@ -99,8 +99,21 @@ struct DocumentStorageTests {
         p.corrections.setRotation(degrees: -0.7)
         doc.append(p)
         try store.saveDocument(doc)
-        #expect(try store.loadDocument(id: doc.id) == doc)
-        #expect(try store.allDocuments() == [doc])
+        let loaded = try store.loadDocument(id: doc.id)
+        expectSame(loaded, doc)
+        let all = try store.allDocuments()
+        #expect(all.count == 1)
+        if let first = all.first { expectSame(first, doc) }
+    }
+
+    /// Zeitpunkte sind als ISO 8601 mit Millisekunden gespeichert, exakte Gleichheit von `Date` gilt nicht.
+    private func expectSame(_ a: ScanDocument, _ b: ScanDocument, sourceLocation: SourceLocation = #_sourceLocation) {
+        #expect(a.id == b.id, sourceLocation: sourceLocation)
+        #expect(a.title == b.title, sourceLocation: sourceLocation)
+        #expect(a.metadata == b.metadata, sourceLocation: sourceLocation)
+        #expect(a.pages == b.pages, sourceLocation: sourceLocation)
+        #expect(a.revision == b.revision, sourceLocation: sourceLocation)
+        #expect(abs(a.createdAt.timeIntervalSince(b.createdAt)) < 0.001, sourceLocation: sourceLocation)
     }
 
     @Test func rejectsPageWithUnknownScan() throws {
