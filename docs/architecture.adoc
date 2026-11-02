@@ -45,7 +45,6 @@ Das Auslösen geschieht per Software.
 | mittel (JVM)
 | mittel (JVM, Browser)
 | mittel
-| 
 
 | Desktop-UX
 | beste
