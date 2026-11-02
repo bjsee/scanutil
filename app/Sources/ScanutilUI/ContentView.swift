@@ -9,6 +9,7 @@ import UniformTypeIdentifiers
 public struct ContentView: View {
     @Bindable var model: AppModel
     @State private var keyMonitor = SpaceKeyMonitor()
+    @State private var showLog = false
 
     public init(model: AppModel) {
         self.model = model
@@ -110,6 +111,26 @@ public struct ContentView: View {
                 }
             }
             Spacer()
+            Button {
+                showLog.toggle()
+                if showLog { model.markLogSeen() }
+            } label: {
+                Label("Meldungen", systemImage: model.unseenIssues > 0 ? "exclamationmark.bubble.fill" : "text.bubble")
+                    .foregroundStyle(model.unseenIssues > 0 ? Color.orange : Color.primary)
+                    .overlay(alignment: .topTrailing) {
+                        if model.unseenIssues > 0 {
+                            Text("\(min(model.unseenIssues, 99))")
+                                .font(.caption2.bold()).foregroundStyle(.white)
+                                .padding(.horizontal, 4).background(Capsule().fill(.red))
+                                .offset(x: 10, y: -8)
+                        }
+                    }
+            }
+            .help("Warnungen und Hinweise dieser Sitzung")
+            .accessibilityLabel("Meldungen")
+            .accessibilityValue("\(model.unseenIssues) neu, \(model.log.count) insgesamt")
+            .accessibilityIdentifier("log-button")
+            .popover(isPresented: $showLog, arrowEdge: .top) { LogView(model: model) }
             Button("Archiv im Finder zeigen") {
                 NSWorkspace.shared.activateFileViewerSelecting([model.archiveURL])
             }
@@ -131,6 +152,119 @@ public struct ContentView: View {
         case .ready: model.device.map { "Bereit: \($0.name)" } ?? "Bereit"
         case .capturing: "Aufnahme läuft"
         case .failed: "Nicht verfügbar"
+        }
+    }
+}
+
+/// Protokoll der Sitzung: Warnungen der Analyse, übersprungene Dubletten, Fehler des Scanners, Berichte vom Export.
+struct LogView: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Meldungen").font(.headline)
+                Text("\(model.log.count)").font(.callout).foregroundStyle(.secondary)
+                Spacer()
+                Button("Kopieren") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(model.logText, forType: .string)
+                }
+                .disabled(model.log.isEmpty)
+                .accessibilityIdentifier("log-copy-button")
+                Button("Leeren") { model.clearLog() }
+                    .disabled(model.log.isEmpty)
+                    .accessibilityIdentifier("log-clear-button")
+            }
+            .padding(10)
+            Divider()
+            if model.log.isEmpty {
+                Text("Keine Meldungen.").foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 80)
+            } else {
+                ScrollView { LogList(model: model) }
+                    .accessibilityLabel("Meldungen")
+                    .accessibilityIdentifier("log-list")
+            }
+        }
+        .frame(width: 520, height: 360)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("log-view")
+    }
+}
+
+/// Die Zeilen des Protokolls, neueste zuerst. Ohne Rahmen zum Scrollen, damit sie sich einzeln darstellen lassen.
+struct LogList: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        // Bewusst kein LazyVStack: höchstens `AppModel.logLimit` kurze Zeilen, und ein fauler Stapel baut
+        // unter ImageRenderer keine Zeilen, die Darstellung ließe sich dann nicht prüfen.
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(model.log) { entry in
+                LogRow(entry: entry, scanLabel: scanLabel(for: entry)) {
+                    if let id = entry.scanID, model.scans.contains(where: { $0.id == id }) { model.selectedID = id }
+                }
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                Divider()
+            }
+        }
+    }
+
+    /// „Scan 14:32:05“ für Einträge zu einem Scan, damit man sieht, welcher gemeint ist.
+    private func scanLabel(for entry: LogEntry) -> String? {
+        guard let id = entry.scanID else { return nil }
+        guard let item = model.scans.first(where: { $0.id == id }) else { return "Scan" }
+        return "Scan " + item.record.capture.capturedAt.formatted(.dateTime.hour().minute().second())
+    }
+}
+
+struct LogRow: View {
+    let entry: LogEntry
+    let scanLabel: String?
+    let select: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: symbol).foregroundStyle(color).frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.text).font(.callout).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 6) {
+                    Text(entry.time.formatted(.dateTime.hour().minute().second()))
+                    if let scanLabel { Text("· " + scanLabel) }
+                }
+                .font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(perform: select)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(levelName): \(entry.text)")
+        .accessibilityIdentifier("log-row")
+    }
+
+    private var symbol: String {
+        switch entry.level {
+        case .info: "info.circle"
+        case .warning: "exclamationmark.triangle.fill"
+        case .error: "xmark.octagon.fill"
+        }
+    }
+
+    private var color: Color {
+        switch entry.level {
+        case .info: .secondary
+        case .warning: .yellow
+        case .error: .red
+        }
+    }
+
+    private var levelName: String {
+        switch entry.level {
+        case .info: "Hinweis"
+        case .warning: "Warnung"
+        case .error: "Fehler"
         }
     }
 }

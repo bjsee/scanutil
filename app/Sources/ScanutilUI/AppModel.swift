@@ -45,6 +45,18 @@ public struct BookAnalysisResult: @unchecked Sendable {
     }
 }
 
+/// Ein Eintrag im Protokoll der App: was geschah, wann und zu welchem Scan.
+public struct LogEntry: Identifiable, Equatable, Sendable {
+    public enum Level: String, Sendable { case info, warning, error }
+
+    public let id = UUID()
+    public let time: Date
+    public let level: Level
+    public let text: String
+    /// Der Scan, auf den sich der Eintrag bezieht, falls einer.
+    public let scanID: UUID?
+}
+
 /// Zustand und Abläufe der Oberfläche. Kennt weder SwiftUI noch die Hardware, nur `ScannerPort` und `ArchiveStore`.
 @MainActor
 @Observable
@@ -62,6 +74,10 @@ public final class AppModel {
     public private(set) var previewImage: CGImage?
     public private(set) var scans: [ScanItem] = []
     public private(set) var message: String?
+    /// Alle Meldungen dieser Sitzung, neueste zuerst. Anders als `message` bleiben sie stehen.
+    public private(set) var log: [LogEntry] = []
+    /// Warnungen und Fehler seit dem letzten Öffnen des Protokolls.
+    public private(set) var unseenIssues = 0
     public private(set) var captureFormat: ScanFormat?
     /// Dauer des letzten Scans vom Tastendruck bis zur archivierten Miniatur, ohne den Neustart der Vorschau.
     public private(set) var lastScanDuration: Duration?
@@ -131,6 +147,39 @@ public final class AppModel {
         return BookAnalysisResult(left: pages.left, right: pages.right, warnings: analysis.warnings)
     }
 
+    // MARK: Protokoll
+
+    /// Höchstzahl der Einträge; ältere fallen heraus.
+    static let logLimit = 500
+
+    /// Trägt eine Meldung ins Protokoll ein. Warnungen und Fehler stehen zusätzlich als rote Zeile in `message`,
+    /// außer sie gehören zu einem Scan und stehen dort schon im Hinweis (`asMessage: false`).
+    func post(_ level: LogEntry.Level, _ text: String, scanID: UUID? = nil, asMessage: Bool = true) {
+        log.insert(LogEntry(time: Date(), level: level, text: text, scanID: scanID), at: 0)
+        if log.count > Self.logLimit { log.removeLast(log.count - Self.logLimit) }
+        if level != .info {
+            unseenIssues += 1
+            if asMessage { message = text }
+        }
+    }
+
+    /// Das Protokoll wurde angesehen.
+    public func markLogSeen() { unseenIssues = 0 }
+
+    public func clearLog() {
+        log = []
+        unseenIssues = 0
+    }
+
+    /// Das Protokoll als Text, ältestes zuerst, zum Kopieren und Weitergeben.
+    public var logText: String {
+        let format = Date.ISO8601FormatStyle(timeZone: .current)
+        return log.reversed().map { entry in
+            let level = switch entry.level { case .info: "INFO   "; case .warning: "WARNUNG"; case .error: "FEHLER " }
+            return "\(entry.time.formatted(format)) \(level) \(entry.text)"
+        }.joined(separator: "\n")
+    }
+
     // MARK: Verbinden
 
     /// Verbindet den Scanner, öffnet die Sitzung im Aufnahmeformat und lädt vorhandene Scans.
@@ -149,8 +198,10 @@ public final class AppModel {
             session = opened
             startPreview(from: opened)
             status = .ready
+            post(.info, "Verbunden mit \(device?.name ?? "Scanner"), Aufnahme \(format.description).")
         } catch {
             status = .failed(error.localizedDescription)
+            post(.error, error.localizedDescription, asMessage: false)
         }
     }
 
@@ -210,7 +261,7 @@ public final class AppModel {
             status = .ready
             analyzeInBackground(id: item.id)
         } catch {
-            message = error.localizedDescription
+            post(.error, error.localizedDescription)
             status = .ready
         }
     }
@@ -230,13 +281,15 @@ public final class AppModel {
             trigger = AutoTrigger()
             seriesPhase = trigger.phase
             message = nil
+            post(.info, "Serie „\(title)“ begonnen" + (book ? " (Doppelseiten)." : "."))
         } catch {
-            message = "Die Serie konnte nicht begonnen werden: \(error.localizedDescription)"
+            post(.error, "Die Serie konnte nicht begonnen werden: \(error.localizedDescription)")
         }
     }
 
     /// Beendet die Serie. Das Dokument bleibt gespeichert.
     public func endSeries() {
+        if let series { post(.info, "Serie „\(series.title)“ beendet: \(series.pages.count) Seite(n).") }
         series = nil
         seriesIsBook = false
         seriesPhase = .waitingForMotion
@@ -250,7 +303,7 @@ public final class AppModel {
         seriesPhase = trigger.phase
         switch event {
         case .none: break
-        case .skippedDuplicate: message = "Die Seite ist unverändert, es wurde nicht aufgenommen."
+        case .skippedDuplicate: post(.warning, "Die Seite ist unverändert, es wurde nicht aufgenommen.")
         case .fire: await scan()
         }
     }
@@ -259,7 +312,7 @@ public final class AppModel {
     /// exportiert wird der Stand beim Aufruf.
     public func exportSeries(to url: URL, options: ExportOptions = .archive) async {
         guard let document = series, exportProgress == nil else { return }
-        guard !document.pages.isEmpty else { message = "Die Serie hat noch keine Seiten."; return }
+        guard !document.pages.isEmpty else { post(.warning, "Die Serie hat noch keine Seiten."); return }
         exportProgress = (0, document.pages.count)
         message = nil
         let exporter = PDFExporter(store: store, recognizer: recognizer)
@@ -272,12 +325,14 @@ public final class AppModel {
             lastExportURL = url
             lastExportReport = report
             // Das PDF ist geschrieben; eine fehlgeschlagene Texterkennung wird gemeldet, verwirft es aber nicht.
+            post(.info, "PDF geschrieben: \(report.pageCount) Seite(n)"
+                 + (options.ocr ? ", \(report.recognizedLines) Zeilen Text" : "") + " – \(url.path)")
             if !report.ocrFailures.isEmpty {
                 let pages = report.ocrFailures.prefix(10).map(String.init).joined(separator: ", ")
-                message = "Die Texterkennung schlug bei \(report.ocrFailures.count) Seite(n) fehl (\(pages)); sie stehen ohne Text im PDF."
+                post(.warning, "Die Texterkennung schlug bei \(report.ocrFailures.count) Seite(n) fehl (\(pages)); sie stehen ohne Text im PDF.")
             }
         } catch {
-            message = "Der Export ist fehlgeschlagen: \(error.localizedDescription)"
+            post(.error, "Der Export ist fehlgeschlagen: \(error.localizedDescription)")
         }
         exportProgress = nil
     }
@@ -309,7 +364,7 @@ public final class AppModel {
             try store.saveDocument(document)
             series = document
         } catch {
-            message = "Das Dokument konnte nicht gespeichert werden: \(error.localizedDescription)"
+            post(.error, "Das Dokument konnte nicht gespeichert werden: \(error.localizedDescription)")
         }
     }
 
@@ -385,6 +440,7 @@ public final class AppModel {
         }
         saveSeries(document)
         if let index = scans.firstIndex(where: { $0.id == id }) { scans[index].warnings = result.warnings }
+        for warning in result.warnings { post(.warning, warning, scanID: id, asMessage: false) }
         refreshPagePreviews(scanID: id)
     }
 
@@ -418,6 +474,7 @@ public final class AppModel {
     private func apply(_ corrections: Corrections, warnings: [String], at index: Int) {
         scans[index].corrections = corrections
         scans[index].warnings = warnings
+        for warning in warnings { post(.warning, warning, scanID: scans[index].id, asMessage: false) }
         persistAndRender(index: index)
     }
 
@@ -438,7 +495,7 @@ public final class AppModel {
         do {
             try store.saveCorrections(item.corrections, for: item.id)
         } catch {
-            message = "Die Korrekturen konnten nicht gespeichert werden: \(error.localizedDescription)"
+            post(.error, "Die Korrekturen konnten nicht gespeichert werden: \(error.localizedDescription)")
         }
         mirrorToSeries(item)
         guard let image = item.thumbnail else { return }
