@@ -83,6 +83,7 @@ public final class AppModel {
     public private(set) var exportProgress: (done: Int, total: Int)?
     /// Ort des zuletzt geschriebenen PDFs, für „Im Finder zeigen“.
     public private(set) var lastExportURL: URL?
+    public private(set) var lastExportReport: ExportReport?
 
     public var archiveURL: URL { store.root }
     public var lastScan: ScanItem? { scans.first }
@@ -97,6 +98,7 @@ public final class AppModel {
     private let thumbnailSize: Int
     private let analyze: @Sendable (CGImage) -> AnalysisResult
     private let analyzeBook: @Sendable (CGImage) -> BookAnalysisResult
+    private let recognizer: any TextRecognizer
     private var session: (any ScanSession)?
     private var previewTask: Task<Void, Never>?
     private var trigger = AutoTrigger()
@@ -105,13 +107,15 @@ public final class AppModel {
     public init(
         scanner: any ScannerPort, store: ArchiveStore, thumbnailSize: Int = 1600,
         analyze: @escaping @Sendable (CGImage) -> AnalysisResult = AppModel.defaultAnalysis,
-        analyzeBook: @escaping @Sendable (CGImage) -> BookAnalysisResult = AppModel.defaultBookAnalysis
+        analyzeBook: @escaping @Sendable (CGImage) -> BookAnalysisResult = AppModel.defaultBookAnalysis,
+        recognizer: any TextRecognizer = VisionTextRecognizer()
     ) {
         self.scanner = scanner
         self.store = store
         self.thumbnailSize = thumbnailSize
         self.analyze = analyze
         self.analyzeBook = analyzeBook
+        self.recognizer = recognizer
     }
 
     /// Standardanalyse: Dokument erkennen, Winkel messen, sichere Ergebnisse anwenden.
@@ -258,14 +262,20 @@ public final class AppModel {
         guard !document.pages.isEmpty else { message = "Die Serie hat noch keine Seiten."; return }
         exportProgress = (0, document.pages.count)
         message = nil
-        let exporter = PDFExporter(store: store)
+        let exporter = PDFExporter(store: store, recognizer: recognizer)
         do {
-            try await Task.detached {
+            let report = try await Task.detached { () -> ExportReport in
                 try exporter.export(document, to: url, options: options) { done, total in
                     Task { @MainActor in self.exportProgress = (done, total) }
                 }
             }.value
             lastExportURL = url
+            lastExportReport = report
+            // Das PDF ist geschrieben; eine fehlgeschlagene Texterkennung wird gemeldet, verwirft es aber nicht.
+            if !report.ocrFailures.isEmpty {
+                let pages = report.ocrFailures.prefix(10).map(String.init).joined(separator: ", ")
+                message = "Die Texterkennung schlug bei \(report.ocrFailures.count) Seite(n) fehl (\(pages)); sie stehen ohne Text im PDF."
+            }
         } catch {
             message = "Der Export ist fehlgeschlagen: \(error.localizedDescription)"
         }

@@ -41,7 +41,7 @@ Verzeichnis `app/`, Swift Package (Swift 6, macOS 14 oder neuer).
 | `ScannerKit` | Schnittstelle `ScannerPort`, `ET24Scanner` (AVFoundation, IOKit), `MockScanner` für Tests
 | `ArchiveKit` | Archiv: unveränderte Originale, schreibgeschützt, mit SHA-256, Eintrag als JSON
 | `ImagingKit` | Dokumenterkennung, Winkelmessung, Korrekturen als Parameter, Renderer, Auto-Auslösung (`AutoTrigger`), Falzerkennung und Teilung von Doppelseiten (`BookAnalyzer`)
-| `ExportKit` | PDF-Export aus einem Dokument (seitenweise, JPEG, Metadaten)
+| `ExportKit` | PDF-Export aus einem Dokument (seitenweise, JPEG, Metadaten, optional unsichtbare Textebene aus der Texterkennung)
 | `CUVC` | kleine C-Brücke für die UVC-Controls (Schärfe)
 | `scanutil-cli` | Werkzeug für den Durchstich
 |===
@@ -97,7 +97,13 @@ Ohne Oberfläche, aus allen Scans eines Archivs:
 *Noch nicht gemessen:* Die Schwellen der Auto-Auslösung (Bewegung, Ruhezeit, „neue Seite“) sind Schätzwerte aus künstlichen Bildfolgen und müssen am echten Gerät eingestellt werden.
 Ebenso fehlen Messungen zu Dauer und Speicher eines langen Buches mit 24-Megapixel-Seiten.
 Der Buchmodus wurde nur an künstlichen Doppelseiten geprüft, nicht an echten Büchern: ob Vision die Doppelseite als Ganzes erkennt, wie stark gewölbte Seiten stören (Text zum Falz hin ist verzerrt, das wird nicht entzerrt) und ob der Schatten des Falzes bei Ihren Büchern tief genug ist.
-Die Texterkennung gibt es noch nicht, das PDF ist kein PDF/A.
+Das PDF ist kein PDF/A.
+
+*Texterkennung:* Mit „Mit Texterkennung“ beim Export (CLI: `--ocr`, `--lang de-DE,en-US`) legt Apple Vision den erkannten Text unsichtbar über jede Seite, das PDF wird durchsuchbar.
+Das kostet rund 1,5 Sekunden je Seite und läuft bei jedem Export neu, ein Zwischenspeicher fehlt noch.
+Scheitert die Erkennung bei einer Seite, bleibt das PDF erhalten, die Seite steht ohne Text darin, und die App nennt die Seitennummer.
+Die Erkennung hängt hinter der Schnittstelle `TextRecognizer`; Tesseract für mehrspaltige Zeitungen und Fraktur wäre eine zweite Umsetzung.
+*Nicht gemessen:* Die Fehlerquote bei historischem Druck, Zeitungen und Fraktur (siehe `docs/spike-apple-vision.adoc`).
 
 == Tests
 
@@ -110,6 +116,7 @@ Die Texterkennung gibt es noch nicht, das PDF ist kein PDF/A.
 | Archiv, Prüfsumme, Korrekturen speichern | Unit-Tests, auch Manipulation und Überschreibschutz
 | Dokument (Seitenfolge, Korrekturen je Seite) | Unit-Tests, auch Speichern mit unbekanntem Scan und verworfene Seiten
 | PDF-Export | Tests lesen das erzeugte PDF mit PDFKit: Reihenfolge, Seitengröße, Metadaten, Abbruch, Ersetzen
+| Textebene im PDF | Tests lesen den Text und seine Lage mit PDFKit zurück, prüfen, dass das Bild unverändert bleibt, und einmal mit echtem Vision. Mit absichtlich eingebauten Fehlern geprüft.
 | Auto-Auslösung | Tests mit künstlichen Bildfolgen (Seitenwechsel, Hand, Dublette, schleichende Bewegung). Mit absichtlich eingebauten Fehlern geprüft.
 | Falzerkennung, Teilung der Doppelseite | Tests mit künstlichen Doppelseiten (mittig, versetzt, schräg, ohne Schatten, mit Text). Mit absichtlich eingebauten Fehlern geprüft.
 | Serienmodus im `AppModel` | Tests speisen den Trigger über eine interne Methode ein, der Mock liefert dabei keine eigene Vorschau

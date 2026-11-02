@@ -11,7 +11,7 @@ import ScannerKit
 // scanutil-cli formats
 // scanutil-cli capture <Archivordner> [--format BxH] [--sharpness N] [--mock]
 // scanutil-cli verify <Archivordner>
-// scanutil-cli export <Archivordner> <ziel.pdf> [--document ID] [--title T] [--preset archive|web] [--dpi N] [--auto] [--book]
+// scanutil-cli export <Archivordner> <ziel.pdf> [--document ID] [--title T] [--preset archive|web] [--dpi N] [--auto] [--book] [--ocr] [--lang de-DE,en-US]
 
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data((message + "\n").utf8))
@@ -102,7 +102,7 @@ do {
         }
 
     case "export":
-        guard args.count >= 3 else { fail("Aufruf: export <Archivordner> <ziel.pdf> [--document ID] [--title T] [--preset archive|web] [--dpi N] [--auto] [--book]") }
+        guard args.count >= 3 else { fail("Aufruf: export <Archivordner> <ziel.pdf> [--document ID] [--title T] [--preset archive|web] [--dpi N] [--auto] [--book] [--ocr] [--lang de-DE,en-US]") }
         let store = ArchiveStore(root: URL(fileURLWithPath: args[1], isDirectory: true))
         let target = URL(fileURLWithPath: args[2])
 
@@ -115,6 +115,11 @@ do {
         if let dpi = option("--dpi", in: args) {
             guard let value = Double(dpi), value > 0 else { fail("--dpi braucht eine positive Zahl") }
             options.dpi = value
+        }
+
+        if args.contains("--ocr") {
+            options.ocr = true
+            if let lang = option("--lang", in: args) { options.ocrLanguages = lang.split(separator: ",").map(String.init) }
         }
 
         var document: ScanDocument
@@ -153,8 +158,12 @@ do {
         }
         guard !document.pages.isEmpty else { fail("Das Archiv enthält keine Scans.") }
         if let title = option("--title", in: args) { document.title = title }
-        try PDFExporter(store: store).export(document, to: target, options: options) { done, total in
+        let report = try PDFExporter(store: store).export(document, to: target, options: options) { done, total in
             print("\r\(done)/\(total)", terminator: "")
+        }
+        if options.ocr {
+            print("\nText: \(report.recognizedLines) Zeilen erkannt")
+            if !report.ocrFailures.isEmpty { print("Texterkennung fehlgeschlagen bei Seite \(report.ocrFailures.map(String.init).joined(separator: ", "))") }
         }
         let size = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0
         print("\n\(document.pages.count) Seiten, \(String(format: "%.1f", Double(size) / 1_000_000)) MB: \(target.path)")
