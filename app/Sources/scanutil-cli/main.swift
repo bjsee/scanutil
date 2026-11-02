@@ -1,5 +1,9 @@
 import ArchiveKit
+import CoreGraphics
 import Foundation
+import ImageIO
+import ImagingKit
+import UniformTypeIdentifiers
 import ScannerKit
 
 // Kleines Werkzeug für den Durchstich: Formate anzeigen, aufnehmen, Archiv prüfen.
@@ -68,6 +72,32 @@ do {
         }
         print("\(records.count) Einträge, \(bad) fehlerhaft")
         if bad > 0 { exit(2) }
+
+    case "analyze":
+        // scanutil-cli analyze <bild.png> [--out korrigiert.png]
+        guard args.count >= 2 else { fail("Bilddatei fehlt") }
+        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: args[1]) as CFURL, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { fail("Bild nicht lesbar") }
+        let t0 = ContinuousClock.now
+        let analysis = ImageAnalyzer.analyze(image)
+        let t1 = ContinuousClock.now
+        let corrections = ImageAnalyzer.corrections(from: analysis)
+        print("Bild \(image.width)x\(image.height), Analyse \(t1 - t0)")
+        if let d = analysis.detection {
+            print(String(format: "Dokument: Plausibilität %.2f, Vision-Konfidenz %.2f", d.plausibility, d.reportedConfidence))
+        } else { print("Dokument: nicht erkannt") }
+        if let k = analysis.skew {
+            print(String(format: "Schräglage: %+.2f° (Uhrzeigersinn), Sicherheit %.2f, Kontrast %.1f, Spitzenverhältnis %.2f", k.degrees, k.confidence, k.contrast, k.peakRatio))
+        } else { print("Schräglage: nicht messbar") }
+        print("Zuschnitt aktiv: \(corrections.crop.enabled), Drehung aktiv: \(corrections.rotation.enabled), Prüfung nötig: \(corrections.needsReview)")
+        for w in analysis.warnings { print("  Hinweis: \(w)") }
+        if let out = option("--out", in: args) {
+            guard let rendered = CorrectionRenderer.render(image, corrections: corrections),
+                  let dest = CGImageDestinationCreateWithURL(URL(fileURLWithPath: out) as CFURL, UTType.png.identifier as CFString, 1, nil) else { fail("Rendern fehlgeschlagen") }
+            CGImageDestinationAddImage(dest, rendered, nil)
+            CGImageDestinationFinalize(dest)
+            print("korrigiert: \(out) (\(rendered.width)x\(rendered.height))")
+        }
 
     default:
         fail("Unbekannter Befehl: \(command)")
