@@ -113,12 +113,14 @@ public enum SyntheticPage {
     }
 
     /// Ein Mock-Scanner, der immer dieses Bild als Aufnahme liefert.
-    public static func scanner(delivering image: CGImage) -> MockScanner {
+    /// Mit `stillPreview` zeigt die Vorschau ein stehendes Bild statt eines flimmernden.
+    public static func scanner(delivering image: CGImage, stillPreview: Bool = false) -> MockScanner {
         let data = png(image)
         let size = ScanFormat(width: image.width, height: image.height)
         return MockScanner(
             formats: [size],
-            imageProvider: { _ in MockImage(data: data, width: image.width, height: image.height) }
+            imageProvider: { _ in MockImage(data: data, width: image.width, height: image.height) },
+            stillPreview: stillPreview
         )
     }
 }

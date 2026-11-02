@@ -135,13 +135,18 @@ Die Erkennung hängt hinter der Schnittstelle `TextRecognizer`; Tesseract für m
 | Gerenderte Ansichten | Tests schreiben Bilder (`SCANUTIL_SNAPSHOT_DIR`), die man ansieht. Schalter und Regler erscheinen darin als Platzhalter.
 
 | Oberfläche bedienen (Schaltfläche, Leertaste, Regler, Schalter, Neustart) | `scripts/ui-tests.sh`: startet die echte App im Dokumentmodus und bedient sie über die Bedienungshilfen
+| Serie, Auto-Auslösung, Buchmodus, Meldungen, PDF-Export | dieselben Oberflächentests (16 weitere): Serie beginnen und beenden, Seiten im gespeicherten Dokument, Auto-Auslösung auf stehender Vorschau (genau eine Aufnahme, keine Wiederholung), Buchseiten einzeln drehen, Protokoll öffnen, kopieren und leeren, Export über den echten Speicherdialog bis zum PDF
 |===
 
 *Oberflächentests:* Sie brauchen für das startende Programm die Berechtigung „Bedienungshilfen“ (Systemeinstellungen, Datenschutz und Sicherheit).
 Dabei gehen Fenster auf, die App kommt kurz in den Vordergrund, währenddessen nichts tippen.
 Sie laufen nicht bei einem normalen `swift test`, nur mit `SCANUTIL_UI_TESTS=1`.
 Der Regler wird über „Erhöhen“ und „Verringern“ eingestellt, weil sein Wert über die Bedienungshilfen nicht schreibbar ist.
-`SCANUTIL_MOCK=document` oder `noise` schaltet die App in den Testmodus ohne Scanner.
+`SCANUTIL_MOCK=document`, `document-still` oder `noise` schaltet die App in den Testmodus ohne Scanner.
+`document-still` hat eine stehende Vorschau: die Auto-Auslösung sieht Ruhe und löst nach etwa 0,8 Sekunden von selbst aus, die anderen Modi flimmern und lösen nie aus.
+`SCANUTIL_EXPORT_DIR` lässt den Speicherdialog des Exports in diesem Ordner öffnen, damit die Tests nicht in Ihre Ordner schreiben.
+Der Speicherdialog wird über die sprachunabhängigen Kennungen seiner Schaltflächen (`OKButton`, `CancelButton`) bedient, nicht über deren Beschriftung.
+Nach Änderungen an der App zuerst `scripts/bundle.sh`: die Tests starten das gebaute Bundle, nicht den Quelltext. `scripts/ui-tests.sh` tut das selbst.
 
 *Nicht automatisch abgesichert:* die Hardware selbst und die Eichung der Sicherheitsschwelle an mehr als den bisherigen echten Vorlagen.
 Die Tests wurden mit absichtlich eingebauten Fehlern (umgedrehte Vorzeichen, kaputte Leertaste, fehlendes Speichern) geprüft: Sie schlagen dann fehl.

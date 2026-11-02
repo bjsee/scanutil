@@ -1,0 +1,60 @@
+import Foundation
+
+/// Gemeinsame Hilfen der Oberflächentests: App starten, Dateien im Archiv lesen.
+struct UISession {
+    let app: AppDriver
+    let dir: URL
+    /// Ordner, in dem der Speicherdialog des Exports öffnet.
+    let exportDir: URL
+
+    func close() {
+        app.terminate()
+        try? FileManager.default.removeItem(at: dir)
+        try? FileManager.default.removeItem(at: exportDir)
+    }
+
+    private func files(_ folder: String, ext: String, in base: URL? = nil) -> [URL] {
+        ((try? FileManager.default.contentsOfDirectory(at: (base ?? dir).appendingPathComponent(folder), includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension == ext }
+    }
+
+    var originals: [URL] { files("originals", ext: "png") }
+    var documentFiles: [URL] { files("documents", ext: "json") }
+    var pdfs: [URL] {
+        ((try? FileManager.default.contentsOfDirectory(at: exportDir, includingPropertiesForKeys: nil)) ?? []).filter { $0.pathExtension == "pdf" }
+    }
+
+    /// Das gespeicherte Dokument der Serie als JSON, oder `nil`.
+    var document: [String: Any]? {
+        guard let file = documentFiles.first, let data = try? Data(contentsOf: file) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
+    var pages: [[String: Any]] { (document?["pages"] as? [[String: Any]]) ?? [] }
+
+    /// Der Drehwinkel und die Herkunft der Seite `index` im gespeicherten Dokument.
+    func rotation(ofPage index: Int) -> (degrees: Double, source: String)? {
+        guard pages.indices.contains(index),
+              let corrections = pages[index]["corrections"] as? [String: Any],
+              let rotation = corrections["rotation"] as? [String: Any],
+              let degrees = rotation["degrees"] as? Double, let source = rotation["source"] as? String else { return nil }
+        return (degrees, source)
+    }
+
+    /// Ob die Seite `index` im gespeicherten Dokument schon einen Zuschnitt trägt. Den setzt erst die Analyse:
+    /// ohne sie steht dort nichts. So lässt sich auf das Ende der Automatik warten.
+    func hasCrop(ofPage index: Int) -> Bool {
+        guard pages.indices.contains(index), let corrections = pages[index]["corrections"] as? [String: Any],
+              let crop = corrections["crop"] as? [String: Any] else { return false }
+        return crop["quad"] != nil
+    }
+
+    static func launch(mode: String = "document") throws -> UISession {
+        let base = FileManager.default.temporaryDirectory
+        let dir = base.appendingPathComponent("scanutil-ui-\(UUID().uuidString)")
+        let exportDir = base.appendingPathComponent("scanutil-ui-export-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: exportDir, withIntermediateDirectories: true)
+        let app = try AppDriver(mode: mode, archive: dir, environment: ["SCANUTIL_EXPORT_DIR": exportDir.path])
+        return UISession(app: app, dir: dir, exportDir: exportDir)
+    }
+}
