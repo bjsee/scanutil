@@ -1,0 +1,180 @@
+= Wiederverwendung vorhandener Open-Source-Projekte
+:toc:
+:icons: font
+
+Stand: 2026-11-02.
+Auslöser ist eine Recherche, die der Verein mit ChatGPT durchgeführt hat.
+Dieses Dokument prüft deren Aussagen anhand der Repositories.
+Die bestehende Architektur (`architecture.adoc`) wurde nicht verändert.
+
+== Kennzeichnung
+
+Alle Angaben zu den Projekten stammen aus Repository-Metadaten (GitHub-API), READMEs und Quelltext.
+*Keines der Projekte wurde ausgeführt oder installiert.*
+Aussagen über Funktionen beruhen auf deren Beschreibung, soweit nicht ausdrücklich „im Quelltext gelesen“ steht.
+Die Lizenzeinschätzung ist keine Rechtsberatung.
+
+== Prüfung der ChatGPT-Aussagen
+
+[cols="3,1,3"]
+|===
+| Aussage | Status | Befund
+
+| Foliobruma ist eine native Swift-App für Dokumentenkameras mit Auto-Aufnahme, Seitenerkennung, Buchmodus, Serien, PDF-Export, offline, MIT.
+| Bestätigt
+| README und Quelltext stimmen überein. Apple Silicon, macOS 14 oder neuer, nur Apple-Frameworks, MIT.
+
+| Foliobruma ist „noch eine frühe Version“.
+| Bestätigt, untertrieben
+| Repository erstellt am 2026-09-20, letzter Release v0.4.0 vom 2026-09-26, null Sterne, ein Betreuer. Keine Apple-Signatur oder Notarisierung.
+
+| Foliobruma hat keine OCR.
+| Nicht geprüft
+| Das README nennt keine OCR. Im Quelltext wurde nicht danach gesucht.
+
+| Die volle Auflösung des ET24 Pro ist bei Foliobruma nicht nachgewiesen.
+| Bestätigt
+| Die Kameraliste führt nur die IRIScan Desk 6 Pro als Teilbeleg. „Other USB document cameras: Unverified“.
+
+| NAPS2 ist etablierte kostenlose Scannersoftware mit SDK unter LGPL.
+| Bestätigt, mit Einschränkung
+| Die App steht unter GPL 2.0 oder später. NAPS2.Sdk und einige Teile stehen unter LGPL 2.1 oder später. Unterstützt werden WIA, TWAIN, SANE und ESCL.
+
+| ScanTailor Spectre ist ein Apple-Silicon-Fork mit Buchseitentrennung und OCR.
+| Bestätigt
+| Version 2.0b7, macOS 15 oder neuer, GPL-3.0, ausdrücklich Beta. Zwischenstufen sind unter anderem „Split Pages“ und „OCR“. Es ist ein Fork mit 55 Sternen.
+
+| pyScanTailor bietet Stapelverarbeitung und Buchseitentrennung.
+| Teilweise bestätigt
+| Python-Implementierung von ScanTailor Advanced, GPL-3.0 oder später, hat `scantailor-cli`. Ein Fork mit 7 Sternen. Die Reife wurde nicht geprüft.
+
+| unpaper ist ein Werkzeug zum Begradigen und Bereinigen.
+| Bestätigt
+| GPL-2.0-only (einzelne Dateien MIT oder Apache-2.0). Letzter Release 7.0.0 vom 2022-04-20, letzte Änderung 2024-07.
+
+| OCRmyPDF liefert OCR und durchsuchbare PDFs.
+| Bestätigt
+| MPL-2.0, aktiv gepflegt, 35 000 Sterne.
+
+| Paperless-ngx ist ein Dokumentenmanagementsystem, keine Scan-Anwendung.
+| Bestätigt
+| GPL-3.0, aktiv, 47 000 Sterne. Inhalt und Eignung im Detail nicht geprüft.
+
+| „Der einzige große Unsicherheitsfaktor bleibt die hochauflösende Aufnahme.“
+| Überholt
+| In Phase 1 nachgewiesen: 5696x4272 ohne CZUR-Software, siehe `feasibility.adoc`.
+
+| „Hardwareansteuerung über Scannertreiber: NAPS2 SDK als Referenz.“
+| Passt nicht
+| Der ET24 Pro ist eine UVC-Kamera und kein WIA-, TWAIN-, SANE- oder ESCL-Gerät. Dass NAPS2 ihn erkennt, ist unwahrscheinlich und ungeprüft.
+|===
+
+== Befunde zu Foliobruma im Quelltext
+
+Gelesen wurden `Scanner+Camera.swift`, `USBButton.swift`, `PaperDetector.swift`, `Package.swift`, `AGENTS.md` und `docs/cameras.md`.
+
+*Nachgewiesen (im Quelltext gelesen):*
+
+* Foliobruma wählt per `device.formats.max` das Format mit den meisten Pixeln.
+Beim ET24 Pro wäre das 7424x5568.
+Das ist nach unseren Messungen die überschärfte Stufe und nicht die empfohlene.
+* Foliobruma kennt dasselbe macOS-Verhalten wie wir.
+Der Kommentar lautet sinngemäß: macOS behält nach einer Änderung von `activeFormat` Puffer in Preset-Größe.
+Die Lösung dort ist, in `videoSettings` die Schlüssel `kCVPixelBufferWidthKey` und `kCVPixelBufferHeightKey` mit der nativen Größe zu setzen.
+Unsere Lösung ist, `activeFormat` nach `startRunning()` erneut zu setzen.
+*Ob der Weg von Foliobruma mit dem ET24 Pro funktioniert, wurde nicht getestet.*
+* Die USB-Taste wird über `IOHIDManager` gelesen und erwartet ein HID-Gerät.
+Der ET24 Pro hat kein HID-Interface (Phase 1).
+Dieser Teil ist für uns nicht nutzbar.
+* Das Projekt enthält Cloud-Code (`Sources/FoliobrumaScanner/Cloud/`, `CloudAPI`, `CloudUpload`, `ArchiveServer.production`).
+Das README sagt, Scannen funktioniere ohne Konto und offline, ein Upload sei optional.
+Das widerspricht unserer Anforderung „keine Cloud-Komponenten“ nicht, wenn der Code entfernt wird.
+* Die Dokumentation der Kameras sagt ausdrücklich, ein funktionierender Vorschau-Strom beweise nicht, dass jede Auflösung funktioniert.
+
+*Wahrscheinlich:*
+
+* Die Papiererkennung (`PaperDetector.swift`) und die Aufnahmeabsicherung (`ScannerCore`, Auto-Aufnahme bei ruhigem Blatt) entsprechen dem, was wir als „automatische Aufnahme nach Seitenwechsel“ planen.
+Die Qualität wurde nicht geprüft.
+
+== Bewertung je Anforderung
+
+[cols="2,2,3"]
+|===
+| Anforderung | Kandidat | Einschätzung
+
+| Aufnahme, Controls
+| eigener Code aus Phase 1
+| Foliobruma deckt die Controls (Schärfe, Belichtung) nicht ab und wählt das falsche Format. Eigener Adapter bleibt nötig.
+
+| Dokumentenerkennung, automatische Aufnahme
+| Foliobruma als Vorbild, Code ist MIT
+| Ideen und Teile sind übernehmbar. Fremder Code in Swift passt nur zur Swift-Variante.
+
+| Zuschnitt, Schräglage, Seitentrennung
+| pyScanTailor-CLI, ScanTailor Spectre, unpaper
+| Als externe Kommandozeilenwerkzeuge denkbar. Qualität bei historischen Vorlagen ungeprüft.
+
+| OCR, PDF/A
+| Tesseract mit OCRmyPDF
+| Passt zum Plan, MPL-2.0 ist unproblematisch als Prozessaufruf.
+
+| Archivverwaltung
+| Paperless-ngx
+| Mögliches Archivziel, kein Scan-Werkzeug. Nicht untersucht, ob es zu den Metadatenwünschen passt.
+
+| Scannerzugriff über Treiber
+| NAPS2
+| Nicht anwendbar.
+|===
+
+== Lizenzfragen
+
+* *MIT* (Foliobruma): Code darf übernommen werden, wenn der Lizenzhinweis bleibt.
+* *MPL-2.0* (OCRmyPDF): Aufruf als externer Prozess ist unproblematisch.
+* *GPL* (unpaper 2.0, pyScanTailor und ScanTailor Spectre 3.0, Paperless-ngx 3.0, NAPS2-App 2.0 oder später): Als *eigenständiger Prozess* aufgerufen, zwingt das die eigene Anwendung nicht unter die GPL.
+Wer Code *einbindet oder linkt*, müsste die eigene Anwendung unter eine kompatible GPL-Lizenz stellen.
+* *LGPL* (NAPS2.Sdk): Bibliotheksverwendung ist möglich, mit den bekannten Auflagen.
+
+Da das Projekt quelloffen sein soll, ist eine GPL-Anwendung kein Hindernis.
+Es ist aber eine Entscheidung, die vor dem ersten Einbinden fällt.
+
+== Auswirkung auf die Architektur
+
+Foliobruma zeigt, dass eine native SwiftUI-App mit Apple-Frameworks allein einen großen Teil des MVP abdeckt.
+Dazu gehören Aufnahme, Vorschau, Papiererkennung, Serien, Review und PDF-Export, ohne Fremdpakete.
+Das stärkt die Variante „reines Swift“ in `architecture.adoc`.
+
+Daraus ergibt sich eine weitere Variante, die dort noch nicht steht:
+
+*Foliobruma forken und für den ET24 Pro und das Archiv erweitern.*
+
+[cols="1,1"]
+|===
+| Dafür | Dagegen
+
+| Spart Aufwand bei Review, Serien, Sitzungen und PDF-Export.
+| Sechs Wochen alt, ein Betreuer, null Sterne: hohes Risiko, dass es nicht weiterentwickelt wird.
+
+| MIT, Apple-Frameworks, keine Fremdpakete.
+| Enthält Cloud-Code, der entfernt werden müsste.
+
+| Pragmatischer Weg zu einem lauffähigen MVP.
+| Archivanforderungen (unverfälschtes Original, Metadaten, nichtdestruktive Korrektur) sind nicht das Ziel des Projekts.
+
+| Zeigt bereits die Lösung für das Preset-Puffer-Problem.
+| Reines Swift setzt Swift-Kenntnisse voraus, die Kotlin-Erfahrung nützt nichts.
+|===
+
+*Das ist keine Empfehlung.*
+Der Fork ist eine Option neben den Varianten in `architecture.adoc`.
+Welche Variante gewählt wird, entscheidet der Verein.
+
+== Offene Punkte
+
+. Foliobruma mit dem ET24 Pro ausprobieren.
+Das würde eine nicht signierte App installieren und ausführen und braucht deine Zustimmung.
+. Foliobrumas Quelltext auf OCR, Telemetrie und Netzwerkzugriffe durchsehen.
+. Qualität von pyScanTailor-CLI, ScanTailor Spectre und unpaper an einer echten historischen Vorlage prüfen, am besten am Buchscan aus Phase 1.
+. Ob Foliobrumas `kCVPixelBufferWidthKey`-Weg beim ET24 Pro die volle Auflösung ohne erneutes Setzen liefert.
+. Reife und Wartung von pyScanTailor und ScanTailor Spectre.
+. Eignung von Paperless-ngx als Archivziel.

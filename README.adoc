@@ -23,6 +23,7 @@ Details und Einschränkungen stehen in link:docs/feasibility.adoc[docs/feasibili
 | link:docs/feasibility.adoc[feasibility.adoc] | Machbarkeitsbericht mit Messungen, Status je Aussage und Handlungsempfehlung
 | link:docs/hardware-access.adoc[hardware-access.adoc] | Wie die Hardware angesprochen wird, mit Stolpersteinen
 | link:docs/architecture.adoc[architecture.adoc] | Vorgeschlagene Architektur (noch nicht freigegeben)
+| link:docs/wiederverwendung.adoc[wiederverwendung.adoc] | Prüfung vorhandener Open-Source-Projekte (Foliobruma, NAPS2, ScanTailor, unpaper, OCRmyPDF)
 | link:docs/adr/[adr/] | Architekturentscheidungen
 |===
 
