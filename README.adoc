@@ -74,6 +74,14 @@ Originale liegen unter `~/Pictures/Scanutil-Archiv`, über die Umgebungsvariable
 Mit `SCANUTIL_MOCK=1` läuft die App ohne Scanner.
 Beenden mit Cmd-Q setzt die Schärfe im Gerät auf den Standardwert zurück.
 
+=== Meldungen
+
+Warnungen und Hinweise gehen nicht verloren: Der Knopf „Meldungen“ unten rechts öffnet das Protokoll der Sitzung, ein roter Zähler zeigt die seit dem letzten Öffnen neuen Warnungen und Fehler.
+Es enthält die Warnungen der Analyse (etwa „Die Schräglage ist unsicher“, „Der Falz wurde nicht gefunden“) mit dem Scan, zu dem sie gehören, übersprungene Dubletten, Fehler des Scanners, den Bericht des Exports (auch Seiten, bei denen die Texterkennung scheiterte) und Beginn und Ende einer Serie.
+Ein Klick auf einen Eintrag wählt den Scan aus. „Kopieren“ legt das ganze Protokoll als Text in die Zwischenablage, etwa für eine Fehlermeldung.
+Das Protokoll gilt für die laufende Sitzung und umfasst höchstens 500 Einträge; es wird nicht gespeichert.
+Die rote Zeile in der Statusleiste zeigt weiterhin nur die jüngste Warnung oder den jüngsten Fehler.
+
 === Serie und PDF
 
 „Serie beginnen“ legt ein Dokument an, jede Aufnahme wird als Seite angehängt und sofort gespeichert (`documents/<id>.json` im Archiv).
@@ -117,6 +125,7 @@ Die Erkennung hängt hinter der Schnittstelle `TextRecognizer`; Tesseract für m
 | Dokument (Seitenfolge, Korrekturen je Seite) | Unit-Tests, auch Speichern mit unbekanntem Scan und verworfene Seiten
 | PDF-Export | Tests lesen das erzeugte PDF mit PDFKit: Reihenfolge, Seitengröße, Metadaten, Abbruch, Ersetzen
 | Textebene im PDF | Tests lesen den Text und seine Lage mit PDFKit zurück, prüfen, dass das Bild unverändert bleibt, und einmal mit echtem Vision. Mit absichtlich eingebauten Fehlern geprüft.
+| Protokoll der Meldungen | Tests prüfen Einträge, Zähler, Begrenzung, Textform und die Darstellung der Zeilen
 | Auto-Auslösung | Tests mit künstlichen Bildfolgen (Seitenwechsel, Hand, Dublette, schleichende Bewegung). Mit absichtlich eingebauten Fehlern geprüft.
 | Falzerkennung, Teilung der Doppelseite | Tests mit künstlichen Doppelseiten (mittig, versetzt, schräg, ohne Schatten, mit Text). Mit absichtlich eingebauten Fehlern geprüft.
 | Serienmodus im `AppModel` | Tests speisen den Trigger über eine interne Methode ein, der Mock liefert dabei keine eigene Vorschau
