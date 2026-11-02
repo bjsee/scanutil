@@ -79,6 +79,9 @@ public struct ContentView: View {
                 .padding(8)
             }
             .frame(height: 96)
+            .accessibilityLabel("Letzte Scans")
+            .accessibilityValue("\(model.scans.count)")
+            .accessibilityIdentifier("thumbnail-strip")
         }
     }
 
@@ -91,9 +94,10 @@ public struct ContentView: View {
             }
             .disabled(model.status != .ready)
             .help("Leertaste")
+            .accessibilityIdentifier("scan-button")
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(statusText).font(.callout)
+                Text(statusText).font(.callout).accessibilityIdentifier("status-text")
                 if let message = model.message {
                     Text(message).font(.caption).foregroundStyle(.red)
                 } else if let format = model.captureFormat {
@@ -147,6 +151,7 @@ struct ThumbnailCell: View {
         }
         .padding(2)
         .overlay(RoundedRectangle(cornerRadius: 4).stroke(selected ? Color.accentColor : Color.clear, lineWidth: 2))
+        .accessibilityIdentifier("thumbnail")
     }
 }
 
@@ -185,6 +190,8 @@ struct ScanDetailView: View {
         }
         .padding(8)
         .background(Color.yellow.opacity(0.18))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("review-banner")
     }
 
     private var controls: some View {
@@ -193,20 +200,26 @@ struct ScanDetailView: View {
             HStack {
                 Toggle("Korrekturen anwenden", isOn: Binding(get: { c.enabled }, set: { model.setCorrectionsEnabled(id: item.id, $0) }))
                     .toggleStyle(.switch)
+                    .accessibilityIdentifier("master-toggle")
                 Spacer()
                 Button("Automatisch neu erkennen") { Task { await model.reanalyze(id: item.id) } }
                     .disabled(model.analyzing.contains(item.id))
+                    .accessibilityIdentifier("reanalyze-button")
             }
             Toggle(cropLabel(c), isOn: Binding(get: { c.crop.enabled }, set: { model.setCropEnabled(id: item.id, $0) }))
                 .disabled(!c.enabled || c.crop.quad == nil)
+                .accessibilityIdentifier("crop-toggle")
             Toggle(rotationLabel(c), isOn: Binding(get: { c.rotation.enabled }, set: { model.setRotationEnabled(id: item.id, $0) }))
                 .disabled(!c.enabled)
+                .accessibilityIdentifier("rotation-toggle")
             HStack {
                 Slider(
                     value: Binding(get: { c.rotation.degrees }, set: { model.setRotation(id: item.id, degrees: $0) }),
                     in: -15...15, step: 0.05
                 )
+                .accessibilityIdentifier("rotation-slider")
                 Text(String(format: "%+.2f°", c.rotation.degrees)).font(.callout.monospacedDigit()).frame(width: 64, alignment: .trailing)
+                    .accessibilityIdentifier("rotation-value")
             }
             .disabled(!c.enabled)
             Text("\(item.record.original.width)×\(item.record.original.height) · SHA-256 \(item.record.original.sha256.prefix(12))…")

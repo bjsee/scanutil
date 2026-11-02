@@ -2,10 +2,9 @@ import CoreGraphics
 import CoreText
 import Foundation
 import ImageIO
-import ScannerKit
 import UniformTypeIdentifiers
 
-/// Erzeugt künstliche Seiten mit Text für die Tests, ohne Scanner und ohne Dateien.
+/// Erzeugt künstliche Seiten mit Text für Tests und den Demomodus der App, ohne Scanner und ohne Dateien.
 public enum SyntheticPage {
     private static let words = ["Heimatverein", "Mulsum", "Chronik", "Zeitung", "Bericht", "Dorfgemeinschaft", "Versammlung", "Schützenfest",
                                 "Erntedank", "Kirchenbuch", "Gemeinde", "Ortsgeschichte", "Fotografie", "Archiv", "Familie", "Hof", "Brief"]

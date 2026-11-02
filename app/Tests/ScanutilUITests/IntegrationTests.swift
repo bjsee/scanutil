@@ -3,7 +3,6 @@ import CoreGraphics
 import Foundation
 import ImagingKit
 import ScannerKit
-import TestSupport
 import Testing
 @testable import ScanutilUI
 

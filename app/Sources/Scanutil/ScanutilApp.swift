@@ -37,8 +37,19 @@ struct ScanutilApp: App {
         // Archiv standardmäßig unter Bilder; für Versuche per Umgebungsvariable umlenkbar.
         let path = ProcessInfo.processInfo.environment["SCANUTIL_ARCHIVE"]
             ?? FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask)[0].appendingPathComponent("Scanutil-Archiv").path
-        let scanner: any ScannerPort = ProcessInfo.processInfo.environment["SCANUTIL_MOCK"] != nil ? MockScanner() : ET24Scanner()
+        let scanner = Self.makeScanner(ProcessInfo.processInfo.environment["SCANUTIL_MOCK"])
         _model = State(initialValue: AppModel(scanner: scanner, store: ArchiveStore(root: URL(fileURLWithPath: path, isDirectory: true))))
+    }
+
+    /// `SCANUTIL_MOCK`: nicht gesetzt = echter Scanner, `document` = schiefe Textseite, `noise` = Rauschen (Automatik unsicher),
+    /// jeder andere Wert = Graustufenverlauf. Für Entwicklung und die Oberflächentests.
+    private static func makeScanner(_ mode: String?) -> any ScannerPort {
+        switch mode {
+        case nil: ET24Scanner()
+        case "document": SyntheticPage.scanner(delivering: SyntheticPage.textPage(width: 1600, height: 1600, tiltCounterClockwise: 6, background: 10, raggedEdges: 30))
+        case "noise": SyntheticPage.scanner(delivering: SyntheticPage.noise(width: 1200, height: 1200))
+        default: MockScanner()
+        }
     }
 
     var body: some Scene {

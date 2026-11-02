@@ -1,6 +1,6 @@
 import CoreGraphics
 import Testing
-import TestSupport
+import ScannerKit
 @testable import ImagingKit
 
 @Suite("CorrectionRenderer")

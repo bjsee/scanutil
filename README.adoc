@@ -85,10 +85,18 @@ Beenden mit Cmd-Q setzt die Schärfe im Gerät auf den Standardwert zurück.
 | `AppModel` mit Mock-Scanner | Tests mit fester Analyse (Abläufe, Handkorrektur gegen Automatik, Neustart)
 | Ganze Kette mit echter Analyse | Integrationstests mit einem Mock, der eine künstliche schiefe Textseite liefert
 | Gerenderte Ansichten | Tests schreiben Bilder (`SCANUTIL_SNAPSHOT_DIR`), die man ansieht. Schalter und Regler erscheinen darin als Platzhalter.
+
+| Oberfläche bedienen (Schaltfläche, Leertaste, Regler, Schalter, Neustart) | `scripts/ui-tests.sh`: startet die echte App im Dokumentmodus und bedient sie über die Bedienungshilfen
 |===
 
-*Nicht automatisch abgesichert:* Bedienung der Oberfläche (Klicken, Ziehen, Leertaste), die Hardware selbst und die Eichung der Sicherheitsschwelle an mehr als den bisherigen echten Vorlagen.
-Die Tests wurden mit absichtlich eingebauten Fehlern (umgedrehte Vorzeichen) geprüft: Sie schlagen dann fehl.
+*Oberflächentests:* Sie brauchen für das startende Programm die Berechtigung „Bedienungshilfen“ (Systemeinstellungen, Datenschutz und Sicherheit).
+Dabei gehen Fenster auf, die App kommt kurz in den Vordergrund, währenddessen nichts tippen.
+Sie laufen nicht bei einem normalen `swift test`, nur mit `SCANUTIL_UI_TESTS=1`.
+Der Regler wird über „Erhöhen“ und „Verringern“ eingestellt, weil sein Wert über die Bedienungshilfen nicht schreibbar ist.
+`SCANUTIL_MOCK=document` oder `noise` schaltet die App in den Testmodus ohne Scanner.
+
+*Nicht automatisch abgesichert:* die Hardware selbst und die Eichung der Sicherheitsschwelle an mehr als den bisherigen echten Vorlagen.
+Die Tests wurden mit absichtlich eingebauten Fehlern (umgedrehte Vorzeichen, kaputte Leertaste, fehlendes Speichern) geprüft: Sie schlagen dann fehl.
 
 == Prototyp
 

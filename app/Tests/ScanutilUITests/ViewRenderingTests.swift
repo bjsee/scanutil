@@ -5,7 +5,6 @@ import Foundation
 import ImageIO
 import ScannerKit
 import SwiftUI
-import TestSupport
 import Testing
 import UniformTypeIdentifiers
 @testable import ScanutilUI
