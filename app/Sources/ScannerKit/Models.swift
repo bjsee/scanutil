@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// Aufnahmeformat in Pixeln.
@@ -65,5 +66,14 @@ public struct Capture: Sendable {
         self.width = width
         self.height = height
         self.metadata = metadata
+    }
+}
+
+/// Ein Bild der Live-Vorschau.
+public struct PreviewFrame: @unchecked Sendable {
+    public let image: CGImage
+
+    public init(image: CGImage) {
+        self.image = image
     }
 }

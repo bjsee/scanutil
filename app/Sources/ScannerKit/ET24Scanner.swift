@@ -30,8 +30,31 @@ public final class ET24Scanner: ScannerPort, @unchecked Sendable {
         return formats.sorted { $0.width * $0.height > $1.width * $1.height }
     }
 
+    public func previewFrames(format: ScanFormat) -> AsyncThrowingStream<PreviewFrame, Error> {
+        AsyncThrowingStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            guard busy.acquire() else {
+                continuation.finish(throwing: ScannerError.deviceBusy)
+                return
+            }
+            guard let device = Self.findDevice() else {
+                busy.release()
+                continuation.finish(throwing: ScannerError.deviceNotFound)
+                return
+            }
+            let job = PreviewJob(deviceID: device.uniqueID, format: format, continuation: continuation, onStopped: { [busy] in busy.release() })
+            continuation.onTermination = { _ in job.stop() }
+            job.start()
+        }
+    }
+
     public func capture(format: ScanFormat, settings: CaptureSettings) async throws -> Capture {
-        guard busy.acquire() else { throw ScannerError.deviceBusy }
+        // Läuft noch die Vorschau, kurz auf deren Freigabe warten.
+        var waited = 0
+        while !busy.acquire() {
+            guard waited < 60 else { throw ScannerError.deviceBusy }
+            try await Task.sleep(for: .milliseconds(50))
+            waited += 1
+        }
         defer { busy.release() }
 
         try await Self.requestAccess()
@@ -176,5 +199,76 @@ private final class BusyFlag: @unchecked Sendable {
 
     func release() {
         lock.withLock { isBusy = false }
+    }
+}
+
+/// Laufende Vorschau. Gibt das Gerät beim Stoppen frei und meldet das über `onStopped`.
+private final class PreviewJob: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
+    private let deviceID: String
+    private let format: ScanFormat
+    private let continuation: AsyncThrowingStream<PreviewFrame, Error>.Continuation
+    private let onStopped: @Sendable () -> Void
+    private let queue = DispatchQueue(label: "scanutil.et24.preview")
+    private let session = AVCaptureSession()
+    private let context = CIContext()
+    private let lock = NSLock()
+    private var stopped = false
+
+    init(deviceID: String, format: ScanFormat, continuation: AsyncThrowingStream<PreviewFrame, Error>.Continuation, onStopped: @escaping @Sendable () -> Void) {
+        self.deviceID = deviceID
+        self.format = format
+        self.continuation = continuation
+        self.onStopped = onStopped
+    }
+
+    func start() {
+        queue.async { [self] in
+            do { try configureAndRun() } catch {
+                continuation.finish(throwing: error)
+                stop()
+            }
+        }
+    }
+
+    private func configureAndRun() throws {
+        guard let device = AVCaptureDevice(uniqueID: deviceID) else { throw ScannerError.deviceNotFound }
+        guard let avFormat = device.formats.first(where: {
+            let d = CMVideoFormatDescriptionGetDimensions($0.formatDescription)
+            return Int(d.width) == format.width && Int(d.height) == format.height
+        }) else { throw ScannerError.formatUnavailable(format) }
+        let input = try AVCaptureDeviceInput(device: device)
+        let output = AVCaptureVideoDataOutput()
+        output.alwaysDiscardsLateVideoFrames = true
+        guard session.canAddInput(input), session.canAddOutput(output) else { throw ScannerError.deviceNotFound }
+        session.addInput(input)
+        session.addOutput(output)
+        output.setSampleBufferDelegate(self, queue: queue)
+        session.startRunning()
+        // Das Format muss nach dem Start gesetzt werden, siehe docs/hardware-access.adoc.
+        try device.lockForConfiguration()
+        device.activeFormat = avFormat
+        device.unlockForConfiguration()
+    }
+
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        // Frames in Preset-Größe (vor dem Formatwechsel) überspringen.
+        guard CVPixelBufferGetWidth(buffer) == format.width else { return }
+        let image = CIImage(cvPixelBuffer: buffer)
+        guard let cg = context.createCGImage(image, from: image.extent) else { return }
+        continuation.yield(PreviewFrame(image: cg))
+    }
+
+    func stop() {
+        let alreadyStopped = lock.withLock { () -> Bool in
+            let was = stopped
+            stopped = true
+            return was
+        }
+        guard !alreadyStopped else { return }
+        queue.async { [self] in
+            session.stopRunning()
+            onStopped()
+        }
     }
 }
