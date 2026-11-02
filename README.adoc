@@ -1,0 +1,64 @@
+= scanutil
+:toc:
+:icons: font
+
+Open-Source-Scannersoftware für den CZUR ET24 Pro unter macOS.
+Entwickelt für die Digitalisierung historischer Vorlagen des Heimatvereins Mulsum 1524 e.V.
+
+*Status:* Phase 1 (Machbarkeit) abgeschlossen, Phase 2 wartet auf Freigabe.
+Es gibt noch keine Anwendung, nur einen Hardware-Prototyp.
+
+== Kernergebnis
+
+Der ET24 Pro liefert ohne CZUR-Software und ohne Treiber ein Bild mit 5696x4272 Pixeln.
+Er meldet sich als UVC-Kamera und wird über AVFoundation angesprochen.
+Details und Einschränkungen stehen in link:docs/feasibility.adoc[docs/feasibility.adoc].
+
+== Dokumentation
+
+[cols="1,2"]
+|===
+| Datei | Inhalt
+
+| link:docs/feasibility.adoc[feasibility.adoc] | Machbarkeitsbericht mit Messungen, Status je Aussage und Handlungsempfehlung
+| link:docs/hardware-access.adoc[hardware-access.adoc] | Wie die Hardware angesprochen wird, mit Stolpersteinen
+| link:docs/architecture.adoc[architecture.adoc] | Vorgeschlagene Architektur (noch nicht freigegeben)
+| link:docs/adr/[adr/] | Architekturentscheidungen
+|===
+
+Jede Aussage trägt eine Herkunft (Hersteller, Gerät, Dritte) und einen Status (Nachgewiesen, Wahrscheinlich, Ungeklärt, Nicht möglich).
+
+== Prototyp
+
+Verzeichnis `prototype/`, nur für macOS mit Apple Silicon.
+
+[cols="1,2"]
+|===
+| Datei | Zweck
+
+| `list_formats.swift` | listet alle AVFoundation-Formate des Scanners
+| `capture_frame.swift` | nimmt ein Frame in gewünschter Auflösung auf, speichert PNG
+| `uvc_controls.c` | liest UVC-Controls per IOKit, kann die Schärfe setzen
+| `dump_descriptors.py` | liest USB-Deskriptoren per libusb
+| `read_uvc_controls.py` | Versuch über libusb, scheitert an macOS (siehe Doku)
+| `watch_usb.sh` | beobachtet den USB-Baum
+| `slanted_edge_mtf.py` | Kantenschärfe aus den Quadraten des Testcharts
+| `analyze_spectrum.py`, `edge_width.py`, `crop_compare.py`, `align_compare.py`, `bars_compare.py` | Auswertungen der Machbarkeitsstudie
+| `make_chart.py` | erzeugt das Testchart
+|===
+
+=== Aufnahme
+
+[source,sh]
+----
+swiftc -O prototype/capture_frame.swift -o capture_frame
+./capture_frame 5696 4272 out/test.png 10
+----
+
+Vorher die CZUR-App beenden, sonst bleibt die Kamera belegt.
+Beim ersten Start fragt macOS nach dem Kamerazugriff.
+
+== Testvorlage
+
+`testcharts/resolution_chart_A4.pdf`, Druck mit 100 Prozent.
+Für eine belastbare Auflösungsmessung ist ein Laserdruck mit mindestens 1200 dpi nötig.

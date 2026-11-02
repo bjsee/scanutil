@@ -1,0 +1,31 @@
+= ADR 0001: Hardwarezugriff über AVFoundation und IOKit
+:icons: font
+
+*Status:* Vorgeschlagen.
+*Datum:* 2026-11-02.
+
+== Kontext
+
+Der ET24 Pro meldet sich als UVC-Kamera.
+Die Phase-1-Messungen zeigen, dass AVFoundation 5696x4272 liefert.
+Libusb darf UVC-Class-Anfragen an das Video-Control-Interface nicht senden, IOKit schon.
+
+== Entscheidung
+
+Die Aufnahme läuft über AVFoundation, die Controls laufen über IOKit.
+Beides liegt in einem schmalen Adapter in Swift oder C, getrennt von der übrigen Anwendung.
+
+== Folgen
+
+* Der Zugriff funktioniert ohne CZUR-Software und ohne Treiber.
+* Die Anwendung ist an macOS gebunden.
+Andere Scanner brauchen einen weiteren Adapter hinter derselben Schnittstelle.
+* Die Aufnahme braucht die Kameraberechtigung.
+* Während der Aufnahme darf die CZUR-App nicht laufen.
+* Das Original-JPEG des Scanners ist so nicht erreichbar.
+
+== Verworfen
+
+* *Offizielles SDK:* Nutzbarkeit nicht geprüft, ein Testkontingent von 200 Aufrufen im Changelog, Kosten ungeklärt.
+* *Automatisierung der CZUR-App:* ausdrücklich nicht gewünscht.
+* *Libusb:* scheitert an macOS für die Controls und wurde für den Stream nicht getestet.

@@ -1,0 +1,72 @@
+= Hardwarezugriff auf den CZUR ET24 Pro
+:toc:
+:icons: font
+
+Dieses Dokument beschreibt, wie der Scanner unter macOS angesprochen wird.
+Alle Angaben wurden an einem Gerät mit USB-Kennung `04fc:6333` unter macOS 26.6.2 geprüft, sofern nicht anders vermerkt.
+
+== Aufnahme
+
+Der Scanner ist eine UVC-Kamera.
+AVFoundation liefert Frames in allen von ihm gemeldeten Formaten.
+
+. Gerät suchen: `AVCaptureDevice.DiscoverySession` mit Gerätetyp `.external`, Modell-ID enthält `VendorID_1276` und `ProductID_25395`.
+. Kameraberechtigung anfordern.
+. Session mit `AVCaptureDeviceInput` und `AVCaptureVideoDataOutput` aufbauen.
+. `startRunning()` aufrufen.
+. *Danach* `activeFormat` setzen (Sperre mit `lockForConfiguration`).
+. Einen Moment warten und mindestens zehn Frames verwerfen, dann das nächste Bild nehmen.
+
+Referenz: `prototype/capture_frame.swift`.
+
+== Stolpersteine
+
+[cols="1,2"]
+|===
+| Problem | Ursache und Lösung
+
+| Es kommt nur 1920x1080 an
+| macOS setzt `activeFormat` beim Start auf das Preset zurück. Format nach `startRunning()` erneut setzen.
+
+| Kein Frame, Timeout
+| Die CZUR-App läuft noch und belegt die Kamera. App mit Cmd-Q beenden.
+
+| `inputPriority` und `highResolutionStillImageDimensions` lassen sich nicht kompilieren
+| Beides ist unter macOS nicht verfügbar. Weglassen.
+
+| Einzelne Aufnahme bleibt aus
+| Gelegentlich kommt trotz Wartezeit kein Frame. Die Aufnahme einfach wiederholen.
+|===
+
+== Formate
+
+Der Scanner meldet 32 Formate von 320x240 bis 7424x5568.
+Unkomprimiert (YUY2) gibt es nur bis 2592x1944.
+Alles darüber ist MJPEG, so auch 5696x4272 bei 4,5 fps.
+Die Stufen oberhalb von 5696x4272 sind nach Messung nachgeschärft und nicht zu empfehlen.
+
+== Controls
+
+AVFoundation unterstützt nur Belichtung gesperrt oder automatisch.
+Die Standard-UVC-Controls werden über IOKit gelesen und geschrieben.
+
+* `IOServiceMatching("IOUSBHostInterface")`, Filter auf Vendor `0x04fc`, Produkt `0x6333`, Klasse 14, Unterklasse 1.
+* Plug-in-Interface mit `kIOUSBInterfaceUserClientTypeID`.
+* `ControlRequest` *ohne* `USBInterfaceOpen`.
+* Anfragen mit `wIndex = (Unit-ID << 8) | Interface-Nummer`.
+* Unit-IDs: Camera Terminal 10, Processing Unit 3.
+
+Libusb scheitert an dieser Stelle mit „Access denied“, weil Apples Treiber das Interface besitzt.
+
+Verfügbare Controls und Bereiche stehen in `feasibility.adoc`.
+Bisher wurde nur die Schärfe geschrieben.
+
+*Empfehlung für Archivscans:* Schärfe auf 0 setzen.
+Der Standardwert 12 schärft das Bild bereits im Gerät nach und prägt Halos in das Original ein.
+
+== Nicht untersucht
+
+* Die beiden herstellerspezifischen Extension Units.
+* Das Beanspruchen des Video-Control- oder Streaming-Interfaces per libusb.
+* Scanner-Taste und Fußschalter: weder HID noch neues USB-Gerät, UVC-Status-Interrupt ungeprüft.
+* Die Laserlinien.

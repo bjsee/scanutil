@@ -122,12 +122,13 @@ Die Formate lassen sich also durch Skalieren aufeinander abbilden.
 
 === Datenpfad (Gerät)
 
-*Wahrscheinlich:*
+*Nachgewiesen:*
 Das Gerät hängt an USB 2.0 High-Speed (480 Mbit/s).
-Bei 5696x4272 und 4,5 fps ist das nur mit komprimierten Daten (MJPEG) möglich.
+Die Deskriptoren führen 5696x4272 und alle größeren Formate nur als MJPEG.
 AVFoundation liefert bereits dekodierte Pixel.
 Das Original-JPEG des Geräts wäre nur über UVC-Zugriff auf USB-Ebene (libusb) erreichbar.
 Für die Archivierung ist das relevant, weil jede Rekompression Verluste addiert.
+Die Beanspruchung des Streaming-Interfaces per libusb wurde nicht getestet.
 
 === USB-Deskriptoren (Gerät)
 
@@ -271,17 +272,42 @@ Der Beleg gilt für diesen Rechner und diesen Zustand, bei dem der CZUR-Helfer i
 
 == Offene Punkte
 
-. Echte Detailauflösung mit Testchart klären.
-. Funktionieren Hardware-Taste und Fußschalter über UVC oder zusätzliche Interfaces?
-. Laserlinien: sind sie ansteuerbar oder nur in CZUR-Software auswertbar?
-. Original-MJPEG per libusb abgreifen, falls nötig.
-. Verhalten ohne den CZUR-Helfer prüfen (Neustart ohne CZUR-Installation nicht getestet).
-. Stabilität: Dauerbetrieb über Hunderte Aufnahmen.
-. Belichtung und Fokus: welche UVC-Controls sind verfügbar?
+. Echte Detailauflösung mit einem Laserausdruck (mindestens 1200 dpi) klären, um Objektiv und Tintenkante zu trennen.
+. Ob Controls (zum Beispiel Schärfe 0) ein Ausstecken oder einen Neustart überstehen.
+. Ob die CZUR-Software beim Start Controls zurücksetzt.
+. Scanner-Taste und Fußschalter: einzig denkbarer Weg ist der UVC-Status-Interrupt (Endpunkt `0x81`), erfordert das Beanspruchen des Video-Control-Interfaces.
+. Laserlinien: ansteuerbar oder nur in der CZUR-Software auswertbar?
+Die Extension Units wurden nicht angesprochen.
+. Original-MJPEG per libusb abgreifen, falls Archivqualität das verlangt.
+. Dauerbetrieb über Hunderte Aufnahmen.
+. Verhalten ohne den CZUR-Hintergrundprozess `com.czur.device-helper`.
+. Ursache der wechselnden Netzfrequenz-Einstellung.
 
-== Vorläufige Bewertung
+== Bewertung
 
-Eine Unabhängigkeit von der CZUR-Software für die Bildaufnahme erscheint realistisch.
-Das wichtigste Akzeptanzkriterium, eine Aufnahme mit 5696x4272 Pixeln ohne laufende CZUR-Software, ist erfüllt.
-Offen ist, ob damit die volle Detailqualität eines CZUR-Scans erreicht wird.
-Die vorliegenden Messungen sprechen für Gleichwertigkeit bis auf die Nachschärfung, die sich in der eigenen Verarbeitung nachbilden lässt.
+*Nachgewiesen:*
+Das wichtigste Akzeptanzkriterium ist erfüllt.
+Eine Aufnahme mit 5696x4272 Pixeln gelingt ohne laufende CZUR-Software und ohne zusätzliche Treiber.
+Der CZUR-Originalscan liegt pixelgenau im selben Raster.
+
+*Wahrscheinlich:*
+Eine vollständige Unabhängigkeit von der CZUR-Software für die Aufnahme ist realistisch.
+Die Detailtreue ist der des CZUR-Scans gleichwertig.
+Die Nachschärfung der CZUR-Software lässt sich in der eigenen Verarbeitung nachbilden, nichtdestruktiv und änderbar.
+
+*Ungeklärt:*
+Ob 5696x4272 echte 24 Megapixel trägt.
+Für die Anwendung ist das von nachrangiger Bedeutung, weil das Raster ohnehin mit CZUR übereinstimmt.
+
+*Nicht möglich / nicht erreicht:*
+Die Hardware-Taste und der Fußschalter lassen sich nicht über HID ansprechen.
+Das SDK ist als Hauptlösung nicht geprüft worden und wird derzeit nicht gebraucht.
+
+== Handlungsempfehlung
+
+. Phase 2 freigeben und mit dem Hardwarezugriff über AVFoundation und IOKit beginnen (siehe `architecture.adoc`).
+. Rohaufnahmen mit Schärfe 0 anfertigen und die Nachschärfung in der Verarbeitung durchführen.
+. Das Auslösen per Software (Bildänderungserkennung) vorsehen.
+Für den Fußschalter ist ein separater USB-Taster, der als Tastatur auftritt, der einfachste Weg.
+. Das CZUR-SDK nur als Rückfalloption im Auge behalten, falls die Laserlinien benötigt werden.
+. Die offenen Punkte oben bei Bedarf einzeln nachziehen, keiner blockiert das MVP.

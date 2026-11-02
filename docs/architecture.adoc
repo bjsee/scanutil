@@ -1,0 +1,141 @@
+= Architektur (Vorschlag)
+:toc:
+:icons: font
+
+*Status:* Vorschlag.
+Nicht freigegeben, Phase 2 beginnt erst mit der Zustimmung des Vereins.
+
+== Randbedingungen aus Phase 1
+
+* Der Hardwarezugriff läuft über AVFoundation und IOKit.
+Beides sind macOS-APIs für Swift, Objective-C und C.
+* Libusb reicht für die Controls nicht aus.
+* Der Scanner liefert 5696x4272 mit 4,5 Bildern je Sekunde.
+Die Live-Vorschau läuft in einem kleineren Format.
+* Die Aufnahme braucht die Kameraberechtigung von macOS.
+* Taste und Fußschalter stehen nicht zur Verfügung.
+Das Auslösen geschieht per Software.
+
+== Varianten
+
+[cols="2,1,1,1,1"]
+|===
+| Kriterium | Reines Swift/SwiftUI | Kotlin Compose Desktop | Kotlin-Backend + React | Swift-Adapter + Kotlin-Kern + React
+
+| Kamera- und USB-Zugriff
+| direkt
+| nur über JNI/FFM oder Fremdprozess
+| nur über Fremdprozess
+| direkt im Adapter
+
+| OpenCV
+| möglich (C++-Brücke, Aufwand)
+| JavaCV oder OpenCV-Java
+| JavaCV oder OpenCV-Java
+| im Kern, JavaCV
+
+| Passt zu deinen Kenntnissen
+| nein
+| ja
+| ja
+| überwiegend ja
+
+| Installationsaufwand
+| gering
+| mittel (JVM)
+| mittel (JVM, Browser)
+| mittel
+| 
+
+| Desktop-UX
+| beste
+| gut
+| gut (Browser)
+| gut (Browser)
+
+| Verteilung auf Apple Silicon
+| einfach, signiertes App-Bundle
+| aufwendig (JVM-Bundling)
+| mäßig
+| mäßig
+
+| Sprachgrenzen
+| eine
+| zwei
+| zwei
+| drei
+|===
+
+Eine Bewertung der Wartbarkeit ist ohne Entscheidung über das Team offen.
+
+== Empfehlung
+
+*Swift-Adapter für die Hardware, Kotlin-Kern für Verarbeitung und Archiv, React-Oberfläche im Browser.*
+
+Der Grund ist die Beschränkung: Der Hardwarezugriff geht nur in Swift oder C.
+Alles andere kann in deiner Heimatsprache liegen.
+Der Adapter bleibt klein (grob einige hundert Zeilen) und enthält keine Geschäftslogik.
+
+Das ist eine Empfehlung mit Vorbehalt.
+Reines Swift wäre einfacher zu verteilen und hätte weniger Sprachgrenzen.
+Es setzt aber voraus, dass du bereit bist, Swift zu lernen, und OpenCV braucht dort eine C++-Brücke.
+Die Entscheidung gehört dir.
+
+== Bausteine
+
+[cols="1,2,1"]
+|===
+| Baustein | Aufgabe | Sprache
+
+| `scanner-adapter` | Gerät erkennen, Formate, Vorschau, Aufnahme, Controls. Schmale lokale Schnittstelle. | Swift
+| `core` | Scanverwaltung, Bildverarbeitung, OCR-Steuerung, Metadaten, Export | Kotlin
+| `ui` | Live-Vorschau, Serien, Korrektur | React/TypeScript
+|===
+
+Es gibt keinen weiteren Dienst, keine Cloud und keine Datenbank außerhalb des Rechners.
+
+== Trennung der Verantwortlichkeiten
+
+. Hardwarezugriff: `scanner-adapter`.
+. Bildaufnahme: Schnittstelle `ScannerPort` im Kern.
+Der Adapter und ein Mock-Scanner implementieren sie.
+. Bildverarbeitung: Kern, nichtdestruktiv.
+Korrekturen werden als Parameter je Scan gespeichert, nicht ins Original geschrieben.
+. OCR: Tesseract als externer Prozess.
+. Dokumenten- und Scanverwaltung: Kern.
+. Archivexport: Kern, offene Formate (TIFF, JPEG, PDF/A, TXT).
+. Benutzeroberfläche: `ui`.
+
+== Schnittstelle zum Adapter
+
+Lokal und schmal, zum Beispiel HTTP auf `127.0.0.1`.
+
+* `GET /device`: erkannt, Formate, Controls.
+* `GET /preview`: MJPEG-Strom in kleinem Format.
+* `POST /capture`: Aufnahme in Vollauflösung, Antwort ist das Bild.
+* `PUT /controls/{name}`: Wert setzen.
+
+Die Schnittstelle ist ein Entwurf und wird erst mit dem ersten Durchstich festgelegt.
+
+== Archivprinzipien
+
+* Das Original wird nie überschrieben und trägt eine Prüfsumme.
+* Die Aufnahme erfolgt mit Schärfe 0.
+* Das Original ist ein PNG der dekodierten Pixel.
+Das Original-JPEG des Scanners wäre nur über libusb erreichbar und ist ungeprüft.
+* Verarbeitete Dateien lassen sich aus Original und gespeicherten Parametern reproduzieren.
+* Metadaten liegen getrennt und in einem offenen Format.
+
+== Offene Entscheidungen
+
+. Sprachwahl (siehe oben).
+. Originalformat im Archiv: PNG, TIFF oder verlustfrei komprimiertes JPEG-Original.
+. Ablageort und Verzeichnisstruktur.
+. Auslösung per Software: Erkennung des ruhenden Blatts.
+. Fußschalter: Tastatur-Taster als Eingabegerät.
+
+== Nächste Schritte nach Freigabe
+
+. Vertikaler Durchstich: Adapter nimmt auf, Kern speichert Original, Oberfläche zeigt es an.
+. Automatisches Zuschneiden und Schräglagenkorrektur.
+. OCR mit Tesseract, PDF-Export.
