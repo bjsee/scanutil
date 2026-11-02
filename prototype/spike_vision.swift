@@ -92,6 +92,13 @@ if let med = angles.sorted().dropFirst(angles.count/2).first, abs(med) > 0.2 {
         print(String(format: "Deskew: gedreht um %+.2f°, Restwinkel %.2f°", b.0, b.2))
     }
 }
+if let path = ProcessInfo.processInfo.environment["OCR_OUT"] {
+    let txt = lines.compactMap { l -> String? in
+        guard let c = l.topCandidates(1).first else { return nil }
+        return String(format: "%.3f %.3f %.3f %.3f\t%@", l.boundingBox.minX, l.boundingBox.minY, l.boundingBox.width, l.boundingBox.height, c.string)
+    }.joined(separator: "\n")
+    try? txt.write(toFile: path, atomically: true, encoding: .utf8)
+}
 let conf = lines.compactMap { $0.topCandidates(1).first?.confidence }
 if !conf.isEmpty { print(String(format: "OCR-Konfidenz: Mittel %.2f", conf.reduce(0, +) / Float(conf.count))) }
 for l in lines.prefix(6) { if let c = l.topCandidates(1).first { print("  »\(c.string)«") } }

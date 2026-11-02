@@ -14,8 +14,8 @@ Es verwendet `VNDetectDocumentSegmentationRequest`, `CIPerspectiveCorrection`, `
 
 == Wichtige Einschränkungen
 
-* *Echte Vorlage: nur eine.*
-Ein aufgeschlagenes Buch mit modernem Druck.
+* *Echte Vorlagen: zwei.*
+Ein aufgeschlagenes Buch mit modernem Druck und eine Zeitungsseite (siehe unten).
 * *Schiefe Vorlagen sind synthetisch.*
 Sie wurden aus einem Ausschnitt desselben Buchs erzeugt (`prototype/make_skewed.py`), gedreht um +7, -4 und +12 Grad, mit zufällig ausgefransten Rändern auf dunklem Grund.
 Es fehlen Vergilbung, echte Risse, Spalten, Überschriften, Fotos und Flecken.
@@ -63,12 +63,70 @@ Die ersten sechs Zeilen sind wortgetreu richtig, einschließlich Silbentrennung 
 * Vergleich mit Tesseract.
 * Textrichtung bei 90-, 180- und 270-Grad-gedrehten Vorlagen.
 
+=== Echte Zeitungsvorlage (Gerät)
+
+Eine aktuelle Tageszeitungsseite, schief aufgelegt, mit vier Spalten, farbigem Foto, ausgefranstem rechten Rand, Falz und angrenzender Nachbarseite.
+Aufnahme in 5696x4272 mit Schärfe 0.
+
+*Nachgewiesen:*
+
+* Vision erkennt die Seite (Neigung des Quadrats -8,7 Grad).
+Der Zuschnitt mit Perspektivkorrektur (4813x3210) wirkt gut: Spalten, Foto und Überschriften stehen gerade.
+Die physisch angrenzende, gefaltete Nachbarseite am rechten Rand bleibt im Zuschnitt, weil sie zum Papier gehört.
+* *Vision meldet beim Winkel einen Medianwert von 0,00 Grad, das Projektionsprofil misst aber 1,25 Grad Resttilt.*
+Vision rundet kleine Winkel offenbar auf null.
+Der in diesem Spike eingebaute Auslöser („nachdrehen bei mehr als 0,2 Grad“) griff deshalb nicht.
+Für eine Winkelkorrektur taugt der Vision-Median bei kleinen Winkeln nicht.
+* Das Projektionsprofil als Winkelmaß funktioniert: Nach dem Drehen um den gemessenen Winkel misst es 0,00 Grad.
+Das ist ein Hinweis, dass die Winkelkorrektur eigenen Code (Projektionsprofil oder Hough) braucht und sich nicht auf Vision verlassen sollte.
+
+=== OCR-Vergleich an der Zeitung (Gerät, Stichprobe)
+
+Verglichen wurde eine Spalte („Ein Finale mit Grünkohl“).
+Es ist *keine* Fehlerquote über die ganze Seite, sondern eine Stichprobe von etwa zwanzig Zeilen ohne vollständigen Referenztext.
+
+[cols="1,2,2"]
+|===
+| | Vision (`de-DE`, accurate) | Tesseract 5.5.2 (`deu`, tessdata_best, Seitenanalyse `--psm 1`)
+
+| Laufzeit
+| 1,6 s (300 Zeilen)
+| 9,3 s (1114 Wörter)
+
+| Zeilenaufbau
+| Blocksatzspalten werden in Wortgruppen zerlegt („Der Bauern-“, „markt“, „im“, „Schaufenster“), die Reihenfolge ist nicht lesbar.
+| Zeilen sind zusammenhängend, die Spalten werden getrennt erkannt (Leserichtung bei Mehrspaltigkeit nicht abschließend geprüft).
+
+| Fehler in der Stichprobe
+| „Fi-schereihafen“ wird zu „schereihaten“ (ein Wort).
+| Keine in dieser Stichprobe.
+
+| Konfidenz
+| nicht aussagekräftig (immer 1,00)
+| mittlere Wortkonfidenz 89,4
+|===
+
+*Wahrscheinlich:*
+Für Archivtext aus mehrspaltigen Zeitungen ist Tesseract mit Seitenanalyse die bessere Wahl, weil es die Struktur erhält.
+Vision ist schneller und für kurze Textstellen gut.
+
+*Ungeklärt:*
+Die Fehlerquote über die ganze Seite, der Vergleich bei historischen Zeitungen und Fraktur.
+Das deutsche Modell `deu` war im System nicht installiert und wurde in ein Arbeitsverzeichnis geladen, ohne die Installation zu verändern.
+
+*Nicht geprüft:*
+ScanTailor und unpaper (nicht installiert, die Installation wartet auf deine Zustimmung).
+Fotos ohne Text.
+Textrichtung bei gedrehten Vorlagen.
+
 == Was das für die Technologiewahl heißt
 
 *Wahrscheinlich:*
 Für Vorlagen mit Text und rechteckigem oder ausgefranstem Rand tragen Vision und Core Image die Schritte Dokumenterkennung, Perspektivkorrektur, Winkelmessung aus Textzeilen und deutsche OCR.
 Der Mangel an OpenCV schmerzt für diese Fälle weniger als befürchtet.
 Das gilt für die untersuchte Vorlagenart und nicht darüber hinaus.
+Auch die echte Zeitungsseite mit Spalten, Foto und ausgefranstem Rand wird gut zugeschnitten.
+Die Winkelmessung muss aber eigener Code sein, weil Vision kleine Winkel auf null rundet.
 
 *Ungeklärt:*
 
@@ -79,6 +137,6 @@ Das gilt für die untersuchte Vorlagenart und nicht darüber hinaus.
 
 == Empfohlene Anschlussprüfung
 
-. Eine echte Zeitungsvorlage (mit Spalten, Foto, ausgefranstem Rand) mit dem Spike prüfen.
-. Dieselbe Vorlage mit ScanTailor (CLI) und unpaper als externe Prozesse bearbeiten und vergleichen.
-. OCR-Genauigkeit von Vision und Tesseract an derselben Vorlage zählen.
+. Dieselbe Zeitungsvorlage mit ScanTailor (CLI) und unpaper als externe Prozesse bearbeiten und vergleichen (Installation nötig).
+. OCR-Genauigkeit von Vision und Tesseract mit einem Referenztext zählen.
+. Eine Vorlage mit Fotos ohne Text und eine gedrehte Vorlage (90 Grad) prüfen.
