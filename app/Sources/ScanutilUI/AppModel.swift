@@ -52,6 +52,14 @@ public final class AppModel {
     /// Dauer des letzten Scans vom Tastendruck bis zur archivierten Miniatur, ohne den Neustart der Vorschau.
     public private(set) var lastScanDuration: Duration?
 
+    /// Das Dokument der laufenden Serie, sonst `nil`. Jede Aufnahme der Serie wird als Seite angehängt und sofort gespeichert.
+    public private(set) var series: ScanDocument?
+    public var isSeriesActive: Bool { series != nil }
+    /// Zustand der Auto-Auslösung für die Anzeige (Ruhe-Fortschritt).
+    public private(set) var seriesPhase: AutoTrigger.Phase = .waitingForMotion
+    /// Ob in der Serie automatisch ausgelöst wird. Aus: nur von Hand, die Seiten kommen trotzdem ins Dokument.
+    public var autoTriggerEnabled = true
+
     public var archiveURL: URL { store.root }
     public var lastScan: ScanItem? { scans.first }
 
@@ -66,6 +74,8 @@ public final class AppModel {
     private let analyze: @Sendable (CGImage) -> AnalysisResult
     private var session: (any ScanSession)?
     private var previewTask: Task<Void, Never>?
+    private var trigger = AutoTrigger()
+    private var lastSignature: FrameSignature?
 
     public init(
         scanner: any ScannerPort, store: ArchiveStore, thumbnailSize: Int = 1600,
@@ -132,6 +142,10 @@ public final class AppModel {
             for await frame in session.previewFrames {
                 if Task.isCancelled { break }
                 self.previewImage = frame.image
+                guard self.isSeriesActive, self.status == .ready else { continue }
+                let image = frame.image
+                let signature = await Task.detached { FrameSignature(image: image) }.value
+                if let signature { await self.processSeriesFrame(signature, at: ProcessInfo.processInfo.systemUptime) }
             }
         }
     }
@@ -141,6 +155,7 @@ public final class AppModel {
     /// Nimmt das nächste Bild der laufenden Sitzung in voller Auflösung auf und archiviert das Original.
     public func scan() async {
         guard status == .ready, let session else { return }
+        if series != nil, let lastSignature { trigger.noteManualCapture(of: lastSignature) }
         status = .capturing
         message = nil
         let started = ContinuousClock.now
@@ -153,11 +168,74 @@ public final class AppModel {
             scans.insert(item, at: 0)
             selectedID = item.id
             lastScanDuration = ContinuousClock.now - started
+            appendToSeries(scanID: record.id)
             status = .ready
             analyzeInBackground(id: item.id)
         } catch {
             message = error.localizedDescription
             status = .ready
+        }
+    }
+
+    // MARK: Serie
+
+    /// Beginnt eine Serie: ein neues, sofort gespeichertes Dokument, dem jede Aufnahme als Seite angehängt wird.
+    public func startSeries(title: String) {
+        guard status == .ready, series == nil else { return }
+        let document = ScanDocument(title: title)
+        do {
+            try store.saveDocument(document)
+            series = document
+            trigger = AutoTrigger()
+            seriesPhase = trigger.phase
+            message = nil
+        } catch {
+            message = "Die Serie konnte nicht begonnen werden: \(error.localizedDescription)"
+        }
+    }
+
+    /// Beendet die Serie. Das Dokument bleibt gespeichert.
+    public func endSeries() {
+        series = nil
+        seriesPhase = .waitingForMotion
+    }
+
+    /// Meldet der Auto-Auslösung ein Vorschaubild. Löst eine Aufnahme aus, wenn die Seite gewechselt hat und Ruhe herrscht.
+    func processSeriesFrame(_ signature: FrameSignature, at time: TimeInterval) async {
+        lastSignature = signature
+        guard series != nil, autoTriggerEnabled, status == .ready else { return }
+        let event = trigger.feed(signature, at: time)
+        seriesPhase = trigger.phase
+        switch event {
+        case .none: break
+        case .skippedDuplicate: message = "Die Seite ist unverändert, es wurde nicht aufgenommen."
+        case .fire: await scan()
+        }
+    }
+
+    private func appendToSeries(scanID: UUID) {
+        guard var document = series else { return }
+        document.append(DocumentPage(scanID: scanID))
+        saveSeries(document)
+    }
+
+    /// Übernimmt die Korrekturen eines Scans in die zugehörige Seite der Serie, denn die Seite trägt sie selbst.
+    private func mirrorToSeries(_ item: ScanItem) {
+        guard var document = series else { return }
+        var changed = false
+        for page in document.pages where page.scanID == item.id && page.corrections != item.corrections {
+            document.updateCorrections(pageID: page.id) { $0 = item.corrections }
+            changed = true
+        }
+        if changed { saveSeries(document) }
+    }
+
+    private func saveSeries(_ document: ScanDocument) {
+        do {
+            try store.saveDocument(document)
+            series = document
+        } catch {
+            message = "Das Dokument konnte nicht gespeichert werden: \(error.localizedDescription)"
         }
     }
 
@@ -231,6 +309,7 @@ public final class AppModel {
         } catch {
             message = "Die Korrekturen konnten nicht gespeichert werden: \(error.localizedDescription)"
         }
+        mirrorToSeries(item)
         guard let image = item.thumbnail else { return }
         let corrections = item.corrections, id = item.id
         Task {
