@@ -20,6 +20,8 @@ public struct ContentView: View {
                     .frame(minWidth: 380, idealWidth: 480)
             }
             Divider()
+            SeriesBar(model: model)
+            Divider()
             statusBar
         }
         .frame(minWidth: 900, minHeight: 560)
@@ -127,6 +129,75 @@ public struct ContentView: View {
         case .capturing: "Aufnahme läuft"
         case .failed: "Nicht verfügbar"
         }
+    }
+}
+
+/// Leiste für den Serienmodus: Serie beginnen und beenden, Auto-Auslösung, Fortschritt bis zur Aufnahme.
+struct SeriesBar: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if let series = model.series {
+                Label("\(series.title)", systemImage: "books.vertical")
+                    .font(.callout.bold())
+                    .lineLimit(1)
+                Text(pageCountText(series.pages.count))
+                    .font(.callout.monospacedDigit())
+                    .accessibilityIdentifier("series-page-count")
+                Toggle("Automatisch auslösen", isOn: $model.autoTriggerEnabled)
+                    .toggleStyle(.switch)
+                    .accessibilityIdentifier("auto-trigger-toggle")
+                if model.autoTriggerEnabled {
+                    phaseIndicator
+                }
+                Spacer()
+                Button("Serie beenden") { model.endSeries() }
+                    .accessibilityIdentifier("series-end-button")
+            } else {
+                Button {
+                    model.startSeries(title: Self.defaultTitle())
+                } label: {
+                    Label("Serie beginnen", systemImage: "books.vertical")
+                }
+                .disabled(model.status != .ready)
+                .help("Mehrere Seiten in ein Dokument aufnehmen")
+                .accessibilityIdentifier("series-start-button")
+                Text("Eine Serie sammelt die Aufnahmen als Seiten eines Dokuments und löst nach dem Umblättern selbst aus.")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("series-bar")
+    }
+
+    @ViewBuilder private var phaseIndicator: some View {
+        switch model.seriesPhase {
+        case .waitingForMotion:
+            Text("Nächste Seite umblättern").font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier("series-phase")
+        case .moving:
+            Text("Bewegung …").font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier("series-phase")
+        case .calm(let seconds):
+            HStack(spacing: 6) {
+                ProgressView(value: min(seconds, model.seriesCalmDuration), total: model.seriesCalmDuration)
+                    .frame(width: 80)
+                Text("Ruhig …").font(.caption).foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("series-phase")
+        }
+    }
+
+    private func pageCountText(_ count: Int) -> String {
+        count == 1 ? "1 Seite" : "\(count) Seiten"
+    }
+
+    static func defaultTitle(now: Date = Date()) -> String {
+        "Serie " + now.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
     }
 }
 

@@ -51,6 +51,27 @@ struct ViewRenderingTests {
         return (model, try #require(model.scans.first), dir)
     }
 
+    @Test func seriesBarBeforeAndDuringASeries() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("scanutil-view-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let model = AppModel(scanner: MockScanner(previewsEnabled: false), store: ArchiveStore(root: dir))
+        await model.connect()
+        let before = try render(SeriesBar(model: model), size: CGSize(width: 900, height: 44), name: "serienleiste-vorher")
+        #expect(before.width >= 1800)
+
+        model.startSeries(title: "Chronik 1524")
+        await model.scan()
+        let during = try render(SeriesBar(model: model), size: CGSize(width: 900, height: 44), name: "serienleiste-laeuft")
+        #expect(during.width >= 1800)
+        #expect(model.series?.pages.count == 1)
+        await model.disconnect()
+    }
+
+    @Test func defaultSeriesTitleIsDated() {
+        let date = Date(timeIntervalSince1970: 0)
+        #expect(SeriesBar.defaultTitle(now: date).hasPrefix("Serie "))
+    }
+
     @Test func detailViewForConfidentScan() async throws {
         let page = SyntheticPage.textPage(width: 1600, height: 1600, tiltCounterClockwise: 8)
         let (model, item, dir) = try await scanned(page); defer { try? FileManager.default.removeItem(at: dir) }
