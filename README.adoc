@@ -40,6 +40,8 @@ Verzeichnis `app/`, Swift Package (Swift 6, macOS 14 oder neuer).
 
 | `ScannerKit` | Schnittstelle `ScannerPort`, `ET24Scanner` (AVFoundation, IOKit), `MockScanner` für Tests
 | `ArchiveKit` | Archiv: unveränderte Originale, schreibgeschützt, mit SHA-256, Eintrag als JSON
+| `ImagingKit` | Dokumenterkennung, Winkelmessung, Korrekturen als Parameter, Renderer, Auto-Auslösung (`AutoTrigger`)
+| `ExportKit` | PDF-Export aus einem Dokument (seitenweise, JPEG, Metadaten)
 | `CUVC` | kleine C-Brücke für die UVC-Controls (Schärfe)
 | `scanutil-cli` | Werkzeug für den Durchstich
 |===
@@ -72,6 +74,26 @@ Originale liegen unter `~/Pictures/Scanutil-Archiv`, über die Umgebungsvariable
 Mit `SCANUTIL_MOCK=1` läuft die App ohne Scanner.
 Beenden mit Cmd-Q setzt die Schärfe im Gerät auf den Standardwert zurück.
 
+=== Serie und PDF
+
+„Serie beginnen“ legt ein Dokument an, jede Aufnahme wird als Seite angehängt und sofort gespeichert (`documents/<id>.json` im Archiv).
+Mit „Automatisch auslösen“ nimmt die App selbst auf: Sie wartet auf Bewegung (Seite umblättern) und löst aus, wenn das Bild danach etwa 0,8 Sekunden ruhig ist.
+Bleibt die Seite unverändert (die Hand fuhr nur durchs Bild), nimmt sie nicht nochmals auf.
+Die Leertaste löst weiterhin von Hand aus.
+„Als PDF exportieren …“ erzeugt das PDF aus den Originalen mit den Korrekturen der Seiten; die Originale bleiben unberührt.
+
+Ohne Oberfläche, aus allen Scans eines Archivs:
+
+[source,sh]
+----
+.build/debug/scanutil-cli export ~/Archiv buch.pdf --preset web      # klein, längste Kante 2000 px
+.build/debug/scanutil-cli export ~/Archiv buch.pdf --auto --dpi 300  # mit automatischer Korrektur
+----
+
+*Noch nicht gemessen:* Die Schwellen der Auto-Auslösung (Bewegung, Ruhezeit, „neue Seite“) sind Schätzwerte aus künstlichen Bildfolgen und müssen am echten Gerät eingestellt werden.
+Ebenso fehlen Messungen zu Dauer und Speicher eines langen Buches mit 24-Megapixel-Seiten.
+Der Buchmodus (Doppelseite teilen, Falz erkennen) und die Texterkennung gibt es noch nicht, das PDF ist kein PDF/A.
+
 == Tests
 
 `swift test` im Ordner `app/` führt alle Tests ohne Scanner aus.
@@ -81,6 +103,10 @@ Beenden mit Cmd-Q setzt die Schärfe im Gerät auf den Standardwert zurück.
 | Was | Wie abgesichert
 
 | Archiv, Prüfsumme, Korrekturen speichern | Unit-Tests, auch Manipulation und Überschreibschutz
+| Dokument (Seitenfolge, Korrekturen je Seite) | Unit-Tests, auch Speichern mit unbekanntem Scan und verworfene Seiten
+| PDF-Export | Tests lesen das erzeugte PDF mit PDFKit: Reihenfolge, Seitengröße, Metadaten, Abbruch, Ersetzen
+| Auto-Auslösung | Tests mit künstlichen Bildfolgen (Seitenwechsel, Hand, Dublette, schleichende Bewegung). Mit absichtlich eingebauten Fehlern geprüft.
+| Serienmodus im `AppModel` | Tests speisen den Trigger über eine interne Methode ein, der Mock liefert dabei keine eigene Vorschau
 | Winkelmessung, Renderer | Unit-Tests mit künstlichen Textseiten, auch Vorzeichen und leere Ecken
 | `AppModel` mit Mock-Scanner | Tests mit fester Analyse (Abläufe, Handkorrektur gegen Automatik, Neustart)
 | Ganze Kette mit echter Analyse | Integrationstests mit einem Mock, der eine künstliche schiefe Textseite liefert

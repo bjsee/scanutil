@@ -20,7 +20,7 @@ let package = Package(
         .target(name: "ImagingKit"),
         .target(name: "ArchiveKit", dependencies: ["ScannerKit", "ImagingKit"]),
         .target(name: "ExportKit", dependencies: ["ArchiveKit", "ImagingKit"]),
-        .target(name: "ScanutilUI", dependencies: ["ScannerKit", "ArchiveKit", "ImagingKit"]),
+        .target(name: "ScanutilUI", dependencies: ["ScannerKit", "ArchiveKit", "ImagingKit", "ExportKit"]),
         .executableTarget(name: "scanutil-cli", dependencies: ["ScannerKit", "ArchiveKit", "ImagingKit", "ExportKit"]),
         .executableTarget(name: "Scanutil", dependencies: ["ScanutilUI"]),
         .testTarget(name: "ScannerKitTests", dependencies: ["ScannerKit"]),
@@ -29,6 +29,6 @@ let package = Package(
         .testTarget(name: "ExportKitTests", dependencies: ["ExportKit", "ArchiveKit", "ScannerKit", "ImagingKit"]),
         // Steuert die echte App über die Bedienungshilfen. Läuft nur mit SCANUTIL_UI_TESTS=1, weil dabei Fenster aufgehen.
         .testTarget(name: "ScanutilAutomationTests", dependencies: ["Scanutil"]),
-        .testTarget(name: "ScanutilUITests", dependencies: ["ScanutilUI", "ScannerKit", "ArchiveKit", "ImagingKit"]),
+        .testTarget(name: "ScanutilUITests", dependencies: ["ScanutilUI", "ScannerKit", "ArchiveKit", "ImagingKit", "ExportKit"]),
     ]
 )

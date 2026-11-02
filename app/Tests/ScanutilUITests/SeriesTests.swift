@@ -1,4 +1,6 @@
 import ArchiveKit
+import ExportKit
+import PDFKit
 import CoreGraphics
 import Foundation
 import ImagingKit
@@ -148,6 +150,42 @@ struct SeriesTests {
         let doc = try store.loadDocument(id: try #require(model.series?.id))
         #expect(doc.pages.first?.corrections.rotation.degrees == -0.5)
         #expect(doc.pages.first?.corrections.rotation.source == .manual)
+        await model.disconnect()
+    }
+
+    @Test func exportsTheSeriesAsPDF() async throws {
+        let (model, _, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "Export")
+        await model.scan(); await model.scan()
+        let target = dir.appendingPathComponent("serie.pdf")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        await model.exportSeries(to: target, options: ExportOptions(dpi: 72))
+        #expect(model.message == nil)
+        #expect(model.exportProgress == nil)
+        #expect(model.lastExportURL == target)
+        #expect(PDFDocument(url: target)?.pageCount == 2)
+        await model.disconnect()
+    }
+
+    @Test func exportWithoutPagesSaysSo() async {
+        let (model, _, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "Leer")
+        let target = dir.appendingPathComponent("leer.pdf")
+        await model.exportSeries(to: target)
+        #expect(model.message?.contains("keine Seiten") == true)
+        #expect(!FileManager.default.fileExists(atPath: target.path))
+        await model.disconnect()
+    }
+
+    @Test func exportFailureShowsMessageAndClearsProgress() async {
+        let (model, _, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "Fehler")
+        await model.scan()
+        let unwritable = URL(fileURLWithPath: "/nonexistent-\(UUID().uuidString)/x.pdf")
+        await model.exportSeries(to: unwritable)
+        #expect(model.message?.contains("fehlgeschlagen") == true)
+        #expect(model.exportProgress == nil)
+        #expect(model.lastExportURL == nil)
         await model.disconnect()
     }
 }

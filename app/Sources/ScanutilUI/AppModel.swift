@@ -1,5 +1,6 @@
 import ArchiveKit
 import CoreGraphics
+import ExportKit
 import Foundation
 import ImagingKit
 import Observation
@@ -61,6 +62,10 @@ public final class AppModel {
     public private(set) var seriesPhase: AutoTrigger.Phase = .waitingForMotion
     /// Ob in der Serie automatisch ausgelöst wird. Aus: nur von Hand, die Seiten kommen trotzdem ins Dokument.
     public var autoTriggerEnabled = true
+    /// Fortschritt des laufenden PDF-Exports (fertige Seiten, alle Seiten), sonst `nil`.
+    public private(set) var exportProgress: (done: Int, total: Int)?
+    /// Ort des zuletzt geschriebenen PDFs, für „Im Finder zeigen“.
+    public private(set) var lastExportURL: URL?
 
     public var archiveURL: URL { store.root }
     public var lastScan: ScanItem? { scans.first }
@@ -213,6 +218,27 @@ public final class AppModel {
         case .skippedDuplicate: message = "Die Seite ist unverändert, es wurde nicht aufgenommen."
         case .fire: await scan()
         }
+    }
+
+    /// Schreibt das Dokument der Serie als PDF. Läuft im Hintergrund; die Serie kann dabei weitergehen,
+    /// exportiert wird der Stand beim Aufruf.
+    public func exportSeries(to url: URL, options: ExportOptions = .archive) async {
+        guard let document = series, exportProgress == nil else { return }
+        guard !document.pages.isEmpty else { message = "Die Serie hat noch keine Seiten."; return }
+        exportProgress = (0, document.pages.count)
+        message = nil
+        let exporter = PDFExporter(store: store)
+        do {
+            try await Task.detached {
+                try exporter.export(document, to: url, options: options) { done, total in
+                    Task { @MainActor in self.exportProgress = (done, total) }
+                }
+            }.value
+            lastExportURL = url
+        } catch {
+            message = "Der Export ist fehlgeschlagen: \(error.localizedDescription)"
+        }
+        exportProgress = nil
     }
 
     private func appendToSeries(scanID: UUID) {

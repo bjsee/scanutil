@@ -1,7 +1,9 @@
 import AppKit
+import ArchiveKit
 import ImagingKit
 import ScannerKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 public struct ContentView: View {
     @Bindable var model: AppModel
@@ -152,6 +154,18 @@ struct SeriesBar: View {
                     phaseIndicator
                 }
                 Spacer()
+                if let progress = model.exportProgress {
+                    ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1)))
+                        .frame(width: 100)
+                    Text("\(progress.done)/\(progress.total)").font(.caption.monospacedDigit())
+                } else if let url = model.lastExportURL {
+                    Button("PDF zeigen") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                        .buttonStyle(.link)
+                        .accessibilityIdentifier("export-reveal-button")
+                }
+                Button("Als PDF exportieren …") { chooseExportTarget(for: series) }
+                    .disabled(series.pages.isEmpty || model.exportProgress != nil)
+                    .accessibilityIdentifier("series-export-button")
                 Button("Serie beenden") { model.endSeries() }
                     .accessibilityIdentifier("series-end-button")
             } else {
@@ -190,6 +204,15 @@ struct SeriesBar: View {
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("series-phase")
         }
+    }
+
+    private func chooseExportTarget(for series: ScanDocument) {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.pdf]
+        panel.nameFieldStringValue = series.title + ".pdf"
+        panel.message = "Das PDF wird aus den Originalen mit den eingestellten Korrekturen erzeugt."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task { await model.exportSeries(to: url) }
     }
 
     private func pageCountText(_ count: Int) -> String {
