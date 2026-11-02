@@ -32,6 +32,19 @@ public struct AnalysisResult: @unchecked Sendable {
     }
 }
 
+/// Ergebnis der automatischen Analyse einer Doppelseite: Korrekturen je Seite.
+public struct BookAnalysisResult: @unchecked Sendable {
+    public let left: Corrections
+    public let right: Corrections
+    public let warnings: [String]
+
+    public init(left: Corrections, right: Corrections, warnings: [String]) {
+        self.left = left
+        self.right = right
+        self.warnings = warnings
+    }
+}
+
 /// Zustand und Abläufe der Oberfläche. Kennt weder SwiftUI noch die Hardware, nur `ScannerPort` und `ArchiveStore`.
 @MainActor
 @Observable
@@ -62,6 +75,10 @@ public final class AppModel {
     public private(set) var seriesPhase: AutoTrigger.Phase = .waitingForMotion
     /// Ob in der Serie automatisch ausgelöst wird. Aus: nur von Hand, die Seiten kommen trotzdem ins Dokument.
     public var autoTriggerEnabled = true
+    /// Ob die Serie Doppelseiten aufnimmt: jede Aufnahme ergibt eine linke und eine rechte Seite.
+    public private(set) var seriesIsBook = false
+    /// Verkleinerte Ansicht jeder Buchseite mit ihren Korrekturen, nach Seiten-ID.
+    public private(set) var pagePreviews: [UUID: CGImage] = [:]
     /// Fortschritt des laufenden PDF-Exports (fertige Seiten, alle Seiten), sonst `nil`.
     public private(set) var exportProgress: (done: Int, total: Int)?
     /// Ort des zuletzt geschriebenen PDFs, für „Im Finder zeigen“.
@@ -79,6 +96,7 @@ public final class AppModel {
     private let store: ArchiveStore
     private let thumbnailSize: Int
     private let analyze: @Sendable (CGImage) -> AnalysisResult
+    private let analyzeBook: @Sendable (CGImage) -> BookAnalysisResult
     private var session: (any ScanSession)?
     private var previewTask: Task<Void, Never>?
     private var trigger = AutoTrigger()
@@ -86,18 +104,27 @@ public final class AppModel {
 
     public init(
         scanner: any ScannerPort, store: ArchiveStore, thumbnailSize: Int = 1600,
-        analyze: @escaping @Sendable (CGImage) -> AnalysisResult = AppModel.defaultAnalysis
+        analyze: @escaping @Sendable (CGImage) -> AnalysisResult = AppModel.defaultAnalysis,
+        analyzeBook: @escaping @Sendable (CGImage) -> BookAnalysisResult = AppModel.defaultBookAnalysis
     ) {
         self.scanner = scanner
         self.store = store
         self.thumbnailSize = thumbnailSize
         self.analyze = analyze
+        self.analyzeBook = analyzeBook
     }
 
     /// Standardanalyse: Dokument erkennen, Winkel messen, sichere Ergebnisse anwenden.
     public static let defaultAnalysis: @Sendable (CGImage) -> AnalysisResult = { image in
         let analysis = ImageAnalyzer.analyze(image)
         return AnalysisResult(corrections: ImageAnalyzer.corrections(from: analysis), warnings: analysis.warnings)
+    }
+
+    /// Standardanalyse einer Doppelseite: Rand, Falz und Schräglage je Seite.
+    public static let defaultBookAnalysis: @Sendable (CGImage) -> BookAnalysisResult = { image in
+        let analysis = BookAnalyzer.analyze(image)
+        let pages = BookAnalyzer.corrections(from: analysis)
+        return BookAnalysisResult(left: pages.left, right: pages.right, warnings: analysis.warnings)
     }
 
     // MARK: Verbinden
@@ -187,12 +214,15 @@ public final class AppModel {
     // MARK: Serie
 
     /// Beginnt eine Serie: ein neues, sofort gespeichertes Dokument, dem jede Aufnahme als Seite angehängt wird.
-    public func startSeries(title: String) {
+    /// Mit `book` ergibt jede Aufnahme zwei Seiten (links und rechts), geteilt am erkannten Falz.
+    public func startSeries(title: String, book: Bool = false) {
         guard status == .ready, series == nil else { return }
         let document = ScanDocument(title: title)
         do {
             try store.saveDocument(document)
             series = document
+            seriesIsBook = book
+            pagePreviews = [:]
             trigger = AutoTrigger()
             seriesPhase = trigger.phase
             message = nil
@@ -204,6 +234,7 @@ public final class AppModel {
     /// Beendet die Serie. Das Dokument bleibt gespeichert.
     public func endSeries() {
         series = nil
+        seriesIsBook = false
         seriesPhase = .waitingForMotion
     }
 
@@ -243,7 +274,12 @@ public final class AppModel {
 
     private func appendToSeries(scanID: UUID) {
         guard var document = series else { return }
-        document.append(DocumentPage(scanID: scanID))
+        if seriesIsBook {
+            document.append(DocumentPage(scanID: scanID, region: .left))
+            document.append(DocumentPage(scanID: scanID, region: .right))
+        } else {
+            document.append(DocumentPage(scanID: scanID))
+        }
         saveSeries(document)
     }
 
@@ -251,7 +287,7 @@ public final class AppModel {
     private func mirrorToSeries(_ item: ScanItem) {
         guard var document = series else { return }
         var changed = false
-        for page in document.pages where page.scanID == item.id && page.corrections != item.corrections {
+        for page in document.pages where page.scanID == item.id && page.region == .whole && page.corrections != item.corrections {
             document.updateCorrections(pageID: page.id) { $0 = item.corrections }
             changed = true
         }
@@ -289,6 +325,7 @@ public final class AppModel {
     /// Analysiert einen Scan automatisch und speichert das Ergebnis, außer jemand hat inzwischen von Hand korrigiert.
     private func analyzeInBackground(id: UUID) {
         guard let image = scans.first(where: { $0.id == id })?.thumbnail else { return }
+        if isBookScan(id) { Task { await analyzeBookScan(id: id, image: image) }; return }
         analyzing.insert(id)
         let analyze = self.analyze
         Task {
@@ -304,12 +341,68 @@ public final class AppModel {
     /// Verwirft alle Änderungen und analysiert neu.
     public func reanalyze(id: UUID) async {
         guard let index = scans.firstIndex(where: { $0.id == id }), let image = scans[index].thumbnail else { return }
+        if isBookScan(id) { await analyzeBookScan(id: id, image: image, force: true); return }
         analyzing.insert(id)
         let analyze = self.analyze
         let result = await Task.detached { analyze(image) }.value
         analyzing.remove(id)
         guard let current = scans.firstIndex(where: { $0.id == id }) else { return }
         apply(result.corrections, warnings: result.warnings, at: current)
+    }
+
+    /// Ob der Scan eine Doppelseite ist, die in zwei Seiten geteilt wird.
+    public func isBookScan(_ id: UUID) -> Bool {
+        series?.pages.contains { $0.scanID == id && $0.region != .whole } ?? false
+    }
+
+    /// Die Seiten eines Scans in der Reihenfolge des Dokuments.
+    public func pages(of scanID: UUID) -> [DocumentPage] {
+        series?.pages.filter { $0.scanID == scanID } ?? []
+    }
+
+    /// `force` verwirft auch manuelle Änderungen, sonst gelten sie vor der Automatik.
+    private func analyzeBookScan(id: UUID, image: CGImage, force: Bool = false) async {
+        analyzing.insert(id)
+        let analyzeBook = self.analyzeBook
+        let result = await Task.detached { analyzeBook(image) }.value
+        analyzing.remove(id)
+        guard var document = series else { return }
+        for page in document.pages where page.scanID == id {
+            let corrections = page.region == .left ? result.left : result.right
+            // Hat der Nutzer die Seite schon angefasst, gilt das und nicht die Automatik.
+            guard force || page.corrections.revision == 0 else { continue }
+            document.updateCorrections(pageID: page.id) { $0 = corrections }
+        }
+        saveSeries(document)
+        if let index = scans.firstIndex(where: { $0.id == id }) { scans[index].warnings = result.warnings }
+        refreshPagePreviews(scanID: id)
+    }
+
+    /// Ändert die Korrekturen einer Buchseite, speichert das Dokument und rendert die Seitenansicht neu.
+    public func updatePageCorrections(pageID: UUID, _ change: (inout Corrections) -> Void) {
+        guard var document = series, let page = document.page(id: pageID) else { return }
+        document.updateCorrections(pageID: pageID, change)
+        saveSeries(document)
+        refreshPagePreviews(scanID: page.scanID)
+    }
+
+    public func setPageRotation(pageID: UUID, degrees: Double) { updatePageCorrections(pageID: pageID) { $0.setRotation(degrees: degrees) } }
+    public func setPageCropEnabled(pageID: UUID, _ on: Bool) { updatePageCorrections(pageID: pageID) { $0.setCropEnabled(on) } }
+
+    /// Rendert die Ansicht der Seiten eines Scans neu: dieselben Korrekturen wie im PDF, nur kleiner.
+    private func refreshPagePreviews(scanID: UUID) {
+        guard let image = scans.first(where: { $0.id == scanID })?.thumbnail else { return }
+        let pages = self.pages(of: scanID)
+        Task {
+            let rendered: [(UUID, CGImage?)] = await Task.detached {
+                pages.map { ($0.id, CorrectionRenderer.render(image, corrections: PageGeometry.effectiveCorrections(for: $0))) }
+            }.value
+            for (id, preview) in rendered {
+                // Nur übernehmen, wenn die Seite noch dieselben Korrekturen hat wie beim Rendern.
+                guard let current = series?.page(id: id), pages.first(where: { $0.id == id })?.corrections == current.corrections else { continue }
+                pagePreviews[id] = preview
+            }
+        }
     }
 
     private func apply(_ corrections: Corrections, warnings: [String], at index: Int) {

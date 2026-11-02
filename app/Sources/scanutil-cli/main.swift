@@ -124,17 +124,30 @@ do {
         } else {
             // Ohne Dokument: alle Scans in der Reihenfolge der Aufnahme, ungespeichert.
             var ad = ScanDocument(title: option("--title", in: args) ?? target.deletingPathExtension().lastPathComponent)
-            let regions: [PageRegion] = args.contains("--book") ? [.left, .right] : [.whole]
+            let book = args.contains("--book")
             for record in try store.allRecords() {
                 var corrections = try store.corrections(for: record.id) ?? .none
-                if args.contains("--auto"), corrections == .none || corrections.revision == 0 {
-                    // Die Analyse braucht das Original; bei 24 MP dauert sie spürbar.
-                    if let source = CGImageSourceCreateWithURL(store.originalURL(for: record) as CFURL, nil),
-                       let image = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+                var pageCorrections: [Corrections] = [corrections, corrections]
+                if args.contains("--auto"),
+                   // Die Analyse braucht das Original; bei 24 MP dauert sie spürbar.
+                   let source = CGImageSourceCreateWithURL(store.originalURL(for: record) as CFURL, nil),
+                   let image = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+                    if book {
+                        let analysis = BookAnalyzer.analyze(image)
+                        let pages = BookAnalyzer.corrections(from: analysis)
+                        pageCorrections = [pages.left, pages.right]
+                        for w in analysis.warnings { FileHandle.standardError.write(Data("\(record.id.uuidString.prefix(8)): \(w)\n".utf8)) }
+                    } else if corrections == .none || corrections.revision == 0 {
                         corrections = ImageAnalyzer.corrections(from: ImageAnalyzer.analyze(image))
+                        pageCorrections = [corrections, corrections]
                     }
                 }
-                for region in regions { ad.append(DocumentPage(scanID: record.id, region: region, corrections: corrections)) }
+                if book {
+                    ad.append(DocumentPage(scanID: record.id, region: .left, corrections: pageCorrections[0]))
+                    ad.append(DocumentPage(scanID: record.id, region: .right, corrections: pageCorrections[1]))
+                } else {
+                    ad.append(DocumentPage(scanID: record.id, region: .whole, corrections: corrections))
+                }
             }
             document = ad
         }

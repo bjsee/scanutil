@@ -3,6 +3,7 @@ import ArchiveKit
 import CoreGraphics
 import Foundation
 import ImageIO
+import ImagingKit
 import ScannerKit
 import SwiftUI
 import Testing
@@ -64,6 +65,35 @@ struct ViewRenderingTests {
         let during = try render(SeriesBar(model: model), size: CGSize(width: 900, height: 44), name: "serienleiste-laeuft")
         #expect(during.width >= 1800)
         #expect(model.series?.pages.count == 1)
+        await model.disconnect()
+    }
+
+    /// Eine künstliche Doppelseite aus zwei Textseiten, geliefert vom Mock; die Analyse ist fest vorgegeben.
+    @Test func detailViewForABookScan() async throws {
+        let left = SyntheticPage.textPage(width: 800, height: 1100, tiltCounterClockwise: 2)
+        let right = SyntheticPage.textPage(width: 800, height: 1100, tiltCounterClockwise: -1.5)
+        let context = CGContext(data: nil, width: 1600, height: 1100, bitsPerComponent: 8, bytesPerRow: 0,
+                                space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue)!
+        context.draw(left, in: CGRect(x: 0, y: 0, width: 800, height: 1100))
+        context.draw(right, in: CGRect(x: 800, y: 0, width: 800, height: 1100))
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("scanutil-view-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let model = AppModel(scanner: SyntheticPage.scanner(delivering: context.makeImage()!), store: ArchiveStore(root: dir),
+                             analyzeBook: { _ in
+            func c(_ degrees: Double) -> Corrections {
+                Corrections(rotation: RotationCorrection(degrees: degrees, enabled: true, source: .automatic, confidence: 0.9))
+            }
+            return BookAnalysisResult(left: c(2), right: c(-1.5), warnings: ["Der Falz ist unsicher."])
+        })
+        await model.connect()
+        model.startSeries(title: "Buch", book: true)
+        await model.scan()
+        let id = try #require(model.scans.first?.id)
+        let pageIDs = model.pages(of: id).map(\.id)
+        #expect(await eventually { pageIDs.allSatisfy { model.pagePreviews[$0] != nil } })
+        let item = try #require(model.scans.first)
+        let image = try render(ScanDetailView(model: model, item: item), size: CGSize(width: 520, height: 760), name: "detail-doppelseite")
+        #expect(image.width >= 1000)
         await model.disconnect()
     }
 

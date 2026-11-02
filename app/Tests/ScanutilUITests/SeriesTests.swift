@@ -17,11 +17,21 @@ struct SeriesTests {
     )
 
     /// Ohne eigene Vorschaubilder des Mocks: der Trigger bekommt nur die Signaturen, die der Test einspeist.
+    /// Feste Doppelseitenanalyse: links 1°, rechts −1°, nach einer kurzen Wartezeit wie bei der echten Analyse.
+    nonisolated private static let book: @Sendable (CGImage) -> BookAnalysisResult = { _ in
+        Thread.sleep(forTimeInterval: 0.15)
+        func corrections(_ degrees: Double) -> Corrections {
+            Corrections(crop: CropCorrection(quad: .full, enabled: true, source: .automatic, confidence: 0.9),
+                        rotation: RotationCorrection(degrees: degrees, enabled: true, source: .automatic, confidence: 0.9))
+        }
+        return BookAnalysisResult(left: corrections(1), right: corrections(-1), warnings: ["Der Falz ist unsicher."])
+    }
+
     private func makeModel() async -> (AppModel, ArchiveStore, URL) {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("scanutil-series-\(UUID().uuidString)")
         let store = ArchiveStore(root: dir)
         let model = AppModel(scanner: MockScanner(previewsEnabled: false), store: store, thumbnailSize: 64,
-                             analyze: { _ in SeriesTests.confident })
+                             analyze: { _ in SeriesTests.confident }, analyzeBook: SeriesTests.book)
         await model.connect()
         return (model, store, dir)
     }
@@ -187,5 +197,104 @@ struct SeriesTests {
         #expect(model.exportProgress == nil)
         #expect(model.lastExportURL == nil)
         await model.disconnect()
+    }
+
+    // MARK: Buchmodus
+
+    @Test func bookSeriesAddsALeftAndARightPagePerScan() async throws {
+        let (model, store, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "Buch", book: true)
+        await model.scan()
+        let scanID = try #require(model.scans.first?.id)
+        #expect(model.seriesIsBook)
+        #expect(model.isBookScan(scanID))
+        let doc = try store.loadDocument(id: try #require(model.series?.id))
+        #expect(doc.pages.map(\.region) == [.left, .right])
+        #expect(doc.pages.allSatisfy { $0.scanID == scanID })
+        #expect(model.pages(of: scanID).count == 2)
+        await model.disconnect()
+    }
+
+    @Test func singlePageSeriesIsNotABookSeries() async {
+        let (model, _, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "Blätter")
+        await model.scan()
+        #expect(!model.seriesIsBook)
+        #expect(model.scans.first.map { !model.isBookScan($0.id) } == true)
+        #expect(model.series?.pages.map(\.region) == [.whole])
+        await model.disconnect()
+    }
+
+    @Test func bookAnalysisGivesEachPageItsOwnCorrectionsAndPreview() async throws {
+        let (model, store, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "Buch", book: true)
+        await model.scan()
+        let scanID = try #require(model.scans.first?.id)
+        #expect(await eventually { model.pages(of: scanID).first?.corrections.rotation.degrees == 1 })
+        let pages = model.pages(of: scanID)
+        #expect(pages.map(\.corrections.rotation.degrees) == [1, -1])
+        #expect(await eventually { pages.allSatisfy { model.pagePreviews[$0.id] != nil } })
+        #expect(model.scans.first?.warnings == ["Der Falz ist unsicher."])
+        let saved = try store.loadDocument(id: try #require(model.series?.id))
+        #expect(saved.pages.map(\.corrections.rotation.degrees) == [1, -1])
+        await model.disconnect()
+    }
+
+    @Test func manualChangeBeforeAnalysisFinishesIsKept() async throws {
+        let (model, _, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "Buch", book: true)
+        await model.scan()
+        let scanID = try #require(model.scans.first?.id)
+        let left = try #require(model.pages(of: scanID).first)
+        model.setPageRotation(pageID: left.id, degrees: 4)          // die Analyse läuft noch
+        // Die Automatik kommt für die andere Seite an; erst dann ist die Analyse sicher durch.
+        #expect(await eventually { model.pages(of: scanID).last?.corrections.rotation.degrees == -1 })
+        let pages = model.pages(of: scanID)
+        #expect(pages[0].corrections.rotation.degrees == 4)         // Handeingabe gilt
+        #expect(pages[0].corrections.rotation.source == .manual)
+        #expect(pages[1].corrections.rotation.degrees == -1)        // die andere Seite bekommt die Automatik
+        await model.disconnect()
+    }
+
+    @Test func reanalyzeDiscardsManualPageChanges() async throws {
+        let (model, _, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "Buch", book: true)
+        await model.scan()
+        let scanID = try #require(model.scans.first?.id)
+        #expect(await eventually { model.analyzing.isEmpty && model.pages(of: scanID).first?.corrections.rotation.degrees == 1 })
+        model.setPageRotation(pageID: model.pages(of: scanID)[0].id, degrees: 4)
+        await model.reanalyze(id: scanID)
+        #expect(model.pages(of: scanID)[0].corrections.rotation.degrees == 1)
+        await model.disconnect()
+    }
+
+    @Test func editingTheSpreadItemDoesNotTouchTheBookPages() async throws {
+        let (model, _, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "Buch", book: true)
+        await model.scan()
+        let scanID = try #require(model.scans.first?.id)
+        #expect(await eventually { model.analyzing.isEmpty && model.pages(of: scanID).first?.corrections.rotation.degrees == 1 })
+        let before = model.pages(of: scanID).map(\.corrections)
+        model.setRotation(id: scanID, degrees: 9)
+        #expect(model.pages(of: scanID).map(\.corrections) == before)
+        await model.disconnect()
+    }
+
+    @Test func bookSeriesExportsTwoPdfPagesPerScan() async throws {
+        let (model, _, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "Buch", book: true)
+        await model.scan(); await model.scan()
+        let target = dir.appendingPathComponent("buch.pdf")
+        await model.exportSeries(to: target, options: ExportOptions(dpi: 72))
+        #expect(model.message == nil)
+        #expect(PDFDocument(url: target)?.pageCount == 4)
+        await model.disconnect()
+    }
+
+    @Test func endingTheSeriesEndsBookMode() async {
+        let (model, _, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "Buch", book: true)
+        model.endSeries()
+        #expect(!model.seriesIsBook)
     }
 }

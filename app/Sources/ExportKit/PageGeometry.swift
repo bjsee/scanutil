@@ -2,11 +2,11 @@ import ArchiveKit
 import ImagingKit
 
 /// Bestimmt, welche Korrekturen für den Export einer Seite gelten.
-enum PageGeometry {
+public enum PageGeometry {
     /// Hat die Seite einen eigenen, aktiven Zuschnitt, gilt er. Sonst ergibt sich bei `.left` und `.right`
     /// die jeweilige Hälfte des ganzen Bildes, bei `.whole` bleibt es unverändert.
     /// Drehung und Hauptschalter der Korrekturen bleiben, wie sie sind.
-    static func effectiveCorrections(for page: DocumentPage) -> Corrections {
+    public static func effectiveCorrections(for page: DocumentPage) -> Corrections {
         var corrections = page.corrections
         guard page.region != .whole else { return corrections }
         if corrections.crop.enabled, corrections.crop.quad != nil { return corrections }

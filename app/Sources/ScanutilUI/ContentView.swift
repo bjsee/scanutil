@@ -137,11 +137,13 @@ public struct ContentView: View {
 /// Leiste für den Serienmodus: Serie beginnen und beenden, Auto-Auslösung, Fortschritt bis zur Aufnahme.
 struct SeriesBar: View {
     @Bindable var model: AppModel
+    /// Vor dem Beginn gewählt: jede Aufnahme ist eine Doppelseite.
+    @State private var bookMode = false
 
     var body: some View {
         HStack(spacing: 12) {
             if let series = model.series {
-                Label("\(series.title)", systemImage: "books.vertical")
+                Label("\(series.title)" + (model.seriesIsBook ? " · Buch" : ""), systemImage: "books.vertical")
                     .font(.callout.bold())
                     .lineLimit(1)
                 Text(pageCountText(series.pages.count))
@@ -170,13 +172,17 @@ struct SeriesBar: View {
                     .accessibilityIdentifier("series-end-button")
             } else {
                 Button {
-                    model.startSeries(title: Self.defaultTitle())
+                    model.startSeries(title: Self.defaultTitle(), book: bookMode)
                 } label: {
                     Label("Serie beginnen", systemImage: "books.vertical")
                 }
                 .disabled(model.status != .ready)
                 .help("Mehrere Seiten in ein Dokument aufnehmen")
                 .accessibilityIdentifier("series-start-button")
+                Toggle("Doppelseiten (Buch)", isOn: $bookMode)
+                    .toggleStyle(.switch)
+                    .help("Jede Aufnahme wird am Falz in eine linke und eine rechte Seite geteilt")
+                    .accessibilityIdentifier("book-mode-toggle")
                 Text("Eine Serie sammelt die Aufnahmen als Seiten eines Dokuments und löst nach dem Umblättern selbst aus.")
                     .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 Spacer()
@@ -249,6 +255,27 @@ struct ThumbnailCell: View {
     }
 }
 
+/// Eine Seite einer Doppelseite mit ihren Korrekturen.
+struct BookPageView: View {
+    let preview: CGImage?
+    let region: PageRegion
+
+    var body: some View {
+        Group {
+            if let preview {
+                Image(decorative: preview, scale: 1).resizable().aspectRatio(contentMode: .fit)
+            } else {
+                Rectangle().fill(.quaternary)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            Text(region == .left ? "links" : "rechts").font(.caption2).padding(2).background(.regularMaterial)
+        }
+        .accessibilityLabel(region == .left ? "Linke Seite" : "Rechte Seite")
+        .accessibilityIdentifier("book-page-\(region == .left ? "left" : "right")")
+    }
+}
+
 /// Detailansicht eines Scans mit Korrekturen. Alle Änderungen betreffen nur die gespeicherten Parameter, nicht das Original.
 struct ScanDetailView: View {
     @Bindable var model: AppModel
@@ -258,7 +285,14 @@ struct ScanDetailView: View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack {
                 Color(nsColor: .underPageBackgroundColor)
-                if let image = item.display {
+                if model.isBookScan(item.id) {
+                    HStack(alignment: .center, spacing: 6) {
+                        ForEach(model.pages(of: item.id)) { page in
+                            BookPageView(preview: model.pagePreviews[page.id], region: page.region)
+                        }
+                    }
+                    .padding(6)
+                } else if let image = item.display {
                     Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fit).padding(6)
                 }
                 if model.analyzing.contains(item.id) {
@@ -266,8 +300,45 @@ struct ScanDetailView: View {
                 }
             }
             if item.corrections.needsReview || !item.warnings.isEmpty { reviewBanner }
-            controls.padding(12)
+            if model.isBookScan(item.id) {
+                bookControls.padding(12)
+            } else {
+                controls.padding(12)
+            }
         }
+    }
+
+    /// Je Seite einer Doppelseite: Zuschnitt und Drehung. Die Korrekturen gehören der Seite, nicht dem Scan.
+    private var bookControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Doppelseite: zwei Seiten, geteilt am Falz").font(.callout.bold())
+                Spacer()
+                Button("Automatisch neu erkennen") { Task { await model.reanalyze(id: item.id) } }
+                    .disabled(model.analyzing.contains(item.id))
+                    .accessibilityIdentifier("reanalyze-button")
+            }
+            ForEach(model.pages(of: item.id)) { page in
+                let c = page.corrections
+                let side = page.region == .left ? "links" : "rechts"
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Zuschnitt \(side)" + (c.crop.source == .manual ? " (manuell)" : c.crop.confidence.map { String(format: " (automatisch, Sicherheit %.2f)", $0) } ?? ""),
+                           isOn: Binding(get: { c.crop.enabled }, set: { model.setPageCropEnabled(pageID: page.id, $0) }))
+                        .disabled(c.crop.quad == nil)
+                        .accessibilityIdentifier("book-crop-\(side)")
+                    HStack {
+                        Text("Drehung \(side)").font(.callout).frame(width: 90, alignment: .leading)
+                        Slider(value: Binding(get: { c.rotation.degrees }, set: { model.setPageRotation(pageID: page.id, degrees: $0) }), in: -15...15, step: 0.05)
+                            .accessibilityIdentifier("book-rotation-slider-\(side)")
+                        Text(String(format: "%+.2f°", c.rotation.degrees)).font(.callout.monospacedDigit()).frame(width: 64, alignment: .trailing)
+                    }
+                }
+            }
+            Text("\(item.record.original.width)×\(item.record.original.height) · SHA-256 \(item.record.original.sha256.prefix(12))…")
+                .font(.caption2.monospaced()).foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("book-controls")
     }
 
     private var reviewBanner: some View {
