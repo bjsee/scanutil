@@ -21,7 +21,7 @@ let package = Package(
         .target(name: "ArchiveKit", dependencies: ["ScannerKit", "ImagingKit"]),
         .target(name: "ExportKit", dependencies: ["ArchiveKit", "ImagingKit"]),
         .target(name: "ScanutilUI", dependencies: ["ScannerKit", "ArchiveKit", "ImagingKit"]),
-        .executableTarget(name: "scanutil-cli", dependencies: ["ScannerKit", "ArchiveKit", "ImagingKit"]),
+        .executableTarget(name: "scanutil-cli", dependencies: ["ScannerKit", "ArchiveKit", "ImagingKit", "ExportKit"]),
         .executableTarget(name: "Scanutil", dependencies: ["ScanutilUI"]),
         .testTarget(name: "ScannerKitTests", dependencies: ["ScannerKit"]),
         .testTarget(name: "ImagingKitTests", dependencies: ["ImagingKit", "ScannerKit"]),

@@ -1,5 +1,6 @@
 import ArchiveKit
 import CoreGraphics
+import ExportKit
 import Foundation
 import ImageIO
 import ImagingKit
@@ -10,6 +11,7 @@ import ScannerKit
 // scanutil-cli formats
 // scanutil-cli capture <Archivordner> [--format BxH] [--sharpness N] [--mock]
 // scanutil-cli verify <Archivordner>
+// scanutil-cli export <Archivordner> <ziel.pdf> [--document ID] [--title T] [--preset archive|web] [--dpi N] [--auto] [--book]
 
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data((message + "\n").utf8))
@@ -27,7 +29,7 @@ func parseFormat(_ text: String) -> ScanFormat? {
 }
 
 let args = Array(CommandLine.arguments.dropFirst())
-guard let command = args.first else { fail("Aufruf: scanutil-cli formats | capture <Archivordner> | verify <Archivordner>") }
+guard let command = args.first else { fail("Aufruf: scanutil-cli formats | capture <Archivordner> | verify <Archivordner> | export <Archivordner> <ziel.pdf>") }
 
 do {
     switch command {
@@ -98,6 +100,51 @@ do {
             CGImageDestinationFinalize(dest)
             print("korrigiert: \(out) (\(rendered.width)x\(rendered.height))")
         }
+
+    case "export":
+        guard args.count >= 3 else { fail("Aufruf: export <Archivordner> <ziel.pdf> [--document ID] [--title T] [--preset archive|web] [--dpi N] [--auto] [--book]") }
+        let store = ArchiveStore(root: URL(fileURLWithPath: args[1], isDirectory: true))
+        let target = URL(fileURLWithPath: args[2])
+
+        var options: ExportOptions
+        switch option("--preset", in: args) ?? "archive" {
+        case "archive": options = .archive
+        case "web": options = .web
+        case let other: fail("Unbekanntes Preset: \(other) (archive oder web)")
+        }
+        if let dpi = option("--dpi", in: args) {
+            guard let value = Double(dpi), value > 0 else { fail("--dpi braucht eine positive Zahl") }
+            options.dpi = value
+        }
+
+        var document: ScanDocument
+        if let id = option("--document", in: args) {
+            guard let uuid = UUID(uuidString: id) else { fail("--document braucht eine UUID") }
+            document = try store.loadDocument(id: uuid)
+        } else {
+            // Ohne Dokument: alle Scans in der Reihenfolge der Aufnahme, ungespeichert.
+            var ad = ScanDocument(title: option("--title", in: args) ?? target.deletingPathExtension().lastPathComponent)
+            let regions: [PageRegion] = args.contains("--book") ? [.left, .right] : [.whole]
+            for record in try store.allRecords() {
+                var corrections = try store.corrections(for: record.id) ?? .none
+                if args.contains("--auto"), corrections == .none || corrections.revision == 0 {
+                    // Die Analyse braucht das Original; bei 24 MP dauert sie spürbar.
+                    if let source = CGImageSourceCreateWithURL(store.originalURL(for: record) as CFURL, nil),
+                       let image = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+                        corrections = ImageAnalyzer.corrections(from: ImageAnalyzer.analyze(image))
+                    }
+                }
+                for region in regions { ad.append(DocumentPage(scanID: record.id, region: region, corrections: corrections)) }
+            }
+            document = ad
+        }
+        guard !document.pages.isEmpty else { fail("Das Archiv enthält keine Scans.") }
+        if let title = option("--title", in: args) { document.title = title }
+        try PDFExporter(store: store).export(document, to: target, options: options) { done, total in
+            print("\r\(done)/\(total)", terminator: "")
+        }
+        let size = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0
+        print("\n\(document.pages.count) Seiten, \(String(format: "%.1f", Double(size) / 1_000_000)) MB: \(target.path)")
 
     default:
         fail("Unbekannter Befehl: \(command)")
