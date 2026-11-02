@@ -1,5 +1,6 @@
 import AppKit
 import ArchiveKit
+import ExportKit
 import ImagingKit
 import ScannerKit
 import SwiftUI
@@ -139,6 +140,8 @@ struct SeriesBar: View {
     @Bindable var model: AppModel
     /// Vor dem Beginn gewählt: jede Aufnahme ist eine Doppelseite.
     @State private var bookMode = false
+    /// Beim Export Text erkennen und unsichtbar ins PDF legen.
+    @State private var withOCR = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -165,6 +168,10 @@ struct SeriesBar: View {
                         .buttonStyle(.link)
                         .accessibilityIdentifier("export-reveal-button")
                 }
+                Toggle("Mit Texterkennung", isOn: $withOCR)
+                    .toggleStyle(.switch)
+                    .help("Macht das PDF durchsuchbar. Kostet etwa 1,5 Sekunden je Seite.")
+                    .accessibilityIdentifier("export-ocr-toggle")
                 Button("Als PDF exportieren …") { chooseExportTarget(for: series) }
                     .disabled(series.pages.isEmpty || model.exportProgress != nil)
                     .accessibilityIdentifier("series-export-button")
@@ -218,7 +225,9 @@ struct SeriesBar: View {
         panel.nameFieldStringValue = series.title + ".pdf"
         panel.message = "Das PDF wird aus den Originalen mit den eingestellten Korrekturen erzeugt."
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { await model.exportSeries(to: url) }
+        var options = ExportOptions.archive
+        options.ocr = withOCR
+        Task { await model.exportSeries(to: url, options: options) }
     }
 
     private func pageCountText(_ count: Int) -> String {

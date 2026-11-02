@@ -27,11 +27,21 @@ struct SeriesTests {
         return BookAnalysisResult(left: corrections(1), right: corrections(-1), warnings: ["Der Falz ist unsicher."])
     }
 
-    private func makeModel() async -> (AppModel, ArchiveStore, URL) {
+    /// Texterkennung für Tests: liefert eine Zeile oder scheitert.
+    private struct StubRecognizer: TextRecognizer {
+        let fail: Bool
+        struct Failure: Error {}
+        func recognize(_ image: CGImage, languages: [String]) throws -> [RecognizedLine] {
+            if fail { throw Failure() }
+            return [RecognizedLine(text: "Heimatverein", box: CGRect(x: 0.1, y: 0.5, width: 0.4, height: 0.05))]
+        }
+    }
+
+    private func makeModel(recognizer: any TextRecognizer = StubRecognizer(fail: false)) async -> (AppModel, ArchiveStore, URL) {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("scanutil-series-\(UUID().uuidString)")
         let store = ArchiveStore(root: dir)
         let model = AppModel(scanner: MockScanner(previewsEnabled: false), store: store, thumbnailSize: 64,
-                             analyze: { _ in SeriesTests.confident }, analyzeBook: SeriesTests.book)
+                             analyze: { _ in SeriesTests.confident }, analyzeBook: SeriesTests.book, recognizer: recognizer)
         await model.connect()
         return (model, store, dir)
     }
@@ -296,5 +306,33 @@ struct SeriesTests {
         model.startSeries(title: "Buch", book: true)
         model.endSeries()
         #expect(!model.seriesIsBook)
+    }
+
+    // MARK: Texterkennung
+
+    @Test func exportWithOCRReportsRecognizedLines() async throws {
+        let (model, _, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "OCR")
+        await model.scan(); await model.scan()
+        var options = ExportOptions(dpi: 72); options.ocr = true
+        let target = dir.appendingPathComponent("ocr.pdf")
+        await model.exportSeries(to: target, options: options)
+        #expect(model.message == nil)
+        #expect(model.lastExportReport == ExportReport(pageCount: 2, ocrFailures: [], recognizedLines: 2))
+        #expect(PDFDocument(url: target)?.page(at: 1)?.string?.contains("Heimatverein") == true)
+        await model.disconnect()
+    }
+
+    @Test func failedOCRKeepsThePDFAndSaysSo() async throws {
+        let (model, _, dir) = await makeModel(recognizer: StubRecognizer(fail: true)); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "OCR")
+        await model.scan()
+        var options = ExportOptions(dpi: 72); options.ocr = true
+        let target = dir.appendingPathComponent("ocr.pdf")
+        await model.exportSeries(to: target, options: options)
+        #expect(model.lastExportURL == target)
+        #expect(PDFDocument(url: target)?.pageCount == 1)
+        #expect(model.message?.contains("Texterkennung schlug bei 1 Seite") == true)
+        await model.disconnect()
     }
 }
