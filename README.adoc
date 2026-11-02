@@ -72,6 +72,24 @@ Originale liegen unter `~/Pictures/Scanutil-Archiv`, über die Umgebungsvariable
 Mit `SCANUTIL_MOCK=1` läuft die App ohne Scanner.
 Beenden mit Cmd-Q setzt die Schärfe im Gerät auf den Standardwert zurück.
 
+== Tests
+
+`swift test` im Ordner `app/` führt alle Tests ohne Scanner aus.
+
+[cols="1,2"]
+|===
+| Was | Wie abgesichert
+
+| Archiv, Prüfsumme, Korrekturen speichern | Unit-Tests, auch Manipulation und Überschreibschutz
+| Winkelmessung, Renderer | Unit-Tests mit künstlichen Textseiten, auch Vorzeichen und leere Ecken
+| `AppModel` mit Mock-Scanner | Tests mit fester Analyse (Abläufe, Handkorrektur gegen Automatik, Neustart)
+| Ganze Kette mit echter Analyse | Integrationstests mit einem Mock, der eine künstliche schiefe Textseite liefert
+| Gerenderte Ansichten | Tests schreiben Bilder (`SCANUTIL_SNAPSHOT_DIR`), die man ansieht. Schalter und Regler erscheinen darin als Platzhalter.
+|===
+
+*Nicht automatisch abgesichert:* Bedienung der Oberfläche (Klicken, Ziehen, Leertaste), die Hardware selbst und die Eichung der Sicherheitsschwelle an mehr als den bisherigen echten Vorlagen.
+Die Tests wurden mit absichtlich eingebauten Fehlern (umgedrehte Vorzeichen) geprüft: Sie schlagen dann fehl.
+
 == Prototyp
 
 Verzeichnis `prototype/`, nur für macOS mit Apple Silicon.

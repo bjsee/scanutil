@@ -1,5 +1,6 @@
 import CoreGraphics
 import Testing
+import TestSupport
 @testable import ImagingKit
 
 @Suite("SkewEstimator")

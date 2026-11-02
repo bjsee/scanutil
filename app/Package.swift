@@ -21,9 +21,11 @@ let package = Package(
         .target(name: "ScanutilUI", dependencies: ["ScannerKit", "ArchiveKit", "ImagingKit"]),
         .executableTarget(name: "scanutil-cli", dependencies: ["ScannerKit", "ArchiveKit", "ImagingKit"]),
         .executableTarget(name: "Scanutil", dependencies: ["ScanutilUI"]),
+        // Gemeinsame Hilfen für die Tests: künstliche Seiten ohne Scanner und ohne Dateien.
+        .target(name: "TestSupport", dependencies: ["ScannerKit"], path: "Tests/TestSupport"),
         .testTarget(name: "ScannerKitTests", dependencies: ["ScannerKit"]),
-        .testTarget(name: "ImagingKitTests", dependencies: ["ImagingKit"]),
+        .testTarget(name: "ImagingKitTests", dependencies: ["ImagingKit", "TestSupport"]),
         .testTarget(name: "ArchiveKitTests", dependencies: ["ArchiveKit", "ScannerKit", "ImagingKit"]),
-        .testTarget(name: "ScanutilUITests", dependencies: ["ScanutilUI", "ScannerKit", "ArchiveKit", "ImagingKit"]),
+        .testTarget(name: "ScanutilUITests", dependencies: ["ScanutilUI", "ScannerKit", "ArchiveKit", "ImagingKit", "TestSupport"]),
     ]
 )

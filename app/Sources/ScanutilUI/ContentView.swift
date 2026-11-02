@@ -126,7 +126,7 @@ public struct ContentView: View {
     }
 }
 
-private struct ThumbnailCell: View {
+struct ThumbnailCell: View {
     let item: ScanItem
     let selected: Bool
     let needsReview: Bool
@@ -151,7 +151,7 @@ private struct ThumbnailCell: View {
 }
 
 /// Detailansicht eines Scans mit Korrekturen. Alle Änderungen betreffen nur die gespeicherten Parameter, nicht das Original.
-private struct ScanDetailView: View {
+struct ScanDetailView: View {
     @Bindable var model: AppModel
     let item: ScanItem
 

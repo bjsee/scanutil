@@ -1,6 +1,19 @@
 import CoreGraphics
 import Foundation
 
+/// Ein vom Mock gelieferte Aufnahme: kodiertes Bild und seine Maße.
+public struct MockImage: Sendable {
+    public let data: Data
+    public let width: Int
+    public let height: Int
+
+    public init(data: Data, width: Int, height: Int) {
+        self.data = data
+        self.width = width
+        self.height = height
+    }
+}
+
 /// Scanner ohne Hardware für Tests und Entwicklung.
 /// Liefert ein künstliches Testbild und merkt sich die Aufrufe.
 public final class MockScanner: ScannerPort, @unchecked Sendable {
@@ -18,19 +31,22 @@ public final class MockScanner: ScannerPort, @unchecked Sendable {
     private let failure: ScannerError?
     private let captureFailure: ScannerError?
     private let clock: @Sendable () -> Date
+    private let imageProvider: (@Sendable (ScanFormat) throws -> MockImage)?
 
     public init(
         formats: [ScanFormat] = [ScanFormat(width: 640, height: 480), ScanFormat(width: 320, height: 240)],
         device: DeviceInfo = DeviceInfo(name: "Mock-Scanner", identifier: "mock"),
         failure: ScannerError? = nil,
         captureFailure: ScannerError? = nil,
-        clock: @escaping @Sendable () -> Date = { Date() }
+        clock: @escaping @Sendable () -> Date = { Date() },
+        imageProvider: (@Sendable (ScanFormat) throws -> MockImage)? = nil
     ) {
         self.formats = formats
         self.device = device
         self.failure = failure
         self.captureFailure = captureFailure
         self.clock = clock
+        self.imageProvider = imageProvider
     }
 
     /// Aufnahmen in der Reihenfolge ihres Auslösens.
@@ -59,6 +75,12 @@ public final class MockScanner: ScannerPort, @unchecked Sendable {
     fileprivate func recordClose() { lock.withLock { closed += 1 } }
     fileprivate var captureError: ScannerError? { captureFailure }
     fileprivate var now: Date { clock() }
+
+    /// Bild der nächsten Aufnahme: das vom Lieferanten vorgegebene oder ein künstlicher Verlauf.
+    fileprivate func image(for format: ScanFormat) throws -> MockImage {
+        if let imageProvider { return try imageProvider(format) }
+        return MockImage(data: try Self.testImage(width: format.width, height: format.height), width: format.width, height: format.height)
+    }
 
     fileprivate static func testImage(width: Int, height: Int) throws -> Data {
         guard let context = CGContext(
@@ -107,9 +129,9 @@ private final class MockSession: ScanSession, @unchecked Sendable {
         if let error = owner.captureError { throw error }
         guard !lock.withLock({ isClosed }) else { throw ScannerError.deviceNotFound }
         owner.record(.init(format: format, settings: settings))
-        let data = try MockScanner.testImage(width: format.width, height: format.height)
+        let image = try owner.image(for: format)
         return Capture(
-            imageData: data, width: format.width, height: format.height,
+            imageData: image.data, width: image.width, height: image.height,
             metadata: CaptureMetadata(device: device, requestedFormat: format, capturedAt: owner.now, sharpness: settings.sharpness)
         )
     }

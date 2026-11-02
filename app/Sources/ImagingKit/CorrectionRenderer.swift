@@ -31,9 +31,14 @@ public enum CorrectionRenderer {
             let center = CGPoint(x: size.width / 2, y: size.height / 2)
             // Im Uhrzeigersinn: bei nach oben zeigender y-Achse ein negativer Winkel.
             let radians = -corrections.rotation.degrees * .pi / 180
-            let transform = CGAffineTransform(translationX: -center.x, y: -center.y)
-                .rotated(by: radians)
-                .translatedBy(x: center.x, y: center.y)
+            // Drehung um den Mittelpunkt, ausdrücklich als Matrix: Verkettungen von `rotated` und `translatedBy`
+            // ergaben eine Drehung um den Ursprung und damit leere Ecken im Ergebnis.
+            let cosA = CGFloat(cos(radians)), sinA = CGFloat(sin(radians))
+            let transform = CGAffineTransform(
+                a: cosA, b: sinA, c: -sinA, d: cosA,
+                tx: center.x - center.x * cosA + center.y * sinA,
+                ty: center.y - center.x * sinA - center.y * cosA
+            )
             let inner = largestInscribedRect(width: size.width, height: size.height, angle: abs(radians))
             let crop = CGRect(x: center.x - inner.width / 2, y: center.y - inner.height / 2, width: inner.width, height: inner.height)
             ci = ci.transformed(by: transform).cropped(to: crop)

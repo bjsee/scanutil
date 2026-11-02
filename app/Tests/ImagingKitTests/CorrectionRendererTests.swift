@@ -1,5 +1,6 @@
 import CoreGraphics
 import Testing
+import TestSupport
 @testable import ImagingKit
 
 @Suite("CorrectionRenderer")
@@ -61,5 +62,39 @@ struct CorrectionRendererTests {
     @Test func inscribedRectWithoutRotationIsFullSize() {
         let size = CorrectionRenderer.largestInscribedRect(width: 300, height: 200, angle: 0)
         #expect(size.width == 300 && size.height == 200)
+    }
+
+    /// Liest die Pixel in den Ecken und in der Mitte aus: nach Drehung und Beschnitt darf nichts leer oder transparent sein.
+    private func cornerPixels(_ image: CGImage) -> [(r: UInt8, g: UInt8, b: UInt8, a: UInt8)] {
+        let w = image.width, h = image.height
+        var data = [UInt8](repeating: 0, count: w * h * 4)
+        data.withUnsafeMutableBytes { buffer in
+            let context = CGContext(data: buffer.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                    space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        }
+        let points = [(2, 2), (w - 3, 2), (2, h - 3), (w - 3, h - 3), (w / 2, h / 2)]
+        return points.map { x, y in let i = (y * w + x) * 4; return (data[i], data[i + 1], data[i + 2], data[i + 3]) }
+    }
+
+    @Test(arguments: [-12.0, -3.0, 3.0, 8.0, 12.0])
+    func rotationLeavesNoEmptyCorners(degrees: Double) throws {
+        // Eine ganz weiße Seite: jedes nicht weiße oder transparente Pixel stammt aus dem Rand der Drehung.
+        let white = SyntheticPage.blank(width: 1200, height: 900, value: 255)
+        let corrections = Corrections(rotation: RotationCorrection(degrees: degrees, enabled: true))
+        let result = try #require(CorrectionRenderer.render(white, corrections: corrections))
+        for (index, pixel) in cornerPixels(result).enumerated() {
+            #expect(pixel.a == 255 && pixel.r == 255 && pixel.g == 255 && pixel.b == 255, "Pixel \(index) bei \(degrees)°: \(pixel)")
+        }
+    }
+
+    @Test func croppedAndRotatedLeavesNoEmptyCorners() throws {
+        let white = SyntheticPage.blank(width: 1200, height: 900, value: 255)
+        let quad = Quad(topLeft: .init(x: 0.1, y: 0.1), topRight: .init(x: 0.9, y: 0.1), bottomRight: .init(x: 0.9, y: 0.9), bottomLeft: .init(x: 0.1, y: 0.9))
+        let corrections = Corrections(crop: CropCorrection(quad: quad, enabled: true), rotation: RotationCorrection(degrees: 7, enabled: true))
+        let result = try #require(CorrectionRenderer.render(white, corrections: corrections))
+        for (index, pixel) in cornerPixels(result).enumerated() {
+            #expect(pixel.a == 255 && pixel.r == 255, "Pixel \(index): \(pixel)")
+        }
     }
 }
