@@ -5,8 +5,9 @@
 Open-Source-Scannersoftware für den CZUR ET24 Pro unter macOS.
 Entwickelt für die Digitalisierung historischer Vorlagen des Heimatvereins Mulsum 1524 e.V.
 
-*Status:* Phase 1 (Machbarkeit) abgeschlossen, Phase 2 wartet auf Freigabe.
-Es gibt noch keine Anwendung, nur einen Hardware-Prototyp.
+*Status:* Phase 2 läuft.
+Technologie: Swift (ADR 0003).
+Es gibt Hardwarezugriff, Archivspeicherung und ein Kommandozeilenwerkzeug, aber noch keine Oberfläche.
 
 == Kernergebnis
 
@@ -28,6 +29,34 @@ Details und Einschränkungen stehen in link:docs/feasibility.adoc[docs/feasibili
 |===
 
 Jede Aussage trägt eine Herkunft (Hersteller, Gerät, Dritte) und einen Status (Nachgewiesen, Wahrscheinlich, Ungeklärt, Nicht möglich).
+
+== Anwendung
+
+Verzeichnis `app/`, Swift Package (Swift 6, macOS 14 oder neuer).
+
+[cols="1,2"]
+|===
+| Modul | Aufgabe
+
+| `ScannerKit` | Schnittstelle `ScannerPort`, `ET24Scanner` (AVFoundation, IOKit), `MockScanner` für Tests
+| `ArchiveKit` | Archiv: unveränderte Originale, schreibgeschützt, mit SHA-256, Eintrag als JSON
+| `CUVC` | kleine C-Brücke für die UVC-Controls (Schärfe)
+| `scanutil-cli` | Werkzeug für den Durchstich
+|===
+
+[source,sh]
+----
+cd app
+swift build
+swift test
+.build/debug/scanutil-cli formats
+.build/debug/scanutil-cli capture ~/Archiv        # 5696x4272, Schärfe 0
+.build/debug/scanutil-cli verify ~/Archiv
+.build/debug/scanutil-cli capture /tmp/test --mock
+----
+
+Die CZUR-App muss beendet sein.
+Beim ersten Start fragt macOS nach dem Kamerazugriff.
 
 == Prototyp
 
