@@ -1,10 +1,21 @@
+import AppKit
 import ArchiveKit
 import ScannerKit
 import ScanutilUI
 import SwiftUI
 
+/// Macht aus der Binärdatei ein reguläres Programm mit Tastaturfokus. Ohne das bekommt eine nicht gebündelte
+/// App keine Tasteneingaben, sie landen im Terminal, aus dem sie gestartet wurde.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate()
+    }
+}
+
 @main
 struct ScanutilApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var model: AppModel
 
     init() {

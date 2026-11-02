@@ -30,6 +30,8 @@ public final class AppModel {
     public private(set) var message: String?
     public private(set) var captureFormat: ScanFormat?
     public private(set) var previewFormat: ScanFormat?
+    /// Dauer des letzten Scans vom Tastendruck bis zur archivierten Miniatur, ohne den Neustart der Vorschau.
+    public private(set) var lastScanDuration: Duration?
 
     public var archiveURL: URL { store.root }
     public var lastScan: ScanItem? { scans.first }
@@ -112,6 +114,7 @@ public final class AppModel {
         guard status == .ready, let format = captureFormat else { return }
         status = .capturing
         message = nil
+        let started = ContinuousClock.now
         await stopPreview()
         do {
             let capture = try await scanner.capture(format: format, settings: .archival)
@@ -119,6 +122,7 @@ public final class AppModel {
             let store = self.store, size = thumbnailSize
             let thumb = await Task.detached { store.thumbnail(for: record, maxPixelSize: size) }.value
             scans.insert(ScanItem(record: record, thumbnail: thumb), at: 0)
+            lastScanDuration = ContinuousClock.now - started
             status = .ready
         } catch {
             // Das Gerät ist meist noch da, der Fehler gehört an den Anfang der Oberfläche, nicht in einen Dialog.

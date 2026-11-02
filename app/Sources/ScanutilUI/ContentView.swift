@@ -4,6 +4,7 @@ import SwiftUI
 
 public struct ContentView: View {
     @Bindable var model: AppModel
+    @State private var keyMonitor = SpaceKeyMonitor()
 
     public init(model: AppModel) {
         self.model = model
@@ -21,6 +22,10 @@ public struct ContentView: View {
             statusBar
         }
         .frame(minWidth: 900, minHeight: 560)
+        // Die Leertaste löst den Scan aus. Als Tastenkürzel der Schaltfläche kommt sie nicht an,
+        // weil das Fokussystem eine Taste ohne Modifikator abfängt, deshalb ein Monitor auf AppKit-Ebene.
+        .onAppear { keyMonitor.start { Task { await model.scan() } } }
+        .onDisappear { keyMonitor.stop() }
         .task {
             await model.connect()
         }
@@ -81,7 +86,6 @@ public struct ContentView: View {
             } label: {
                 Label("Scannen", systemImage: "camera.shutter.button")
             }
-            .keyboardShortcut(.space, modifiers: [])
             .disabled(model.status != .ready)
             .help("Leertaste")
 
@@ -90,7 +94,7 @@ public struct ContentView: View {
                 if let message = model.message {
                     Text(message).font(.caption).foregroundStyle(.red)
                 } else if let format = model.captureFormat {
-                    Text("Aufnahme \(format.description), Schärfe 0 (Archivmodus)").font(.caption).foregroundStyle(.secondary)
+                    Text("Aufnahme \(format.description), Schärfe 0 (Archivmodus)" + durationText).font(.caption).foregroundStyle(.secondary)
                 }
             }
             Spacer()
@@ -100,6 +104,12 @@ public struct ContentView: View {
             .buttonStyle(.link)
         }
         .padding(10)
+    }
+
+    private var durationText: String {
+        guard let d = model.lastScanDuration else { return "" }
+        let seconds = Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18
+        return String(format: " · letzter Scan %.1f s", seconds)
     }
 
     private var statusText: String {
@@ -137,5 +147,27 @@ private struct ScanRow: View {
                 NSWorkspace.shared.activateFileViewerSelecting([archive.appendingPathComponent(item.record.original.path)])
             }
         }
+    }
+}
+
+/// Fängt die Leertaste ab, solange das Fenster aktiv ist. Lässt sie durch, wenn gerade in ein Textfeld getippt wird.
+@MainActor
+final class SpaceKeyMonitor {
+    private var token: Any?
+
+    func start(_ action: @escaping @MainActor () -> Void) {
+        guard token == nil else { return }
+        token = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let isSpace = event.keyCode == 49 && event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty
+            guard isSpace, !event.isARepeat else { return event }
+            if NSApp.keyWindow?.firstResponder is NSTextView { return event }
+            action()
+            return nil
+        }
+    }
+
+    func stop() {
+        if let token { NSEvent.removeMonitor(token) }
+        token = nil
     }
 }

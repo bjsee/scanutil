@@ -53,6 +53,15 @@ struct AppModelTests {
         await model.stopPreview()
     }
 
+    @Test func scanMeasuresDuration() async {
+        let (model, _, dir) = makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        await model.connect()
+        #expect(model.lastScanDuration == nil)
+        await model.scan()
+        #expect(model.lastScanDuration != nil)
+        await model.stopPreview()
+    }
+
     @Test func scanRestartsPreview() async {
         let (model, _, dir) = makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
         await model.connect()
