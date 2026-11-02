@@ -5,12 +5,14 @@ import ScannerKit
 public enum ArchiveError: Error, Equatable, LocalizedError {
     case alreadyExists(String)
     case notFound(UUID)
+    case documentNotFound(UUID)
     case unreadable(String)
 
     public var errorDescription: String? {
         switch self {
         case .alreadyExists(let path): "Die Datei \(path) existiert bereits und wird nie überschrieben."
         case .notFound(let id): "Der Scan \(id.uuidString) wurde im Archiv nicht gefunden."
+        case .documentNotFound(let id): "Das Dokument \(id.uuidString) wurde im Archiv nicht gefunden."
         case .unreadable(let path): "Die Datei \(path) konnte nicht gelesen werden."
         }
     }
@@ -107,7 +109,7 @@ public struct ArchiveStore: Sendable {
     /// ISO 8601 mit Sekundenbruchteilen, damit Zeitpunkte unverändert wieder eingelesen werden.
     private static let dateStyle = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
 
-    private static func encoder() -> JSONEncoder {
+    static func encoder() -> JSONEncoder {
         let e = JSONEncoder()
         e.outputFormatting = [.prettyPrinted, .sortedKeys]
         e.dateEncodingStrategy = .custom { date, encoder in
@@ -117,7 +119,7 @@ public struct ArchiveStore: Sendable {
         return e
     }
 
-    private static func decoder() -> JSONDecoder {
+    static func decoder() -> JSONDecoder {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .custom { decoder in
             let text = try decoder.singleValueContainer().decode(String.self)
