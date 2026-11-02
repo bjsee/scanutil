@@ -16,9 +16,9 @@ final class AppDriver {
             .appendingPathComponent("build/Scanutil.app")
     }
 
-    init(mode: String, archive: URL) throws {
+    init(mode: String, archive: URL, environment extra: [String: String] = [:]) throws {
         self.archive = archive
-        let environment = ["SCANUTIL_MOCK": mode, "SCANUTIL_ARCHIVE": archive.path]
+        let environment = ["SCANUTIL_MOCK": mode, "SCANUTIL_ARCHIVE": archive.path].merging(extra) { _, new in new }
         let bundle = Self.bundleURL()
         guard FileManager.default.fileExists(atPath: bundle.path) else {
             throw DriverError.bundleMissing(bundle.path)
@@ -72,16 +72,33 @@ final class AppDriver {
 
     // MARK: Elemente finden
 
-    /// Gesucht wird nur im App-Fenster, nie in der Menüleiste (dort stehen zuletzt benutzte Dokumente).
-    var root: AXUIElement? {
+    /// Alle Fenster der App, das Hauptfenster zuerst. Gesucht wird nie in der Menüleiste (dort stehen zuletzt benutzte Dokumente).
+    /// Ein Popover oder ein Dialog kann ein eigenes Fenster sein.
+    var windows: [AXUIElement] {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &value) == .success,
-              let windows = value as? [AXUIElement] else { return nil }
-        return windows.first
+              let windows = value as? [AXUIElement] else { return [] }
+        return windows
     }
 
-    func element(_ identifier: String) -> AXUIElement? { root.flatMap { find($0) { Self.string($0, kAXIdentifierAttribute) == identifier } } }
-    func elements(_ identifier: String) -> [AXUIElement] { root.map { findAll($0) { Self.string($0, kAXIdentifierAttribute) == identifier } } ?? [] }
+    var root: AXUIElement? { windows.first }
+
+    func element(_ identifier: String) -> AXUIElement? {
+        for window in windows { if let hit = find(window, where: { Self.string($0, kAXIdentifierAttribute) == identifier }) { return hit } }
+        return nil
+    }
+
+    func elements(_ identifier: String) -> [AXUIElement] {
+        windows.flatMap { findAll($0) { Self.string($0, kAXIdentifierAttribute) == identifier } }
+    }
+
+    /// Texte aller Elemente mit dieser Kennung, in Reihenfolge der Ansicht. Ein Textelement trägt seinen Text im Wert,
+    /// eine Schaltfläche in der Beschreibung.
+    func labels(_ identifier: String) -> [String] {
+        elements(identifier).map {
+            Self.string($0, kAXValueAttribute) ?? Self.string($0, kAXDescriptionAttribute) ?? Self.string($0, kAXTitleAttribute) ?? ""
+        }
+    }
 
     func find(_ element: AXUIElement, depth: Int = 0, where match: (AXUIElement) -> Bool) -> AXUIElement? {
         if match(element) { return element }
@@ -123,10 +140,30 @@ final class AppDriver {
         return current
     }
 
+    /// Drückt eine Schaltfläche, die einen modalen Dialog öffnet. Der Aufruf kehrt nicht zurück, solange der Dialog offen ist,
+    /// und meldet deshalb einen Fehler, obwohl er gewirkt hat. Das Ergebnis zählt nicht; ob der Dialog da ist, prüft `hasDialog`.
+    func pressOpeningDialog(_ identifier: String) {
+        guard let el = element(identifier) else { return }
+        _ = AXUIElementPerformAction(el, kAXPressAction as CFString)
+    }
+
+    /// Ob ein Dialog der App offen ist. Die Schaltflächen des Speicherdialogs tragen sprachunabhängige Kennungen.
+    var hasDialog: Bool { element("OKButton") != nil }
+
+    /// Bestätigt den Dialog („Sichern“). Gibt `false` zurück, wenn keiner offen ist.
+    @discardableResult
+    func confirmDialog() -> Bool { press("OKButton") }
+
+    /// Bricht den Dialog ab.
+    @discardableResult
+    func cancelDialog() -> Bool { press("CancelButton") }
+
     /// Leertaste an genau diesen Prozess. Nur wenn die App vorn ist, sonst würde sie ins Leere gehen.
     /// Gibt `false` zurück, wenn die App nicht in den Vordergrund kam.
     func pressSpace() -> Bool {
-        guard wait(timeout: 5, { isFrontmost }) else { return false }
+        // Direkt nach dem Beenden einer anderen App landet der Fokus gern woanders: ausdrücklich nach vorn holen.
+        if !isFrontmost { launched?.activate() }
+        guard wait(timeout: 10, { isFrontmost }) else { return false }
         // Eine echte Ereignisquelle, sonst verwirft macOS synthetische Tastenereignisse unter Umständen.
         let source = CGEventSource(stateID: .hidSystemState)
         for down in [true, false] {

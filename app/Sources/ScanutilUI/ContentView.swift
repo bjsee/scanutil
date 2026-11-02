@@ -358,6 +358,8 @@ struct SeriesBar: View {
         panel.allowedContentTypes = [.pdf]
         panel.nameFieldStringValue = series.title + ".pdf"
         panel.message = "Das PDF wird aus den Originalen mit den eingestellten Korrekturen erzeugt."
+        // Für die Oberflächentests: der Dialog öffnet im Testordner statt in den Ordnern des Nutzers.
+        if let dir = ProcessInfo.processInfo.environment["SCANUTIL_EXPORT_DIR"] { panel.directoryURL = URL(fileURLWithPath: dir, isDirectory: true) }
         guard panel.runModal() == .OK, let url = panel.url else { return }
         var options = ExportOptions.archive
         options.ocr = withOCR

@@ -33,6 +33,7 @@ public final class MockScanner: ScannerPort, @unchecked Sendable {
     private let clock: @Sendable () -> Date
     private let imageProvider: (@Sendable (ScanFormat) throws -> MockImage)?
     fileprivate let previewsEnabled: Bool
+    fileprivate let stillPreview: Bool
 
     public init(
         formats: [ScanFormat] = [ScanFormat(width: 640, height: 480), ScanFormat(width: 320, height: 240)],
@@ -41,9 +42,11 @@ public final class MockScanner: ScannerPort, @unchecked Sendable {
         captureFailure: ScannerError? = nil,
         clock: @escaping @Sendable () -> Date = { Date() },
         imageProvider: (@Sendable (ScanFormat) throws -> MockImage)? = nil,
-        previewsEnabled: Bool = true
+        previewsEnabled: Bool = true,
+        stillPreview: Bool = false
     ) {
         self.previewsEnabled = previewsEnabled
+        self.stillPreview = stillPreview
         self.formats = formats
         self.device = device
         self.failure = failure
@@ -121,7 +124,8 @@ private final class MockSession: ScanSession, @unchecked Sendable {
             var shade: CGFloat = 0
             while !Task.isCancelled {
                 if owner.previewsEnabled, let image = Self.previewImage(shade: shade) { continuation.yield(PreviewFrame(image: image)) }
-                shade = (shade + 0.1).truncatingRemainder(dividingBy: 1)
+                // Eine stehende Vorschau ändert sich nie: wie ein ruhig liegendes Buch, die Auto-Auslösung sieht nur Ruhe.
+                if !owner.stillPreview { shade = (shade + 0.1).truncatingRemainder(dividingBy: 1) }
                 try? await Task.sleep(for: .milliseconds(30))
             }
             continuation.finish()
