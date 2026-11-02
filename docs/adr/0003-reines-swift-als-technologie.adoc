@@ -1,0 +1,35 @@
+= ADR 0003: Reines Swift/SwiftUI als Technologie (Variante A)
+:icons: font
+
+*Status:* Entschieden (Verein, 2026-11-02, auf Empfehlung).
+Die Entscheidung gilt, bis der erste Durchstich etwas anderes zeigt.
+
+== Kontext
+
+Der Hardwarezugriff geht nur in Swift oder C (ADR 0001).
+Der Spike (`spike-apple-vision.adoc`) zeigt, dass Vision und Core Image Dokumenterkennung, Perspektivkorrektur und Zuschnitt auch bei einer schwierigen echten Zeitungsseite tragen.
+Die Winkelmessung braucht eigenen Code, die OCR bei Mehrspaltigkeit Tesseract.
+Die Alternativen (B bis E) stehen in `architecture.adoc`.
+
+== Entscheidung
+
+Die Anwendung wird als native macOS-App in Swift und SwiftUI gebaut (Variante A).
+Bildkorrektur und OCR laufen, wo nötig, als externe Prozesse (ADR 0002).
+
+== Folgen
+
+* Ein Prozess, ein App-Bundle, keine JVM, kein lokaler Server.
+* Die Kameraberechtigung gehört einer App.
+* Die Anwendung ist an macOS gebunden.
+Andere Scanner brauchen ein weiteres Modul hinter derselben Schnittstelle.
+* Eigener Code für die Winkelmessung (Projektionsprofil oder Hough).
+* Tesseract (mit deutschem Modell) und OCRmyPDF werden als Prozess aufgerufen.
+PDF/A bleibt ein externer Schritt.
+* Die Weitergabe an andere Macs braucht Signierung, für den eigenen Rechner reicht eine lokale Signatur.
+* Der Verein braucht Swift-Kenntnisse für die Pflege.
+Der Wechsel von Kotlin gilt als leicht, ist aber eine Annahme.
+
+== Verworfen
+
+* *B bis E* aus `architecture.adoc`.
+Variante E (Spring Boot mit htmx) bleibt die Rückfalloption, falls mehrere Rechner oder gleichzeitiger Zugriff gebraucht werden.

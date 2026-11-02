@@ -111,12 +111,12 @@ Die Qualität wurde nicht geprüft.
 | Ideen und Teile sind übernehmbar. Fremder Code in Swift passt nur zur Swift-Variante.
 
 | Zuschnitt, Schräglage, Seitentrennung
-| pyScanTailor-CLI, ScanTailor Spectre, unpaper
-| Als externe Kommandozeilenwerkzeuge denkbar. Qualität bei historischen Vorlagen ungeprüft.
+| Apple Vision und Core Image, eigene Winkelmessung
+| Der Spike zeigt: Vision schneidet gut zu, unpaper (Standardeinstellungen) erkennt auf der Zeitung keine Drehung, ScanTailor Spectre ist nur GUI, pyScanTailor hat kein Release. Siehe `spike-apple-vision.adoc`.
 
 | OCR, PDF/A
 | Tesseract mit OCRmyPDF
-| Passt zum Plan, MPL-2.0 ist unproblematisch als Prozessaufruf.
+| Passt zum Plan, MPL-2.0 ist unproblematisch als Prozessaufruf. Bei der Zeitung hat Tesseract die Spaltenstruktur besser erhalten als Vision (Stichprobe).
 
 | Archivverwaltung
 | Paperless-ngx

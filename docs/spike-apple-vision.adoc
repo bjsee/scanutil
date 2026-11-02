@@ -115,9 +115,26 @@ Die Fehlerquote über die ganze Seite, der Vergleich bei historischen Zeitungen 
 Das deutsche Modell `deu` war im System nicht installiert und wurde in ein Arbeitsverzeichnis geladen, ohne die Installation zu verändern.
 
 *Nicht geprüft:*
-ScanTailor und unpaper (nicht installiert, die Installation wartet auf deine Zustimmung).
 Fotos ohne Text.
 Textrichtung bei gedrehten Vorlagen.
+
+=== unpaper und ScanTailor (Gerät)
+
+*Nachgewiesen:*
+
+* unpaper 7.0.0 (Homebrew, GPL-2.0-or-later) erkennt auf der Zeitungsseite *keine* Drehung.
+Auf der Rohaufnahme (Neigung 8,7 Grad) meldet es „out of deviation range - NO ROTATING“, der Standardbereich liegt bei etwa 5 Grad.
+Auf dem Vision-Zuschnitt (1,25 Grad Resttilt) und auf einer um 1,25 Grad weiter gedrehten Fassung (2,5 Grad) meldet es jeweils 0,000000 Drehung.
+Das Projektionsprofil misst vor und nach unpaper unverändert 1,25 beziehungsweise 2,50 Grad.
+* Die Messung nutzt die Standardeinstellungen.
+Die Optionen für Suchbereich und Kantenerkennung wurden nicht durchprobiert.
+unpaper sucht den Winkel an Seitenrändern und nicht an Textzeilen.
+* unpaper liest kein RGBA-PNG, die Eingabe muss RGB sein.
+* ScanTailor Spectre ist eine GUI-Anwendung.
+Das README nennt keine Kommandozeile, als externer Prozess ist es deshalb nach bisherigem Stand nicht brauchbar.
+* pyScanTailor hat kein veröffentlichtes Release.
+Eine Installation braucht Python 3.14, PySide6 und ein lokal zu bauendes Paket (`jbig2`).
+Es wurde nicht installiert.
 
 == Was das für die Technologiewahl heißt
 
@@ -137,6 +154,6 @@ Die Winkelmessung muss aber eigener Code sein, weil Vision kleine Winkel auf nul
 
 == Empfohlene Anschlussprüfung
 
-. Dieselbe Zeitungsvorlage mit ScanTailor (CLI) und unpaper als externe Prozesse bearbeiten und vergleichen (Installation nötig).
+. Die Winkelmessung per Projektionsprofil als eigenen Baustein umsetzen und an weiteren Vorlagen prüfen.
 . OCR-Genauigkeit von Vision und Tesseract mit einem Referenztext zählen.
 . Eine Vorlage mit Fotos ohne Text und eine gedrehte Vorlage (90 Grad) prüfen.

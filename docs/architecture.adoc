@@ -2,8 +2,9 @@
 :toc:
 :icons: font
 
-*Status:* Vorschlag.
-Nicht freigegeben, Phase 2 beginnt erst mit der Zustimmung des Vereins.
+*Status:* Variante A entschieden (link:adr/0003-reines-swift-als-technologie.adoc[ADR 0003]).
+Die Varianten B bis E bleiben als Begründung der Entscheidung stehen.
+Die Beschreibung der Bausteine für A folgt am Ende des Dokuments.
 
 == Randbedingungen aus Phase 1
 
@@ -132,7 +133,10 @@ Abhilfe: Der Swift-Adapter legt ein Fenster mit einer eingebetteten Webansicht (
 * Die Bedienung bei hunderten Scans hintereinander ist mit htmx gut möglich, wirkt aber nicht so flüssig wie eine reine Client-App.
 *Ungeprüft:* Das zeigt erst der vertikale Durchstich.
 
-== Empfehlung
+== Empfehlung (vor dem Spike)
+
+Diese Empfehlung stammt aus der Zeit vor dem Spike mit Apple Vision.
+Sie ist durch die Entscheidung für Variante A überholt und bleibt zur Nachvollziehbarkeit stehen.
 
 *Variante E: Swift-Adapter für die Hardware, Spring Boot (Kotlin) mit Thymeleaf und htmx für Oberfläche und Kern, eine JavaScript-Insel für den Editor.*
 
@@ -212,3 +216,28 @@ Das Original-JPEG des Scanners wäre nur über libusb erreichbar und ist ungepr�
 . Vertikaler Durchstich: Adapter nimmt auf, Kern speichert Original, Oberfläche zeigt es an.
 . Automatisches Zuschneiden und Schräglagenkorrektur.
 . OCR mit Tesseract, PDF-Export.
+
+== Bausteine der entschiedenen Variante A
+
+Eine App, mehrere Swift-Module (Swift Package Manager), klare Grenzen:
+
+[cols="1,2"]
+|===
+| Modul | Aufgabe
+
+| `ScannerKit` | Protokoll `ScannerPort`, Umsetzung für den ET24 Pro (AVFoundation, IOKit), Mock-Scanner für Tests
+| `ImagingKit` | Dokumenterkennung (Vision), Perspektive und Drehung (Core Image), Winkelmessung (eigener Code), nichtdestruktive Korrekturparameter
+| `OCRKit` | Aufruf von Tesseract und OCRmyPDF als Prozess, Erkennung der Werkzeuge und ihrer Versionen
+| `ArchiveKit` | Scanverwaltung, Metadaten, Prüfsummen, Export in offene Formate
+| `App` | SwiftUI-Oberfläche, Serien, Review, Tastaturkürzel
+|===
+
+Die Module hängen nur in einer Richtung voneinander ab, `App` oben.
+`ScannerKit` kennt weder Bildverarbeitung noch Archiv.
+
+=== Erste Schritte
+
+. Projektgerüst mit den Modulen und einem Mock-Scanner.
+. Vertikaler Durchstich: `ScannerKit` nimmt auf (mit Schärfe 0), `ArchiveKit` speichert das Original mit Prüfsumme, `App` zeigt es an.
+. `ImagingKit`: Zuschnitt und Winkelkorrektur als Parameter je Scan, Original unverändert.
+. `OCRKit`: Tesseract mit deutschem Modell, durchsuchbares PDF.
