@@ -1,0 +1,84 @@
+= Spike: Apple Vision und Core Image für Zuschnitt, Schräglage und OCR
+:toc:
+:icons: font
+
+Stand: 2026-11-02.
+Ziel: prüfen, wie viel die Apple-Frameworks für die Bildverarbeitung leisten, bevor die Technologie festgelegt wird.
+Frage: Schmerzt das Fehlen von OpenCV in einer reinen Swift-Anwendung (Variante A)?
+
+== Kennzeichnung
+
+Alle Angaben wurden am Gerät des Vereins unter macOS 26.6.2 (Apple Silicon) gemessen, soweit nicht anders vermerkt.
+Programm: `prototype/spike_vision.swift`.
+Es verwendet `VNDetectDocumentSegmentationRequest`, `CIPerspectiveCorrection`, `CIStraightenFilter` und `VNRecognizeTextRequest`.
+
+== Wichtige Einschränkungen
+
+* *Echte Vorlage: nur eine.*
+Ein aufgeschlagenes Buch mit modernem Druck.
+* *Schiefe Vorlagen sind synthetisch.*
+Sie wurden aus einem Ausschnitt desselben Buchs erzeugt (`prototype/make_skewed.py`), gedreht um +7, -4 und +12 Grad, mit zufällig ausgefransten Rändern auf dunklem Grund.
+Es fehlen Vergilbung, echte Risse, Spalten, Überschriften, Fotos und Flecken.
+* *Messung der Schräglage:* Vision liefert Winkel nur mit begrenzter Auflösung.
+Ein unabhängiges Projektionsprofil (`prototype/measure_skew.py`) bestätigt Größenordnung und Beträge auf etwa 0,2 Grad.
+Aussagen unterhalb von 0,1 Grad sind nicht belegt.
+* *Konfidenzwerte* von Vision (0,99 für die Dokumenterkennung, 1,00 für OCR) sind nicht aussagekräftig, weil sie in allen Läufen gleich hoch lagen.
+
+== Ergebnisse
+
+=== Dokumenterkennung und Zuschnitt (Gerät)
+
+*Nachgewiesen:*
+
+* Das Buch (5696x4272, aufgeschlagen auf dunklem Grund) wird als ein Dokument erkannt.
+Der Zuschnitt mit Perspektivkorrektur ergibt 3264x2792 Pixel und sieht sauber aus.
+* Die drei synthetischen, schiefen Vorlagen mit unregelmäßigem Rand werden ebenfalls erkannt.
+Die Neigung der Quadratkante weicht um etwa 1 Grad von der wahren Drehung ab (6,0 statt 7, -3,0 statt -4, 11,5 statt 12).
+* Laufzeit: Erkennung 0,15 bis 1 s (erster Aufruf inklusive Modellladen), Korrektur und Schreiben 0,07 bis 0,6 s.
+
+=== Schräglage (Gerät)
+
+*Nachgewiesen:*
+
+* Die Perspektivkorrektur allein reicht nicht.
+Danach bleiben Zeilen um 2,9 / 0,95 / 2,65 Grad schief (Projektionsprofil), Vision misst 3,09 / 1,05 / 2,87 Grad.
+Das Quadrat aus der Dokumenterkennung ist nur auf etwa 1 Grad genau, und die Korrektur verzerrt leicht.
+* Ein zweiter Schritt behebt das: den Medianwinkel der OCR-Zeilen messen und um diesen Winkel zurückdrehen (`CIStraightenFilter`).
+Danach messen beide Verfahren 0,00 Grad Restwinkel in allen drei Fällen.
+Das Vorzeichen muss geprüft werden, die Probe mit beiden Vorzeichen im Spike wählt das bessere.
+* Beim Buch bleibt ein Winkelstreuung von etwa ±3,5 Grad zwischen einzelnen Zeilen (Wölbung zur Buchmitte).
+Das Medianverfahren ist dort für den Gesamtwinkel brauchbar, entzerrt die Wölbung aber nicht.
+
+=== OCR (Gerät)
+
+*Nachgewiesen:*
+
+* Vision-OCR mit Sprache `de-DE` liest die Seite des Buchs in 1,5 s (82 Zeilen).
+Die ersten sechs Zeilen sind wortgetreu richtig, einschließlich Silbentrennung und Umlauten.
+* Die Zahl der Fehler im ganzen Text wurde nicht ausgezählt.
+
+*Ungeklärt:*
+
+* Genauigkeit bei historischem Druck, vergilbtem Papier, Zeitungsdruck, Fraktur und Handschrift.
+* Vergleich mit Tesseract.
+* Textrichtung bei 90-, 180- und 270-Grad-gedrehten Vorlagen.
+
+== Was das für die Technologiewahl heißt
+
+*Wahrscheinlich:*
+Für Vorlagen mit Text und rechteckigem oder ausgefranstem Rand tragen Vision und Core Image die Schritte Dokumenterkennung, Perspektivkorrektur, Winkelmessung aus Textzeilen und deutsche OCR.
+Der Mangel an OpenCV schmerzt für diese Fälle weniger als befürchtet.
+Das gilt für die untersuchte Vorlagenart und nicht darüber hinaus.
+
+*Ungeklärt:*
+
+* Vorlagen ohne Text, etwa Fotos: die Winkelmessung aus Textzeilen entfällt, der Winkel müsste aus Rändern oder Kanten kommen.
+* Echte Zeitungsausschnitte mit mehreren Spalten, Überschriften und Fotos.
+* Buchentzerrung (gewölbte Seiten) und Seitentrennung.
+* Perspektivfehler bei stark verformtem Papier.
+
+== Empfohlene Anschlussprüfung
+
+. Eine echte Zeitungsvorlage (mit Spalten, Foto, ausgefranstem Rand) mit dem Spike prüfen.
+. Dieselbe Vorlage mit ScanTailor (CLI) und unpaper als externe Prozesse bearbeiten und vergleichen.
+. OCR-Genauigkeit von Vision und Tesseract an derselben Vorlage zählen.
