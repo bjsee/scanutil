@@ -198,18 +198,40 @@ Quelle: `prototype/uvc_controls.c`, nur `GET_CUR`, `GET_MIN`, `GET_MAX`, `GET_RE
 | Zoom absolut | 0 | 0 | 16384 | 1 | 0
 |===
 
-*Wahrscheinlich:*
-Die im Gerät eingestellte Schärfe (12 von 15) ist die Ursache der gemessenen Nachschärfung.
-Das ist nicht geprüft, sondern aus Wert und Messung geschlossen.
+*Nachgewiesen:*
+Die Controls lassen sich über denselben Weg schreiben (`SET_CUR`, Rücklesen bestätigt den Wert).
+Bisher wurde nur die Schärfe geschrieben, und danach auf den Ausgangswert 12 zurückgesetzt.
+
+*Nachgewiesen:*
+Die Schärfe (Default 12 von 15) wird im Gerät angewendet und ist die Ursache der gemessenen Nachschärfung.
+Mit Schärfe 0 sinkt die MTF50 von 3,7 auf etwa 2,5 lp/mm.
+Der Wert blieb während der Aufnahmen auf 0 stehen.
+
+[cols="1,1,1,1"]
+|===
+| Format | MTF50 bei Schärfe 12 (lp/mm) | MTF50 bei Schärfe 0 (lp/mm) | MTF10 bei Schärfe 0 (lp/mm)
+
+| 2592x1944 | 3,6 bis 3,8 | 2,4 | 6,8 bis 8,2 (über Nyquist)
+| 4608x3456 | 3,75 | 2,46 | 5,4 bis 6,2
+| 5696x4272 | 3,70 | 2,51 bis 2,53 | 5,2
+|===
+
+*Nachgewiesen:*
+Auch ohne Nachschärfung ist die MTF50 bei allen drei Formaten gleich (etwa 2,5 lp/mm).
+Das System ist bei 5696x4272 überabgetastet: Die MTF50 liegt bei 0,20 Zyklen je Pixel, die Nyquist-Grenze bei 0,5.
 
 *Ungeklärt:*
-Die aktuelle Netzfrequenz steht auf 60 Hz, der Default auf 50 Hz.
-Für Deutschland wäre 50 Hz richtig, bei falscher Einstellung droht Flackern unter Kunstlicht.
-Unklar ist, ob die CZUR-Software diesen Wert gesetzt hat und ob er dauerhaft im Gerät bleibt.
+Ob das Limit vom Objektiv oder von der Tintenkante des Ausdrucks stammt.
+Siehe Testchart-Messung.
 
 *Ungeklärt:*
-Ob sich die Controls schreiben lassen und ob die Werte flüchtig sind.
-Es wurde bisher nichts geschrieben.
+Die Netzfrequenz stand bei der ersten Abfrage auf 60 Hz (Wert 2) und bei einer späteren auf 50 Hz (Wert 1, Default).
+Es wurde nichts an diesem Wert geschrieben.
+Die Ursache der Änderung ist unbekannt.
+Für Deutschland ist 50 Hz richtig.
+
+*Ungeklärt:*
+Ob geschriebene Werte ein Ausstecken oder einen Neustart des Geräts überstehen.
 
 == Offizielles SDK (Hersteller)
 
