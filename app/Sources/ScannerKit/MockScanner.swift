@@ -32,6 +32,7 @@ public final class MockScanner: ScannerPort, @unchecked Sendable {
     private let captureFailure: ScannerError?
     private let clock: @Sendable () -> Date
     private let imageProvider: (@Sendable (ScanFormat) throws -> MockImage)?
+    fileprivate let previewsEnabled: Bool
 
     public init(
         formats: [ScanFormat] = [ScanFormat(width: 640, height: 480), ScanFormat(width: 320, height: 240)],
@@ -39,8 +40,10 @@ public final class MockScanner: ScannerPort, @unchecked Sendable {
         failure: ScannerError? = nil,
         captureFailure: ScannerError? = nil,
         clock: @escaping @Sendable () -> Date = { Date() },
-        imageProvider: (@Sendable (ScanFormat) throws -> MockImage)? = nil
+        imageProvider: (@Sendable (ScanFormat) throws -> MockImage)? = nil,
+        previewsEnabled: Bool = true
     ) {
+        self.previewsEnabled = previewsEnabled
         self.formats = formats
         self.device = device
         self.failure = failure
@@ -117,7 +120,7 @@ private final class MockSession: ScanSession, @unchecked Sendable {
         previewTask = Task {
             var shade: CGFloat = 0
             while !Task.isCancelled {
-                if let image = Self.previewImage(shade: shade) { continuation.yield(PreviewFrame(image: image)) }
+                if owner.previewsEnabled, let image = Self.previewImage(shade: shade) { continuation.yield(PreviewFrame(image: image)) }
                 shade = (shade + 0.1).truncatingRemainder(dividingBy: 1)
                 try? await Task.sleep(for: .milliseconds(30))
             }
