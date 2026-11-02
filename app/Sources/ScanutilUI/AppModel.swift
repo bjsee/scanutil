@@ -1,14 +1,34 @@
 import ArchiveKit
 import CoreGraphics
 import Foundation
+import ImagingKit
 import Observation
 import ScannerKit
 
-/// Ein gespeicherter Scan mit Miniatur für die Anzeige.
+/// Ein gespeicherter Scan mit Ansichten und Korrekturen. Das Original auf der Platte bleibt unverändert.
 public struct ScanItem: Identifiable, @unchecked Sendable {
     public let record: ScanRecord
+    /// Verkleinerte Ansicht des unveränderten Originals.
     public let thumbnail: CGImage?
+    public var corrections: Corrections
+    /// Verkleinerte Ansicht mit angewandten Korrekturen.
+    public var corrected: CGImage?
+    public var warnings: [String]
     public var id: UUID { record.id }
+
+    /// Was die Oberfläche zeigt: mit Korrekturen, wenn es welche gibt.
+    public var display: CGImage? { corrected ?? thumbnail }
+}
+
+/// Ergebnis der automatischen Analyse für die Oberfläche.
+public struct AnalysisResult: @unchecked Sendable {
+    public let corrections: Corrections
+    public let warnings: [String]
+
+    public init(corrections: Corrections, warnings: [String]) {
+        self.corrections = corrections
+        self.warnings = warnings
+    }
 }
 
 /// Zustand und Abläufe der Oberfläche. Kennt weder SwiftUI noch die Hardware, nur `ScannerPort` und `ArchiveStore`.
@@ -35,16 +55,32 @@ public final class AppModel {
     public var archiveURL: URL { store.root }
     public var lastScan: ScanItem? { scans.first }
 
+    /// Scans, deren automatische Analyse noch läuft.
+    public private(set) var analyzing: Set<UUID> = []
+    public var selectedID: UUID?
+    public var selectedItem: ScanItem? { scans.first { $0.id == selectedID } }
+
     private let scanner: any ScannerPort
     private let store: ArchiveStore
     private let thumbnailSize: Int
+    private let analyze: @Sendable (CGImage) -> AnalysisResult
     private var session: (any ScanSession)?
     private var previewTask: Task<Void, Never>?
 
-    public init(scanner: any ScannerPort, store: ArchiveStore, thumbnailSize: Int = 1600) {
+    public init(
+        scanner: any ScannerPort, store: ArchiveStore, thumbnailSize: Int = 1600,
+        analyze: @escaping @Sendable (CGImage) -> AnalysisResult = AppModel.defaultAnalysis
+    ) {
         self.scanner = scanner
         self.store = store
         self.thumbnailSize = thumbnailSize
+        self.analyze = analyze
+    }
+
+    /// Standardanalyse: Dokument erkennen, Winkel messen, sichere Ergebnisse anwenden.
+    public static let defaultAnalysis: @Sendable (CGImage) -> AnalysisResult = { image in
+        let analysis = ImageAnalyzer.analyze(image)
+        return AnalysisResult(corrections: ImageAnalyzer.corrections(from: analysis), warnings: analysis.warnings)
     }
 
     // MARK: Verbinden
@@ -113,9 +149,12 @@ public final class AppModel {
             let record = try store.store(capture)
             let store = self.store, size = thumbnailSize
             let thumb = await Task.detached { store.thumbnail(for: record, maxPixelSize: size) }.value
-            scans.insert(ScanItem(record: record, thumbnail: thumb), at: 0)
+            let item = ScanItem(record: record, thumbnail: thumb, corrections: .none, corrected: nil, warnings: [])
+            scans.insert(item, at: 0)
+            selectedID = item.id
             lastScanDuration = ContinuousClock.now - started
             status = .ready
+            analyzeInBackground(id: item.id)
         } catch {
             message = error.localizedDescription
             status = .ready
@@ -128,8 +167,77 @@ public final class AppModel {
         let store = self.store, size = thumbnailSize
         let items: [ScanItem] = await Task.detached {
             let records = (try? store.allRecords()) ?? []
-            return records.suffix(20).reversed().map { ScanItem(record: $0, thumbnail: store.thumbnail(for: $0, maxPixelSize: size)) }
+            return records.suffix(20).reversed().map { record -> ScanItem in
+                let thumb = store.thumbnail(for: record, maxPixelSize: size)
+                let corrections = (try? store.corrections(for: record.id)) ?? .none
+                let corrected = thumb.flatMap { CorrectionRenderer.render($0, corrections: corrections) }
+                return ScanItem(record: record, thumbnail: thumb, corrections: corrections, corrected: corrected, warnings: [])
+            }
         }.value
         scans = items
+        selectedID = items.first?.id
+    }
+
+    // MARK: Korrekturen
+
+    /// Analysiert einen Scan automatisch und speichert das Ergebnis, außer jemand hat inzwischen von Hand korrigiert.
+    private func analyzeInBackground(id: UUID) {
+        guard let image = scans.first(where: { $0.id == id })?.thumbnail else { return }
+        analyzing.insert(id)
+        let analyze = self.analyze
+        Task {
+            let result = await Task.detached { analyze(image) }.value
+            analyzing.remove(id)
+            guard let index = scans.firstIndex(where: { $0.id == id }) else { return }
+            // Hat der Nutzer in der Zwischenzeit etwas geändert, gilt das und nicht die Automatik.
+            guard scans[index].corrections.revision == 0 else { return }
+            apply(result.corrections, warnings: result.warnings, at: index)
+        }
+    }
+
+    /// Verwirft alle Änderungen und analysiert neu.
+    public func reanalyze(id: UUID) async {
+        guard let index = scans.firstIndex(where: { $0.id == id }), let image = scans[index].thumbnail else { return }
+        analyzing.insert(id)
+        let analyze = self.analyze
+        let result = await Task.detached { analyze(image) }.value
+        analyzing.remove(id)
+        guard let current = scans.firstIndex(where: { $0.id == id }) else { return }
+        apply(result.corrections, warnings: result.warnings, at: current)
+    }
+
+    private func apply(_ corrections: Corrections, warnings: [String], at index: Int) {
+        scans[index].corrections = corrections
+        scans[index].warnings = warnings
+        persistAndRender(index: index)
+    }
+
+    /// Ändert die Korrekturen eines Scans, speichert sie und rendert die Ansicht neu.
+    public func updateCorrections(id: UUID, _ change: (inout Corrections) -> Void) {
+        guard let index = scans.firstIndex(where: { $0.id == id }) else { return }
+        change(&scans[index].corrections)
+        persistAndRender(index: index)
+    }
+
+    public func setRotation(id: UUID, degrees: Double) { updateCorrections(id: id) { $0.setRotation(degrees: degrees) } }
+    public func setRotationEnabled(id: UUID, _ on: Bool) { updateCorrections(id: id) { $0.setRotationEnabled(on) } }
+    public func setCropEnabled(id: UUID, _ on: Bool) { updateCorrections(id: id) { $0.setCropEnabled(on) } }
+    public func setCorrectionsEnabled(id: UUID, _ on: Bool) { updateCorrections(id: id) { $0.setEnabled(on) } }
+
+    private func persistAndRender(index: Int) {
+        let item = scans[index]
+        do {
+            try store.saveCorrections(item.corrections, for: item.id)
+        } catch {
+            message = "Die Korrekturen konnten nicht gespeichert werden: \(error.localizedDescription)"
+        }
+        guard let image = item.thumbnail else { return }
+        let corrections = item.corrections, id = item.id
+        Task {
+            let rendered = await Task.detached { CorrectionRenderer.render(image, corrections: corrections) }.value
+            // Nur übernehmen, wenn inzwischen nicht schon neuere Korrekturen vorliegen.
+            guard let current = scans.firstIndex(where: { $0.id == id }), scans[current].corrections == corrections else { return }
+            scans[current].corrected = rendered
+        }
     }
 }

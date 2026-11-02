@@ -1,5 +1,7 @@
 import ArchiveKit
+import CoreGraphics
 import Foundation
+import ImagingKit
 import ScannerKit
 import Testing
 @testable import ScanutilUI
@@ -7,9 +9,29 @@ import Testing
 @MainActor
 @Suite("AppModel")
 struct AppModelTests {
-    private func makeModel(scanner: MockScanner = MockScanner()) -> (AppModel, MockScanner, URL) {
+    /// Feste Analyse für die Tests: sichere automatische Korrekturen.
+    nonisolated private static let confident = AnalysisResult(
+        corrections: Corrections(
+            crop: CropCorrection(quad: .full, enabled: true, source: .automatic, confidence: 0.9),
+            rotation: RotationCorrection(degrees: 1.5, enabled: true, source: .automatic, confidence: 0.9)
+        ),
+        warnings: []
+    )
+
+    nonisolated private static let unsure = AnalysisResult(
+        corrections: Corrections(
+            crop: CropCorrection(quad: .full, enabled: true, source: .automatic, confidence: 0.9),
+            rotation: RotationCorrection(degrees: 2.5, enabled: false, source: .automatic, confidence: 0.2)
+        ),
+        warnings: ["Die Schräglage ist unsicher."]
+    )
+
+    private func makeModel(
+        scanner: MockScanner = MockScanner(),
+        analyze: @escaping @Sendable (CGImage) -> AnalysisResult = { _ in AppModelTests.confident }
+    ) -> (AppModel, MockScanner, URL) {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("scanutil-ui-\(UUID().uuidString)")
-        let model = AppModel(scanner: scanner, store: ArchiveStore(root: dir), thumbnailSize: 64)
+        let model = AppModel(scanner: scanner, store: ArchiveStore(root: dir), thumbnailSize: 64, analyze: analyze)
         return (model, scanner, dir)
     }
 
@@ -127,5 +149,102 @@ struct AppModelTests {
 
     @Test func noFormatsMeansNoSelection() {
         #expect(AppModel.captureFormat(from: []) == nil)
+    }
+
+    // MARK: Korrekturen
+
+    @Test func scanIsAnalyzedAndCorrectionsArePersisted() async throws {
+        let (model, _, dir) = makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        await model.connect()
+        await model.scan()
+        #expect(await eventually { model.scans.first?.corrections.rotation.degrees == 1.5 })
+        let id = try #require(model.scans.first?.id)
+        #expect(try ArchiveStore(root: dir).corrections(for: id) == AppModelTests.confident.corrections)
+        #expect(model.selectedID == id)
+        #expect(await eventually { model.analyzing.isEmpty })
+        await model.disconnect()
+    }
+
+    @Test func unsureAnalysisIsSuggestedNotApplied() async {
+        let (model, _, dir) = makeModel(analyze: { _ in AppModelTests.unsure }); defer { try? FileManager.default.removeItem(at: dir) }
+        await model.connect()
+        await model.scan()
+        #expect(await eventually { model.scans.first?.warnings.isEmpty == false })
+        let item = model.scans[0]
+        #expect(item.corrections.needsReview)
+        #expect(!item.corrections.rotation.enabled)
+        #expect(item.corrections.rotation.degrees == 2.5)
+        await model.disconnect()
+    }
+
+    @Test func manualRotationIsPersistedAndMarkedManual() async throws {
+        let (model, _, dir) = makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        await model.connect()
+        await model.scan()
+        #expect(await eventually { model.scans.first?.corrections.revision == 0 && model.scans.first?.corrections.rotation.degrees == 1.5 })
+        let id = try #require(model.scans.first?.id)
+        model.setRotation(id: id, degrees: -3.25)
+        let saved = try #require(try ArchiveStore(root: dir).corrections(for: id))
+        #expect(saved.rotation.degrees == -3.25)
+        #expect(saved.rotation.source == .manual)
+        #expect(saved.rotation.enabled)
+        #expect(saved.revision >= 1)
+        #expect(await eventually { model.scans.first?.corrected != nil })
+        await model.disconnect()
+    }
+
+    @Test func manualEditDuringAnalysisIsNotOverwritten() async throws {
+        let slow: @Sendable (CGImage) -> AnalysisResult = { _ in
+            Thread.sleep(forTimeInterval: 0.3)
+            return AppModelTests.confident
+        }
+        let (model, _, dir) = makeModel(analyze: slow); defer { try? FileManager.default.removeItem(at: dir) }
+        await model.connect()
+        await model.scan()
+        let id = try #require(model.scans.first?.id)
+        model.setRotation(id: id, degrees: 4)
+        #expect(await eventually { model.analyzing.isEmpty })
+        #expect(model.scans.first?.corrections.rotation.degrees == 4)
+        #expect(model.scans.first?.corrections.rotation.source == .manual)
+        await model.disconnect()
+    }
+
+    @Test func reanalyzeDiscardsManualChanges() async throws {
+        let (model, _, dir) = makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        await model.connect()
+        await model.scan()
+        let id = try #require(model.scans.first?.id)
+        model.setRotation(id: id, degrees: 7)
+        await model.reanalyze(id: id)
+        #expect(model.scans.first?.corrections.rotation.degrees == 1.5)
+        #expect(model.scans.first?.corrections.rotation.source == .automatic)
+        await model.disconnect()
+    }
+
+    @Test func masterSwitchOffIsPersistedAndOriginalStaysUntouched() async throws {
+        let (model, _, dir) = makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        await model.connect()
+        await model.scan()
+        let item = try #require(model.scans.first)
+        model.setCorrectionsEnabled(id: item.id, false)
+        #expect(try ArchiveStore(root: dir).corrections(for: item.id)?.enabled == false)
+        #expect(try ArchiveStore(root: dir).verify(item.record))
+        await model.disconnect()
+    }
+
+    @Test func existingScansLoadWithTheirCorrections() async throws {
+        let (model, _, dir) = makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        let store = ArchiveStore(root: dir)
+        let session = try await MockScanner().openSession(format: ScanFormat(width: 320, height: 240), settings: .archival)
+        let record = try store.store(try await session.capture())
+        await session.close()
+        var corrections = Corrections()
+        corrections.setRotation(degrees: -2)
+        try store.saveCorrections(corrections, for: record.id)
+
+        await model.connect()
+        #expect(model.scans.first?.corrections == corrections)
+        #expect(model.selectedID == record.id)
+        await model.disconnect()
     }
 }

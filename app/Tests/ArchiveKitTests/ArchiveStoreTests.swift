@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import ScannerKit
+import ImagingKit
 @testable import ArchiveKit
 
 @Suite("ArchiveStore")
@@ -92,5 +93,61 @@ struct ArchiveStoreTests {
         _ = try store.store(try await sampleCapture())
         let names = try FileManager.default.contentsOfDirectory(atPath: dir.appendingPathComponent("originals").path)
         #expect(names.allSatisfy { !$0.hasSuffix(".tmp") })
+    }
+}
+
+@Suite("Korrekturen im Archiv")
+struct CorrectionStorageTests {
+    private func makeStore() throws -> (ArchiveStore, URL) {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("scanutil-corr-\(UUID().uuidString)")
+        return (ArchiveStore(root: dir), dir)
+    }
+
+    private func storedRecord(_ store: ArchiveStore) async throws -> ScanRecord {
+        let session = try await MockScanner().openSession(format: ScanFormat(width: 320, height: 240), settings: .archival)
+        defer { Task { await session.close() } }
+        return try store.store(try await session.capture())
+    }
+
+    @Test func noCorrectionsYieldsNil() async throws {
+        let (store, dir) = try makeStore(); defer { try? FileManager.default.removeItem(at: dir) }
+        let record = try await storedRecord(store)
+        #expect(try store.corrections(for: record.id) == nil)
+    }
+
+    @Test func saveAndLoadRoundTrip() async throws {
+        let (store, dir) = try makeStore(); defer { try? FileManager.default.removeItem(at: dir) }
+        let record = try await storedRecord(store)
+        var corrections = Corrections()
+        corrections.setRotation(degrees: -1.25)
+        try store.saveCorrections(corrections, for: record.id)
+        #expect(try store.corrections(for: record.id) == corrections)
+    }
+
+    @Test func savingAgainReplacesPreviousCorrections() async throws {
+        let (store, dir) = try makeStore(); defer { try? FileManager.default.removeItem(at: dir) }
+        let record = try await storedRecord(store)
+        var corrections = Corrections()
+        corrections.setRotation(degrees: 1)
+        try store.saveCorrections(corrections, for: record.id)
+        corrections.setRotation(degrees: 2)
+        try store.saveCorrections(corrections, for: record.id)
+        #expect(try store.corrections(for: record.id)?.rotation.degrees == 2)
+        #expect(try store.corrections(for: record.id)?.revision == 2)
+    }
+
+    @Test func correctionsNeverTouchTheOriginal() async throws {
+        let (store, dir) = try makeStore(); defer { try? FileManager.default.removeItem(at: dir) }
+        let record = try await storedRecord(store)
+        var corrections = Corrections()
+        corrections.setRotation(degrees: 5)
+        try store.saveCorrections(corrections, for: record.id)
+        #expect(try store.verify(record))
+    }
+
+    @Test func rejectsCorrectionsForUnknownScan() throws {
+        let (store, dir) = try makeStore(); defer { try? FileManager.default.removeItem(at: dir) }
+        let id = UUID()
+        #expect(throws: ArchiveError.notFound(id)) { try store.saveCorrections(Corrections(), for: id) }
     }
 }
