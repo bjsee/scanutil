@@ -55,6 +55,8 @@ public final class AppModel {
     /// Das Dokument der laufenden Serie, sonst `nil`. Jede Aufnahme der Serie wird als Seite angehängt und sofort gespeichert.
     public private(set) var series: ScanDocument?
     public var isSeriesActive: Bool { series != nil }
+    /// Wie lange das Bild ruhig sein muss, bis ausgelöst wird, für den Fortschrittsbalken.
+    public var seriesCalmDuration: TimeInterval { trigger.configuration.calmDuration }
     /// Zustand der Auto-Auslösung für die Anzeige (Ruhe-Fortschritt).
     public private(set) var seriesPhase: AutoTrigger.Phase = .waitingForMotion
     /// Ob in der Serie automatisch ausgelöst wird. Aus: nur von Hand, die Seiten kommen trotzdem ins Dokument.
