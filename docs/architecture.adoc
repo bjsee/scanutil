@@ -16,16 +16,22 @@ Die Live-Vorschau läuft in einem kleineren Format.
 * Taste und Fußschalter stehen nicht zur Verfügung.
 Das Auslösen geschieht per Software.
 
+== Randbedingungen aus Entscheidungen
+
+* Werkzeuge zur Bildkorrektur und OCR laufen als externe Prozesse (link:adr/0002-externe-werkzeuge-als-prozesse.adoc[ADR 0002]).
+* Foliobruma wird nicht geforkt und dient nur als Nachschlagewerk.
+
 == Varianten
 
-[cols="2,1,1,1,1"]
+[cols="2,1,1,1,1,1"]
 |===
-| Kriterium | Reines Swift/SwiftUI | Kotlin Compose Desktop | Kotlin-Backend + React | Swift-Adapter + Kotlin-Kern + React
+| Kriterium | A: Reines Swift/SwiftUI | B: Kotlin Compose Desktop | C: Kotlin-Backend + React | D: Swift-Adapter + Kotlin-Kern + React | E: Swift-Adapter + Spring Boot mit Thymeleaf und htmx
 
 | Kamera- und USB-Zugriff
 | direkt
 | nur über JNI/FFM oder Fremdprozess
 | nur über Fremdprozess
+| direkt im Adapter
 | direkt im Adapter
 
 | OpenCV
@@ -33,11 +39,13 @@ Das Auslösen geschieht per Software.
 | JavaCV oder OpenCV-Java
 | JavaCV oder OpenCV-Java
 | im Kern, JavaCV
+| im Kern, JavaCV
 
 | Passt zu deinen Kenntnissen
 | nein
 | ja
 | ja
+| überwiegend ja
 | überwiegend ja
 
 | Installationsaufwand
@@ -45,50 +53,114 @@ Das Auslösen geschieht per Software.
 | mittel (JVM)
 | mittel (JVM, Browser)
 | mittel
+| mittel
 
 | Desktop-UX
 | beste
 | gut
 | gut (Browser)
 | gut (Browser)
+| gut (Browser), mit Webansicht-Fenster nahe an einer Mac-App
 
 | Verteilung auf Apple Silicon
 | einfach, signiertes App-Bundle
 | aufwendig (JVM-Bundling)
 | mäßig
 | mäßig
+| mäßig
+
+| Technologie-Stapel
+| ein Stapel
+| ein Stapel plus Adapter
+| zwei Stapel plus Adapter
+| drei Stapel (Swift, Kotlin, Node/TypeScript)
+| zwei Stapel (Swift, Kotlin), dazu ein wenig JavaScript
 
 | Sprachgrenzen
 | eine
 | zwei
 | zwei
 | drei
+| zwei, dazu JavaScript für den Editor
 |===
 
 Eine Bewertung der Wartbarkeit ist ohne Entscheidung über das Team offen.
 
+== Variante E im Detail
+
+Server-gerenderte Oberfläche mit Spring Boot, Thymeleaf und htmx.
+
+*Gut serverseitig lösbar:*
+
+[cols="1,2"]
+|===
+| Anforderung | Umsetzung
+
+| Live-Vorschau
+| Der Adapter liefert einen MJPEG-Strom, das Browser-Element `<img>` zeigt ihn nativ an.
+
+| Scan-Serien, Miniaturansichten, Review, Mehrfachauswahl
+| Thymeleaf-Seiten mit htmx-Fragmenten.
+
+| Metadatenformulare, Export, Sammlungen
+| Server-Rendering, hier im Vorteil.
+
+| Fortschritt bei Stapelverarbeitung und OCR
+| Server-Sent Events.
+
+| Tastaturkürzel
+| htmx-Trigger auf Tastendruck oder wenig JavaScript.
+
+| Wiederherstellung nach Absturz
+| Der Zustand liegt im Server, nicht im Browser.
+|===
+
+*Braucht Client-Code im Browser:*
+Der Korrektureditor mit ziehbaren Zuschnittgriffen, Drehwinkel mit Live-Vorschau und Zoom in einem 24-MP-Bild.
+Das lässt sich nicht sinnvoll über Server-Roundtrips lösen.
+Vorgesehen ist eine JavaScript-Insel auf einer Seite, zum Beispiel mit `<canvas>` und einer Bibliothek wie Cropper.js.
+Wächst der Editor stark (Polygon-Zuschnitt, Buchentzerrung), wird daraus ein TypeScript-Modul, aber nicht zwingend eine SPA.
+
+*Unabhängig von der Technik:*
+Der Browser bekommt nie das 24-MP-Original, sondern verkleinerte Vorschauen oder Kacheln.
+Die Kameraberechtigung liegt beim Swift-Adapter, nicht beim Browser.
+
+*Nachteile:*
+
+* Die Oberfläche ist ein Browser-Tab, ohne Dock-Icon und native Menüs.
+Abhilfe: Der Swift-Adapter legt ein Fenster mit einer eingebetteten Webansicht (`WKWebView`) um die Anwendung.
+* Die Bedienung bei hunderten Scans hintereinander ist mit htmx gut möglich, wirkt aber nicht so flüssig wie eine reine Client-App.
+*Ungeprüft:* Das zeigt erst der vertikale Durchstich.
+
 == Empfehlung
 
-*Swift-Adapter für die Hardware, Kotlin-Kern für Verarbeitung und Archiv, React-Oberfläche im Browser.*
+*Variante E: Swift-Adapter für die Hardware, Spring Boot (Kotlin) mit Thymeleaf und htmx für Oberfläche und Kern, eine JavaScript-Insel für den Editor.*
 
 Der Grund ist die Beschränkung: Der Hardwarezugriff geht nur in Swift oder C.
 Alles andere kann in deiner Heimatsprache liegen.
 Der Adapter bleibt klein (grob einige hundert Zeilen) und enthält keine Geschäftslogik.
+Variante E kommt mit weniger Teilen aus als D, weil Node-Build und eine zweite Schicht aus REST-API und Frontend-Zustand entfallen.
+Das passt zu „keine unnötigen Frameworks“.
 
-Das ist eine Empfehlung mit Vorbehalt.
-Reines Swift wäre einfacher zu verteilen und hätte weniger Sprachgrenzen.
-Es setzt aber voraus, dass du bereit bist, Swift zu lernen, und OpenCV braucht dort eine C++-Brücke.
+*Vorbehalte:*
+
+* Das ist eine Einschätzung und kein Beleg.
+Ob die Oberfläche bei großen Stapeln flott genug ist, zeigt der Durchstich.
+* Variante D ist die Alternative, wenn die Oberfläche viel Zustand im Browser braucht.
+* Variante A wäre einfacher zu verteilen und hätte weniger Sprachgrenzen.
+Sie setzt aber voraus, dass du bereit bist, Swift zu lernen, und OpenCV braucht dort eine C++-Brücke.
+
 Die Entscheidung gehört dir.
 
-== Bausteine
+== Bausteine (Variante E)
 
 [cols="1,2,1"]
 |===
 | Baustein | Aufgabe | Sprache
 
-| `scanner-adapter` | Gerät erkennen, Formate, Vorschau, Aufnahme, Controls. Schmale lokale Schnittstelle. | Swift
-| `core` | Scanverwaltung, Bildverarbeitung, OCR-Steuerung, Metadaten, Export | Kotlin
-| `ui` | Live-Vorschau, Serien, Korrektur | React/TypeScript
+| `scanner-adapter` | Gerät erkennen, Formate, Vorschau, Aufnahme, Controls. Schmale lokale Schnittstelle. Optional ein Fenster mit Webansicht. | Swift
+| `core` | Scanverwaltung, Bildverarbeitung, Aufruf externer Werkzeuge, Metadaten, Export, Weboberfläche (Thymeleaf, htmx) | Kotlin (Spring Boot)
+| `editor` | Korrektureditor (Zuschnitt, Drehung, Zoom) als JavaScript-Insel | JavaScript oder TypeScript
 |===
 
 Es gibt keinen weiteren Dienst, keine Cloud und keine Datenbank außerhalb des Rechners.
@@ -100,10 +172,11 @@ Es gibt keinen weiteren Dienst, keine Cloud und keine Datenbank außerhalb des R
 Der Adapter und ein Mock-Scanner implementieren sie.
 . Bildverarbeitung: Kern, nichtdestruktiv.
 Korrekturen werden als Parameter je Scan gespeichert, nicht ins Original geschrieben.
-. OCR: Tesseract als externer Prozess.
+Bildkorrektur und OCR rufen externe Werkzeuge als Prozesse auf (ADR 0002).
+. OCR: Tesseract, gegebenenfalls über OCRmyPDF, als externer Prozess.
 . Dokumenten- und Scanverwaltung: Kern.
 . Archivexport: Kern, offene Formate (TIFF, JPEG, PDF/A, TXT).
-. Benutzeroberfläche: `ui`.
+. Benutzeroberfläche: Weboberfläche im Kern, Editor als Insel.
 
 == Schnittstelle zum Adapter
 
@@ -127,11 +200,12 @@ Das Original-JPEG des Scanners wäre nur über libusb erreichbar und ist ungepr�
 
 == Offene Entscheidungen
 
-. Sprachwahl (siehe oben).
+. Wahl der Variante (A bis E, siehe oben).
 . Originalformat im Archiv: PNG, TIFF oder verlustfrei komprimiertes JPEG-Original.
 . Ablageort und Verzeichnisstruktur.
 . Auslösung per Software: Erkennung des ruhenden Blatts.
 . Fußschalter: Tastatur-Taster als Eingabegerät.
+. Webansicht-Fenster um die Anwendung (Variante E) oder reiner Browser.
 
 == Nächste Schritte nach Freigabe
 
