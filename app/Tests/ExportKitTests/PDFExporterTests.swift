@@ -163,6 +163,26 @@ struct PDFExporterTests {
         try PDFExporter(store: f.store).export(doc, to: f.pdf)
         #expect(try f.store.verify(scan))
     }
+
+    @Test func anUnsureProposalReachesThePDFAsAPageOfTheRightSize() async throws {
+        let f = makeFixture(); defer { f.cleanup() }
+        let scan = try await storeScan(f.store, width: 400, height: 200)
+        var doc = ScanDocument(title: "Unsicher")
+        var left = DocumentPage(scanID: scan.id, region: .left), right = DocumentPage(scanID: scan.id, region: .right)
+        // Die Seiten liegen im Bild bei x 0,1–0,5 und 0,5–0,9 (mit Rand): der Vorschlag ist schmaler als die Bildhälfte.
+        left.corrections.crop = CropCorrection(quad: Quad(topLeft: .init(x: 0.1, y: 0.1), topRight: .init(x: 0.5, y: 0.1),
+                                                          bottomRight: .init(x: 0.5, y: 0.9), bottomLeft: .init(x: 0.1, y: 0.9)),
+                                               enabled: false, source: .automatic, confidence: 0.4)
+        right.corrections.crop = CropCorrection(quad: Quad(topLeft: .init(x: 0.5, y: 0.1), topRight: .init(x: 0.9, y: 0.1),
+                                                           bottomRight: .init(x: 0.9, y: 0.9), bottomLeft: .init(x: 0.5, y: 0.9)),
+                                                enabled: false, source: .automatic, confidence: 0.4)
+        doc.append(left); doc.append(right)
+        try PDFExporter(store: f.store).export(doc, to: f.pdf, options: ExportOptions(dpi: 72))
+        let sizes = pageSizes(f.pdf)
+        #expect(sizes.count == 2)
+        // Vorschlag: 160 × 160 Punkte. Die Bildhälfte wäre 200 × 200.
+        for size in sizes { #expect(abs(size.width - 160) <= 3 && abs(size.height - 160) <= 3, "Seitengröße \(size)") }
+    }
 }
 
 @Suite("Seitengeometrie")
@@ -196,5 +216,42 @@ struct PageGeometryTests {
         let effective = PageGeometry.effectiveCorrections(for: page)
         #expect(effective.crop.enabled)
         #expect(effective.rotation.enabled == false)
+    }
+
+    private let proposal = Quad(topLeft: .init(x: 0.14, y: 0.11), topRight: .init(x: 0.46, y: 0.11),
+                                bottomRight: .init(x: 0.46, y: 0.72), bottomLeft: .init(x: 0.14, y: 0.72))
+
+    @Test func anUnsureAutomaticProposalIsUsedForABookPageInsteadOfTheImageHalf() {
+        // Der Fall aus dem echten Buch: Zuschnitt „aus“ (zu unsicher für die Automatik), Vorschlag vorhanden.
+        var page = DocumentPage(scanID: UUID(), region: .left)
+        page.corrections.crop = CropCorrection(quad: proposal, enabled: false, source: .automatic, confidence: 0.39)
+        let effective = PageGeometry.effectiveCorrections(for: page)
+        #expect(effective.crop.quad == proposal, "Der Vorschlag, nicht die Hälfte des ganzen Bildes")
+        #expect(effective.crop.enabled)
+    }
+
+    @Test func aCropTheUserSwitchedOffByHandStillGivesTheImageHalf() {
+        var page = DocumentPage(scanID: UUID(), region: .right)
+        page.corrections.crop = CropCorrection(quad: proposal, enabled: false, source: .manual, confidence: nil)
+        let effective = PageGeometry.effectiveCorrections(for: page)
+        #expect(effective.crop.quad == PageGeometry.half(of: .full, region: .right), "Von Hand ausgeschaltet heißt: kein eigener Zuschnitt")
+    }
+
+    @Test func aSinglePageWithAnUnsureProposalIsLeftAlone() {
+        // Bei Einzelseiten bleibt ein unsicherer Vorschlag ein Vorschlag: ein falscher Zuschnitt verzerrt dort die ganze Seite.
+        var page = DocumentPage(scanID: UUID(), region: .whole)
+        page.corrections.crop = CropCorrection(quad: proposal, enabled: false, source: .automatic, confidence: 0.3)
+        #expect(PageGeometry.effectiveCorrections(for: page).crop.enabled == false)
+    }
+
+    @Test func anUnsureProposalStillSplitsWhenTheMasterSwitchIsOff() {
+        var page = DocumentPage(scanID: UUID(), region: .left)
+        page.corrections.crop = CropCorrection(quad: proposal, enabled: false, source: .automatic, confidence: 0.4)
+        page.corrections.setRotation(degrees: 3)
+        page.corrections.setEnabled(false)
+        page.corrections.crop = CropCorrection(quad: proposal, enabled: false, source: .automatic, confidence: 0.4)
+        let effective = PageGeometry.effectiveCorrections(for: page)
+        #expect(effective.enabled && effective.crop.quad == proposal)
+        #expect(!effective.rotation.enabled, "Hauptschalter aus: keine Drehung, aber geteilt wird")
     }
 }

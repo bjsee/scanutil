@@ -75,7 +75,10 @@ public enum BookAnalyzer {
     public static func corrections(from analysis: BookAnalysis,
                                    threshold: Double = Corrections.defaultConfidenceThreshold) -> (left: Corrections, right: Corrections) {
         let cropConfidence = min(analysis.outer?.plausibility ?? 1, analysis.gutter?.confidence ?? 0)
-        let cropConfident = analysis.gutter != nil && cropConfidence >= threshold
+        // Mit gefundenem Falz wird zugeschnitten, auch bei niedriger Sicherheit. Die Teilung ist bei einer Doppelseite ohnehin nötig,
+        // und ein unsicherer Zuschnitt war an echten Büchern richtig, die Bildhälfte mit Tuch dagegen nie: Eine flache Schattenlinie
+        // (leere Seite, kaum Falz) drückt die Sicherheit, ohne dass die Lage falsch wäre. Die Warnung „Falz unsicher“ bleibt.
+        let cropConfident = analysis.gutter != nil
         func make(quad: Quad, skew: SkewEstimate?) -> Corrections {
             var result = Corrections()
             result.crop = CropCorrection(quad: quad, enabled: cropConfident, source: .automatic, confidence: cropConfidence)
