@@ -19,6 +19,7 @@ struct UISession {
     }
 
     var originals: [URL] { files("originals", ext: "png") }
+    var correctionFiles: [URL] { files("corrections", ext: "json") }
     var documentFiles: [URL] { files("documents", ext: "json") }
     var pdfs: [URL] {
         ((try? FileManager.default.contentsOfDirectory(at: exportDir, includingPropertiesForKeys: nil)) ?? []).filter { $0.pathExtension == "pdf" }
@@ -58,3 +59,6 @@ struct UISession {
         return UISession(app: app, dir: dir, exportDir: exportDir)
     }
 }
+
+/// Die Schrittweite der Zoomknöpfe, wie in der App (`ZoomState.buttonStep`). Hier doppelt, weil die Oberflächentests die App nur von außen sehen.
+enum ZoomState { static let buttonStepForTests = 1.5 }

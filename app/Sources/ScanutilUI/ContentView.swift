@@ -42,9 +42,8 @@ public struct ContentView: View {
         ZStack {
             Color.black
             if let image = model.previewImage {
-                Image(decorative: image, scale: 1)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+                // Die Vorschau hat nur rund 1500 Pixel Breite: gezoomt wird, was sie hergibt. Die Aufnahme selbst ist schärfer.
+                ZoomableImageView(image: image, identifier: "preview")
             } else if case .failed(let text) = model.status {
                 VStack(spacing: 14) {
                     Label(text, systemImage: "exclamationmark.triangle")
@@ -417,20 +416,29 @@ struct ThumbnailCell: View {
 struct BookPageView: View {
     let preview: CGImage?
     let region: PageRegion
+    var pixelScale = 1.0
+    var fullResolution: (@MainActor () async -> CGImage?)?
+    var fullResolutionKey = ""
+
+    private var side: String { region == .left ? "left" : "right" }
 
     var body: some View {
         Group {
             if let preview {
-                Image(decorative: preview, scale: 1).resizable().aspectRatio(contentMode: .fit)
+                ZoomableImageView(
+                    image: preview, identifier: "book-\(side)", pixelScale: pixelScale,
+                    fullResolution: fullResolution, fullResolutionKey: fullResolutionKey
+                )
             } else {
                 Rectangle().fill(.quaternary)
             }
         }
-        .overlay(alignment: .bottom) {
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .topLeading) {
             Text(region == .left ? "links" : "rechts").font(.caption2).padding(2).background(.regularMaterial)
         }
         .accessibilityLabel(region == .left ? "Linke Seite" : "Rechte Seite")
-        .accessibilityIdentifier("book-page-\(region == .left ? "left" : "right")")
+        .accessibilityIdentifier("book-page-\(side)")
     }
 }
 
@@ -446,12 +454,22 @@ struct ScanDetailView: View {
                 if model.isBookScan(item.id) {
                     HStack(alignment: .center, spacing: 6) {
                         ForEach(model.pages(of: item.id)) { page in
-                            BookPageView(preview: model.pagePreviews[page.id], region: page.region)
+                            BookPageView(
+                                preview: model.pagePreviews[page.id], region: page.region, pixelScale: pixelScale,
+                                fullResolution: { await model.fullResolutionImage(scanID: item.id, pageID: page.id) },
+                                fullResolutionKey: page.corrections.cacheKey
+                            )
                         }
                     }
                     .padding(6)
                 } else if let image = item.display {
-                    Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fit).padding(6)
+                    ZoomableImageView(
+                        image: image, identifier: "scan", pixelScale: pixelScale,
+                        fullResolution: { await model.fullResolutionImage(scanID: item.id) },
+                        fullResolutionKey: item.corrections.cacheKey
+                    )
+                    .id(item.id)        // ein anderer Scan beginnt wieder eingepasst
+                    .padding(6)
                 }
                 if model.analyzing.contains(item.id) {
                     ProgressView("Analyse läuft …").padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
@@ -464,6 +482,11 @@ struct ScanDetailView: View {
                 controls.padding(12)
             }
         }
+    }
+
+    /// Wie viele Pixel des Originals ein Pixel der verkleinerten Ansicht darstellt, für die Prozentanzeige des Zooms.
+    private var pixelScale: Double {
+        item.thumbnail.map { Double(item.record.original.width) / Double(max($0.width, 1)) } ?? 1
     }
 
     /// Je Seite einer Doppelseite: Zuschnitt und Drehung. Die Korrekturen gehören der Seite, nicht dem Scan.

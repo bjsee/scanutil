@@ -10,7 +10,8 @@ final class AppDriver {
     let archive: URL
     private let application: AXUIElement
 
-    /// Das Bundle aus `scripts/bundle.sh`. Es wird wie von einem Nutzer gestartet und darf sich in den Vordergrund holen.
+    /// Das Bundle aus `scripts/bundle.sh`. Es wird im Hintergrund gestartet: kein Fokuswechsel, kein Dock-Symbol, und es
+    /// wird nie nach vorn geholt. Der Rechner des Entwicklers bleibt während der Tests benutzbar.
     static func bundleURL(file: String = #filePath) -> URL {
         URL(fileURLWithPath: file).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("build/Scanutil.app")
@@ -18,7 +19,8 @@ final class AppDriver {
 
     init(mode: String, archive: URL, environment extra: [String: String] = [:]) throws {
         self.archive = archive
-        let environment = ["SCANUTIL_MOCK": mode, "SCANUTIL_ARCHIVE": archive.path].merging(extra) { _, new in new }
+        let environment = ["SCANUTIL_MOCK": mode, "SCANUTIL_ARCHIVE": archive.path, "SCANUTIL_NO_ACTIVATE": "1"]
+            .merging(extra) { _, new in new }
         let bundle = Self.bundleURL()
         guard FileManager.default.fileExists(atPath: bundle.path) else {
             throw DriverError.bundleMissing(bundle.path)
@@ -26,7 +28,7 @@ final class AppDriver {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.environment = environment
         configuration.createsNewApplicationInstance = true
-        configuration.activates = true
+        configuration.activates = false
         var result: Result<NSRunningApplication, Error>?
         NSWorkspace.shared.openApplication(at: bundle, configuration: configuration) { app, error in
             if let app { result = .success(app) } else { result = .failure(error ?? DriverError.launchFailed) }
@@ -158,13 +160,10 @@ final class AppDriver {
     @discardableResult
     func cancelDialog() -> Bool { press("CancelButton") }
 
-    /// Leertaste an genau diesen Prozess. Nur wenn die App vorn ist, sonst würde sie ins Leere gehen.
-    /// Gibt `false` zurück, wenn die App nicht in den Vordergrund kam.
+    /// Leertaste an genau diesen Prozess, ohne die App nach vorn zu holen: Das Tastenereignis geht über `postToPid` direkt
+    /// an die App, auch wenn sie im Hintergrund läuft. Gibt `true` zurück, sobald das Ereignis abgeschickt ist.
+    @discardableResult
     func pressSpace() -> Bool {
-        // Direkt nach dem Beenden einer anderen App landet der Fokus gern woanders: ausdrücklich nach vorn holen.
-        if !isFrontmost { launched?.activate() }
-        guard wait(timeout: 10, { isFrontmost }) else { return false }
-        // Eine echte Ereignisquelle, sonst verwirft macOS synthetische Tastenereignisse unter Umständen.
         let source = CGEventSource(stateID: .hidSystemState)
         for down in [true, false] {
             let event = CGEvent(keyboardEventSource: source, virtualKey: 49, keyDown: down)
@@ -189,6 +188,51 @@ final class AppDriver {
         guard let text = string(identifier),
               let match = text.range(of: #"[+-]?\d+[.,]\d+"#, options: .regularExpression) else { return nil }
         return Double(text[match].replacingOccurrences(of: ",", with: "."))
+    }
+
+    /// Die erste ganze Zahl im Text eines Elements, etwa 66 aus „66 %“. Tausenderpunkte der deutschen Anzeige
+    /// zählen mit: aus „3.278 %“ wird 3278.
+    func integerInText(_ identifier: String) -> Int? {
+        guard let text = string(identifier), let match = text.range(of: #"\d[\d.]*"#, options: .regularExpression) else { return nil }
+        return Int(text[match].replacingOccurrences(of: ".", with: ""))
+    }
+
+    /// Rahmen eines Elements in Bildschirmkoordinaten (Ursprung oben links).
+    func frame(of identifier: String) -> CGRect? {
+        guard let el = element(identifier) else { return nil }
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, "AXFrame" as CFString, &value) == .success, let value else { return nil }
+        var rect = CGRect.zero
+        return AXValueGetValue(value as! AXValue, .cgRect, &rect) ? rect : nil
+    }
+
+    /// Die Nummer des größten normalen Fensters der App, wie WindowServer sie kennt.
+    var mainWindowNumber: Int? {
+        let infos = (CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]]) ?? []
+        return infos
+            .filter { ($0[kCGWindowOwnerPID as String] as? pid_t) == pid && ($0[kCGWindowLayer as String] as? Int) == 0 }
+            .max { area($0) < area($1) }
+            .flatMap { $0[kCGWindowNumber as String] as? Int }
+    }
+
+    private func area(_ info: [String: Any]) -> Double {
+        guard let bounds = info[kCGWindowBounds as String] as? [String: Double] else { return 0 }
+        return (bounds["Width"] ?? 0) * (bounds["Height"] ?? 0)
+    }
+
+    /// Dreht das Mausrad am Punkt `location` (Bildschirmkoordinaten, Ursprung oben links). Positive Werte: Rad nach oben.
+    /// Das Ereignis geht an den Prozess und nennt das Fenster ausdrücklich, damit es dort ankommt, ohne den echten
+    /// Mauszeiger zu bewegen oder die App nach vorn zu holen.
+    func scrollWheel(at location: CGPoint, lines: Int32) {
+        let event = CGEvent(scrollWheelEvent2Source: CGEventSource(stateID: .hidSystemState), units: .line, wheelCount: 1,
+                            wheel1: lines, wheel2: 0, wheel3: 0)
+        event?.location = location
+        if let number = mainWindowNumber {
+            event?.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(number))
+            event?.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(number))
+        }
+        event?.postToPid(pid)
+        Thread.sleep(forTimeInterval: 0.2)
     }
 
     func isEnabled(_ identifier: String) -> Bool? {
