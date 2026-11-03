@@ -48,7 +48,8 @@ struct ScanutilApp: App {
         let silent = ProcessInfo.processInfo.environment["SCANUTIL_NO_SOUND"] != nil
         _model = State(initialValue: AppModel(
             scanner: scanner, store: ArchiveStore(root: URL(fileURLWithPath: path, isDirectory: true)),
-            sound: silent ? SilentSound() : nil, defaults: silent ? nil : .standard
+            // Das Modell ist von sich aus stumm und speichert nichts: erst die App schaltet Ton und Einstellung ein.
+            sound: silent ? SilentSound() : BeepSound(), defaults: silent ? nil : .standard
         ))
     }
 
