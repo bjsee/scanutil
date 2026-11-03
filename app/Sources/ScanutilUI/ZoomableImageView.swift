@@ -262,12 +262,22 @@ struct ZoomEventCatcher: NSViewRepresentable {
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
         private func handle(_ event: NSEvent) -> NSEvent? {
-            guard let window, event.window === window else { return event }
-            let point = convert(event.locationInWindow, from: nil)
-            guard bounds.contains(point) else { return event }
+            guard let window, let point = localPoint(of: event, in: window), bounds.contains(point) else { return event }
             let anchor = CGPoint(x: point.x - bounds.midX, y: isFlipped ? point.y - bounds.midY : -(point.y - bounds.midY))
             guard let input = Self.input(for: event), let handler else { return event }
             return MainActor.assumeIsolated { handler(input, anchor) } ? nil : event
+        }
+
+        /// Der Ort des Ereignisses in dieser Ansicht. Ein Ereignis eines Geräts nennt sein Fenster. Eines ohne Fenster, wie
+        /// Bedienungshilfen und andere synthetische Quellen es schicken, trägt nur den Ort auf dem Bildschirm
+        /// (Ursprung oben links auf dem Hauptbildschirm): der wird ins Fenster umgerechnet.
+        private func localPoint(of event: NSEvent, in window: NSWindow) -> NSPoint? {
+            if let eventWindow = event.window {
+                return eventWindow === window ? convert(event.locationInWindow, from: nil) : nil
+            }
+            guard let global = event.cgEvent?.location, let primary = NSScreen.screens.first else { return nil }
+            let screenPoint = NSPoint(x: global.x, y: primary.frame.height - global.y)
+            return convert(window.convertPoint(fromScreen: screenPoint), from: nil)
         }
 
         static func input(for event: NSEvent) -> ZoomInput? {
