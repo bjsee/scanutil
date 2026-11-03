@@ -19,7 +19,7 @@ final class AppDriver {
 
     init(mode: String, archive: URL, environment extra: [String: String] = [:]) throws {
         self.archive = archive
-        let environment = ["SCANUTIL_MOCK": mode, "SCANUTIL_ARCHIVE": archive.path, "SCANUTIL_NO_ACTIVATE": "1"]
+        let environment = ["SCANUTIL_MOCK": mode, "SCANUTIL_ARCHIVE": archive.path, "SCANUTIL_NO_ACTIVATE": "1", "SCANUTIL_NO_SOUND": "1"]
             .merging(extra) { _, new in new }
         let bundle = Self.bundleURL()
         guard FileManager.default.fileExists(atPath: bundle.path) else {

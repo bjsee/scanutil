@@ -86,6 +86,24 @@ struct SerieOberflaechenTests {
         #expect(s.app.wait { s.pages.count == 1 }, "Leertaste hat keine Seite angehängt")
     }
 
+    // MARK: Ton
+
+    @Test func theSoundSwitchIsInTheSeriesBarAndCanBeToggled() throws {
+        // Die App läuft in den Tests stumm (`SCANUTIL_NO_SOUND`) und speichert keine Einstellungen.
+        let s = try launch(); defer { s.close() }
+        #expect(s.app.element("sound-toggle") == nil, "Der Tonschalter gehört in die Serienleiste")
+        startSeries(s)
+        #expect(s.app.wait { s.app.element("sound-toggle") != nil }, "Kein Tonschalter in der Serienleiste")
+        #expect(s.app.number("sound-toggle") == 1, "Der Ton ist standardmäßig an")
+        #expect(s.app.press("sound-toggle"))
+        #expect(s.app.wait { s.app.number("sound-toggle") == 0 }, "Der Schalter ließ sich nicht ausschalten")
+        // Aufnehmen geht ohne Ton genauso.
+        scan(s, expecting: 1)
+        #expect(s.app.wait { pageCount(s) == "1 Seite" })
+        #expect(s.app.press("sound-toggle"))
+        #expect(s.app.wait { s.app.number("sound-toggle") == 1 })
+    }
+
     // MARK: Auto-Auslösung
 
     @Test func autoTriggerCapturesExactlyOnePageOnAStillPreview() throws {

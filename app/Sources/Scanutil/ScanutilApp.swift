@@ -44,7 +44,12 @@ struct ScanutilApp: App {
         let path = ProcessInfo.processInfo.environment["SCANUTIL_ARCHIVE"]
             ?? FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask)[0].appendingPathComponent("Scanutil-Archiv").path
         let scanner = Self.makeScanner(ProcessInfo.processInfo.environment["SCANUTIL_MOCK"])
-        _model = State(initialValue: AppModel(scanner: scanner, store: ArchiveStore(root: URL(fileURLWithPath: path, isDirectory: true))))
+        // Die Oberflächentests laufen stumm und lassen die Einstellungen des Nutzers unberührt.
+        let silent = ProcessInfo.processInfo.environment["SCANUTIL_NO_SOUND"] != nil
+        _model = State(initialValue: AppModel(
+            scanner: scanner, store: ArchiveStore(root: URL(fileURLWithPath: path, isDirectory: true)),
+            sound: silent ? SilentSound() : nil, defaults: silent ? nil : .standard
+        ))
     }
 
     /// `SCANUTIL_MOCK`: nicht gesetzt = echter Scanner, `document` = schiefe Textseite, `document-still` = dieselbe Seite mit

@@ -223,8 +223,11 @@ private final class MockSession: ScanSession, @unchecked Sendable {
     func capture() async throws -> Capture {
         if let error = owner.captureError { throw error }
         guard !lock.withLock({ isClosed }), !lost.isSet else { throw ScannerError.deviceNotFound }
-        // Eine Aufnahme, die dauert: der Verlust kann mitten hinein fallen.
-        if owner.captureDelay > .zero { try? await Task.sleep(for: owner.captureDelay) }
+        // Eine Aufnahme, die dauert: der Verlust kann mitten hinein fallen und beendet das Warten sofort.
+        if owner.captureDelay > .zero {
+            let end = ContinuousClock.now + owner.captureDelay
+            while ContinuousClock.now < end, !lost.isSet { try? await Task.sleep(for: .milliseconds(10)) }
+        }
         guard !lock.withLock({ isClosed }), !lost.isSet else { throw ScannerError.deviceNotFound }
         owner.record(.init(format: format, settings: settings))
         let image = try owner.image(for: format)
