@@ -16,6 +16,8 @@ public struct ScanItem: Identifiable, @unchecked Sendable {
     /// Verkleinerte Ansicht mit angewandten Korrekturen.
     public var corrected: CGImage?
     public var warnings: [String]
+    /// Was die Analyse über den Scan wusste (Sicherheiten, Hände), für die Bewertung der Seite.
+    public var analysis: PageAnalysis?
     public var id: UUID { record.id }
 
     /// Was die Oberfläche zeigt: mit Korrekturen, wenn es welche gibt.
@@ -26,10 +28,12 @@ public struct ScanItem: Identifiable, @unchecked Sendable {
 public struct AnalysisResult: @unchecked Sendable {
     public let corrections: Corrections
     public let warnings: [String]
+    public let analysis: PageAnalysis?
 
-    public init(corrections: Corrections, warnings: [String]) {
+    public init(corrections: Corrections, warnings: [String], analysis: PageAnalysis? = nil) {
         self.corrections = corrections
         self.warnings = warnings
+        self.analysis = analysis
     }
 }
 
@@ -38,11 +42,14 @@ public struct BookAnalysisResult: @unchecked Sendable {
     public let left: Corrections
     public let right: Corrections
     public let warnings: [String]
+    /// Rand, Falz und Hände der Doppelseite: beide Seiten tragen dieselbe Zusammenfassung.
+    public let analysis: PageAnalysis?
 
-    public init(left: Corrections, right: Corrections, warnings: [String]) {
+    public init(left: Corrections, right: Corrections, warnings: [String], analysis: PageAnalysis? = nil) {
         self.left = left
         self.right = right
         self.warnings = warnings
+        self.analysis = analysis
     }
 }
 
@@ -179,14 +186,16 @@ public final class AppModel {
     /// Standardanalyse: Dokument erkennen, Winkel messen, sichere Ergebnisse anwenden.
     public static let defaultAnalysis: @Sendable (CGImage) -> AnalysisResult = { image in
         let analysis = ImageAnalyzer.analyze(image)
-        return AnalysisResult(corrections: ImageAnalyzer.corrections(from: analysis), warnings: analysis.warnings)
+        return AnalysisResult(corrections: ImageAnalyzer.corrections(from: analysis), warnings: analysis.warnings,
+                              analysis: ImageAnalyzer.pageAnalysis(from: analysis))
     }
 
     /// Standardanalyse einer Doppelseite: Rand, Falz und Schräglage je Seite.
     public static let defaultBookAnalysis: @Sendable (CGImage) -> BookAnalysisResult = { image in
         let analysis = BookAnalyzer.analyze(image)
         let pages = BookAnalyzer.corrections(from: analysis)
-        return BookAnalysisResult(left: pages.left, right: pages.right, warnings: analysis.warnings)
+        return BookAnalysisResult(left: pages.left, right: pages.right, warnings: analysis.warnings,
+                                  analysis: BookAnalyzer.pageAnalysis(from: analysis))
     }
 
     // MARK: Protokoll
@@ -571,15 +580,19 @@ public final class AppModel {
         for page in document.pages where seen.insert(page.scanID).inserted { ids.append(page.scanID) }
         // Einzelseiten tragen ihre Korrekturen im Dokument, Doppelseiten je Seite.
         var wholePageCorrections: [UUID: Corrections] = [:]
-        for page in document.pages where page.region == .whole { wholePageCorrections[page.scanID] = page.corrections }
-        let corrections = wholePageCorrections
+        var wholePageAnalysis: [UUID: PageAnalysis] = [:]
+        for page in document.pages where page.region == .whole {
+            wholePageCorrections[page.scanID] = page.corrections
+            if let analysis = page.analysis { wholePageAnalysis[page.scanID] = analysis }
+        }
+        let corrections = wholePageCorrections, analyses = wholePageAnalysis
         let items: [ScanItem] = await Task.detached {
             ids.reversed().compactMap { id -> ScanItem? in
                 guard let record = try? store.load(id: id) else { return nil }
                 let thumb = store.thumbnail(for: record, maxPixelSize: size)
                 let c = corrections[id] ?? (try? store.corrections(for: id)) ?? .none
                 let corrected = thumb.flatMap { CorrectionRenderer.render($0, corrections: c) }
-                return ScanItem(record: record, thumbnail: thumb, corrections: c, corrected: corrected, warnings: [])
+                return ScanItem(record: record, thumbnail: thumb, corrections: c, corrected: corrected, warnings: [], analysis: analyses[id])
             }
         }.value
         scans = items
@@ -675,9 +688,17 @@ public final class AppModel {
     private func mirrorToSeries(_ item: ScanItem) {
         guard var document = shownDocument else { return }
         var changed = false
-        for page in document.pages where page.scanID == item.id && page.region == .whole && page.corrections != item.corrections {
-            document.updateCorrections(pageID: page.id) { $0 = item.corrections }
-            changed = true
+        for index in document.pages.indices where document.pages[index].scanID == item.id && document.pages[index].region == .whole {
+            if document.pages[index].corrections != item.corrections {
+                document.updateCorrections(pageID: document.pages[index].id) { $0 = item.corrections }
+                changed = true
+            }
+            // Die Zusammenfassung der Analyse wandert mit, sobald sie da ist.
+            if let analysis = item.analysis, document.pages[index].analysis != analysis {
+                document.pages[index].analysis = analysis
+                document.revision += 1
+                changed = true
+            }
         }
         if changed { commit(document) }
     }
@@ -692,6 +713,108 @@ public final class AppModel {
         } catch {
             post(.error, "Das Dokument konnte nicht gespeichert werden: \(error.localizedDescription)")
         }
+    }
+
+    // MARK: Serie bearbeiten
+
+    @ObservationIgnored private var pagePreviewCache: [String: (key: String, image: CGImage)] = [:]
+
+    /// Die aktuellste Fassung einer Serie: die laufende, die angesehene oder die aus der Liste.
+    public func latestDocument(id: UUID) -> ScanDocument? {
+        [series, openedDocument].compactMap { $0 }.first { $0.id == id } ?? savedDocuments.first { $0.id == id }
+    }
+
+    /// Die Bewertung aller Seiten einer Serie: wo die Automatik unsicher war.
+    public func review(of document: ScanDocument) -> DocumentReview { DocumentReview(document) }
+
+    /// Ändert die Korrekturen einer Seite einer beliebigen Serie und speichert sie, auch wenn die Serie gerade nicht angezeigt wird.
+    /// Bei einer Einzelseite gelten dieselben Korrekturen für den Scan in der Miniaturleiste.
+    public func updatePage(documentID: UUID, pageID: UUID, _ change: (inout Corrections) -> Void) {
+        guard var document = latestDocument(id: documentID), document.page(id: pageID) != nil else { return }
+        document.updateCorrections(pageID: pageID, change)
+        guard let page = document.page(id: pageID) else { return }
+        commit(document)
+        if page.region == .whole {
+            try? store.saveCorrections(page.corrections, for: page.scanID)
+            if let index = scans.firstIndex(where: { $0.id == page.scanID }) {
+                scans[index].corrections = page.corrections
+                persistAndRender(index: index)
+            }
+        }
+        if shownDocument?.id == documentID { refreshPagePreviews(scanID: page.scanID) }
+    }
+
+    /// Markiert Seiten als geprüft oder nimmt die Markierung zurück. „Geprüft“ gilt für den jetzigen Zustand der Korrekturen:
+    /// Ändert sich danach etwas, gilt die Seite wieder als ungeprüft.
+    public func setReviewed(_ reviewed: Bool, documentID: UUID, pageIDs: [UUID]) {
+        guard var document = latestDocument(id: documentID) else { return }
+        var changed = false
+        for index in document.pages.indices where pageIDs.contains(document.pages[index].id) {
+            let key: String? = reviewed ? document.pages[index].corrections.cacheKey : nil
+            if document.pages[index].reviewedKey != key { document.pages[index].reviewedKey = key; changed = true }
+        }
+        guard changed else { return }
+        document.revision += 1
+        commit(document)
+    }
+
+    /// Erkennt die Aufnahme einer Seite neu und verwirft dabei Änderungen von Hand. Bei einer Doppelseite beide Seiten.
+    public func reanalyzeScan(documentID: UUID, scanID: UUID) async {
+        let store = self.store, size = thumbnailSize
+        let image: CGImage? = await Task.detached {
+            guard let record = try? store.load(id: scanID) else { return nil }
+            return store.thumbnail(for: record, maxPixelSize: size)
+        }.value
+        guard let image else { post(.error, "Die Aufnahme konnte nicht gelesen werden."); return }
+        let isBook = latestDocument(id: documentID)?.pages.contains { $0.scanID == scanID && $0.region != .whole } ?? false
+        if isBook {
+            await analyzeBookScan(id: scanID, image: image, force: true)
+            clearReviewed(documentID: documentID, scanID: scanID)
+            return
+        }
+
+        analyzing.insert(scanID)
+        let analyze = self.analyze
+        let result = await Task.detached { analyze(image) }.value
+        analyzing.remove(scanID)
+        guard var document = latestDocument(id: documentID) else { return }
+        for index in document.pages.indices where document.pages[index].scanID == scanID && document.pages[index].region == .whole {
+            document.pages[index].analysis = result.analysis
+            document.pages[index].reviewedKey = nil                       // neu erkannt heißt: wieder ungeprüft
+            document.updateCorrections(pageID: document.pages[index].id) { $0 = result.corrections }
+        }
+        document.revision += 1
+        commit(document)
+        try? self.store.saveCorrections(result.corrections, for: scanID)
+        if let index = scans.firstIndex(where: { $0.id == scanID }) {
+            apply(result.corrections, warnings: result.warnings, analysis: result.analysis, at: index)
+        } else {
+            for warning in result.warnings { post(.warning, warning, scanID: scanID, asMessage: false) }
+        }
+    }
+
+    /// Vorschau einer Seite so, wie sie ins PDF käme (Zuschnitt, Drehung, Handentfernung), für das Raster des Editors.
+    /// Gemerkt wird je Seite und Korrekturstand; ein Scan wird dafür nur einmal gelesen. `nil`, wenn das Original fehlt.
+    public func pagePreview(documentID: UUID, pageID: UUID, maxPixelSize: Int = 480) async -> CGImage? {
+        guard let page = latestDocument(id: documentID)?.page(id: pageID) else { return nil }
+        let corrections = PageGeometry.effectiveCorrections(for: page)
+        let key = "\(pageID.uuidString)/\(maxPixelSize)"
+        if let cached = pagePreviewCache[key], cached.key == corrections.cacheKey { return cached.image }
+        let store = self.store, scanID = page.scanID
+        let image: CGImage? = await Task.detached {
+            guard let record = try? store.load(id: scanID), let thumb = store.thumbnail(for: record, maxPixelSize: maxPixelSize) else { return nil }
+            return CorrectionRenderer.render(thumb, corrections: corrections)
+        }.value
+        if let image { pagePreviewCache[key] = (corrections.cacheKey, image) }
+        return image
+    }
+
+    /// Nimmt den Geprüft-Vermerk von den Seiten eines Scans: Nach „Neu erkennen“ kann das Ergebnis zufällig dem alten gleichen,
+    /// geprüft ist es deshalb nicht.
+    private func clearReviewed(documentID: UUID, scanID: UUID) {
+        guard var document = latestDocument(id: documentID) else { return }
+        for index in document.pages.indices where document.pages[index].scanID == scanID { document.pages[index].reviewedKey = nil }
+        commit(document)
     }
 
     // MARK: Volle Auflösung
@@ -756,7 +879,7 @@ public final class AppModel {
             guard let index = scans.firstIndex(where: { $0.id == id }) else { return }
             // Hat der Nutzer in der Zwischenzeit etwas geändert, gilt das und nicht die Automatik.
             guard scans[index].corrections.revision == 0 else { return }
-            apply(result.corrections, warnings: result.warnings, at: index)
+            apply(result.corrections, warnings: result.warnings, analysis: result.analysis, at: index)
         }
     }
 
@@ -769,7 +892,7 @@ public final class AppModel {
         let result = await Task.detached { analyze(image) }.value
         analyzing.remove(id)
         guard let current = scans.firstIndex(where: { $0.id == id }) else { return }
-        apply(result.corrections, warnings: result.warnings, at: current)
+        apply(result.corrections, warnings: result.warnings, analysis: result.analysis, at: current)
     }
 
     /// Ob der Scan eine Doppelseite ist, die in zwei Seiten geteilt wird.
@@ -788,13 +911,17 @@ public final class AppModel {
         let analyzeBook = self.analyzeBook
         let result = await Task.detached { analyzeBook(image) }.value
         analyzing.remove(id)
-        guard var document = shownDocument else { return }
-        for page in document.pages where page.scanID == id {
-            let corrections = page.region == .left ? result.left : result.right
-            // Hat der Nutzer die Seite schon angefasst, gilt das und nicht die Automatik.
+        // Das Dokument, zu dem der Scan gehört: meist das gezeigte, aber auch ein anderes, wenn der Nutzer inzwischen weitergeblättert hat.
+        let candidates = [series, openedDocument].compactMap { $0 } + savedDocuments
+        guard var document = candidates.first(where: { $0.pages.contains { $0.scanID == id } }) else { return }
+        for index in document.pages.indices where document.pages[index].scanID == id {
+            let page = document.pages[index]
+            // Was die Analyse wusste, wird immer abgelegt. Die Korrekturen nur, wenn der Nutzer die Seite nicht angefasst hat.
+            document.pages[index].analysis = result.analysis
             guard force || page.corrections.revision == 0 else { continue }
-            document.updateCorrections(pageID: page.id) { $0 = corrections }
+            document.updateCorrections(pageID: page.id) { $0 = page.region == .left ? result.left : result.right }
         }
+        document.revision += 1
         commit(document)
         if let index = scans.firstIndex(where: { $0.id == id }) { scans[index].warnings = result.warnings }
         for warning in result.warnings { post(.warning, warning, scanID: id, asMessage: false) }
@@ -829,9 +956,10 @@ public final class AppModel {
         }
     }
 
-    private func apply(_ corrections: Corrections, warnings: [String], at index: Int) {
+    private func apply(_ corrections: Corrections, warnings: [String], analysis: PageAnalysis?, at index: Int) {
         scans[index].corrections = corrections
         scans[index].warnings = warnings
+        scans[index].analysis = analysis
         for warning in warnings { post(.warning, warning, scanID: scans[index].id, asMessage: false) }
         persistAndRender(index: index)
     }

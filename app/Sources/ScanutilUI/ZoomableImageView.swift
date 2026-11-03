@@ -10,16 +10,6 @@ enum ZoomInput: Equatable {
     case pan(CGSize)
 }
 
-extension Corrections {
-    /// Stellt fest, ob sich Korrekturen geändert haben, ohne dass `revision` es zeigt (die Automatik setzt sie ohne Zählung).
-    /// Mit festen Schlüsselreihenfolge: ohne `sortedKeys` kodiert derselbe Wert mal so, mal so, der Schlüssel würde sich ständig
-    /// „ändern“, und das nachgeladene Bild in voller Auflösung würde bei jeder Neuberechnung der Ansicht verworfen.
-    var cacheKey: String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        return (try? encoder.encode(self)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
-    }
-}
 
 /// Ein Bild mit Zoom: Knöpfe, Mausrad und Pinch (um den Mauszeiger), Ziehen zum Verschieben, Doppelklick wechselt zwischen
 /// Einpassen und Zoom.
