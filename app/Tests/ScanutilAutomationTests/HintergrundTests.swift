@@ -4,23 +4,21 @@ import Foundation
 import Testing
 
 /// Die Oberflächentests dürfen den Rechner des Entwicklers nicht blockieren: Sie nehmen weder den Fokus noch bewegen sie die Maus.
-/// Dieser Test hält fest, welche App vorn liegt und wo der Mauszeiger steht, und prüft nach jedem Schritt, dass sich nichts geändert hat.
+/// Dieser Test hält fest, welche App vorn liegt, und prüft nach jedem Schritt, dass es dieselbe ist.
+/// Die Mausposition lässt sich dabei nicht vergleichen: Wer am Rechner sitzt, bewegt sie selbst. Dass die Tests den Zeiger nie
+/// bewegen, ist deshalb eine Regel für den Treiber (kein `CGWarpMouseCursorPosition`, kein Ereignis über den HID-Pfad), keine Prüfung.
 /// Läuft nur mit `SCANUTIL_UI_TESTS=1`.
 @Suite("Oberfläche: Hintergrund", .serialized, .enabled(if: ProcessInfo.processInfo.environment["SCANUTIL_UI_TESTS"] != nil))
 struct HintergrundTests {
     private struct Snapshot: Equatable {
         let frontmost: pid_t?
-        let mouse: CGPoint
-        static func now() -> Snapshot {
-            Snapshot(frontmost: NSWorkspace.shared.frontmostApplication?.processIdentifier, mouse: NSEvent.mouseLocation)
-        }
+        static func now() -> Snapshot { Snapshot(frontmost: NSWorkspace.shared.frontmostApplication?.processIdentifier) }
     }
 
     private func unchanged(_ before: Snapshot, after step: String, app: AppDriver) {
         let now = Snapshot.now()
         #expect(now.frontmost == before.frontmost, "Nach „\(step)“ liegt eine andere App vorn (vorher \(String(describing: before.frontmost)), jetzt \(String(describing: now.frontmost)), die getestete App hat \(app.pid))")
         #expect(!app.isFrontmost, "Nach „\(step)“ ist die getestete App vorn")
-        #expect(now.mouse == before.mouse, "Nach „\(step)“ hat sich der Mauszeiger bewegt: \(before.mouse) → \(now.mouse)")
     }
 
     @Test func theAppRunsAndIsOperatedWithoutTakingFocusOrMovingTheMouse() throws {
@@ -29,19 +27,23 @@ struct HintergrundTests {
         #expect(s.app.wait { s.app.string("status-text") == "Bereit: Mock-Scanner" })
         unchanged(before, after: "Start", app: s.app)
 
-        // Scannen, Serie, Leertaste, Regler, Zoomknopf, Protokoll
+        // Serie, Scannen, Leertaste, Zoomknopf, Protokoll, Export. Die Serie zuerst: Nach einem Scan ist „Serie beginnen“ gesperrt,
+        // bis die App wieder bereit ist.
+        #expect(s.app.press("series-start-button"))
+        #expect(s.app.wait { s.app.element("series-page-count") != nil }, "Die Serie begann nicht")
+        unchanged(before, after: "Serie beginnen", app: s.app)
+
         #expect(s.app.press("scan-button"))
         #expect(s.app.wait { s.originals.count == 1 })
         unchanged(before, after: "Scannen per Knopf", app: s.app)
 
-        #expect(s.app.press("series-start-button"))
-        #expect(s.app.wait { s.app.element("series-page-count") != nil })
-        unchanged(before, after: "Serie beginnen", app: s.app)
-
+        #expect(s.app.wait { s.app.isEnabled("scan-button") == true })
         #expect(s.app.pressSpace())
         #expect(s.app.wait(timeout: 20) { s.originals.count == 2 }, "Die Leertaste erreichte die App im Hintergrund nicht")
         unchanged(before, after: "Leertaste", app: s.app)
+        #expect(s.app.wait { s.app.string("series-page-count") == "2 Seiten" })
 
+        #expect(s.app.wait { s.app.isEnabled("series-export-button") == true }, "Der Export bleibt gesperrt")
         #expect(s.app.wait(timeout: 20) { s.app.element("scan-zoom-in") != nil })
         #expect(s.app.press("scan-zoom-in"))
         unchanged(before, after: "Zoomknopf", app: s.app)
