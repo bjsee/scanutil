@@ -354,6 +354,9 @@ struct SeriesBar: View {
                     Label("Angesehen: \(opened.title) · \(opened.pages.count) Seite\(opened.pages.count == 1 ? "" : "n")", systemImage: "eye")
                         .font(.callout).lineLimit(1)
                         .accessibilityIdentifier("opened-document-label")
+                    Button("Bearbeiten …") { SeriesEditorWindow.show(model: model, documentID: opened.id) }
+                        .disabled(opened.pages.isEmpty)
+                        .accessibilityIdentifier("edit-opened-button")
                     Button("Hier fortsetzen") { Task { await model.resumeSeries(id: opened.id) } }
                         .disabled(model.status != .ready)
                         .accessibilityIdentifier("resume-opened-button")
@@ -634,6 +637,8 @@ struct SeriesListView: View {
                     .accessibilityIdentifier("series-resume-button")
                 Menu {
                     Button("Umbenennen") { renaming = document.id; renameText = document.title }
+                    Button("Bearbeiten …") { SeriesEditorWindow.show(model: model, documentID: document.id) }
+                        .disabled(document.pages.isEmpty)
                     Button("Als PDF …") { export(document) }.disabled(document.pages.isEmpty)
                     Divider()
                     Button("Nur die Serie löschen …", role: .destructive) { deleting = PendingDeletion(document: document, withScans: false) }

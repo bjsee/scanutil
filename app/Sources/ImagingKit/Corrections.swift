@@ -168,3 +168,14 @@ public struct Corrections: Codable, Equatable, Sendable {
         revision += 1
     }
 }
+
+extension Corrections {
+    /// Stellt fest, ob sich Korrekturen geändert haben, ohne dass `revision` es zeigt (die Automatik setzt sie ohne Zählung).
+    /// Mit fester Schlüsselreihenfolge: ohne `sortedKeys` kodiert derselbe Wert mal so, mal so, der Schlüssel würde sich ständig
+    /// „ändern“, und etwa das nachgeladene Bild in voller Auflösung würde bei jeder Neuberechnung der Ansicht verworfen.
+    public var cacheKey: String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return (try? encoder.encode(self)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+    }
+}

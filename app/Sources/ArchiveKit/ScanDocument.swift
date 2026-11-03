@@ -19,15 +19,26 @@ public struct DocumentPage: Codable, Equatable, Identifiable, Sendable {
     public var corrections: Corrections
     /// Seitenbezeichnung, falls sie von der Position abweicht, etwa „Vorsatz“ oder „iv“.
     public var label: String?
+    /// Was die Analyse über die Seite wusste (Sicherheiten, Warnungen), damit sich später zeigen lässt, wo sie unsicher war.
+    /// Ältere Dokumente haben keine.
+    public var analysis: PageAnalysis?
+    /// Die Korrekturen (`Corrections.cacheKey`), die der Nutzer als geprüft markiert hat. Ändert sich danach etwas, stimmt der
+    /// Schlüssel nicht mehr überein, und die Seite gilt wieder als ungeprüft.
+    public var reviewedKey: String?
 
     public init(id: UUID = UUID(), scanID: UUID, region: PageRegion = .whole,
-                corrections: Corrections = .none, label: String? = nil) {
+                corrections: Corrections = .none, label: String? = nil, analysis: PageAnalysis? = nil, reviewedKey: String? = nil) {
         self.id = id
         self.scanID = scanID
         self.region = region
         self.corrections = corrections
         self.label = label
+        self.analysis = analysis
+        self.reviewedKey = reviewedKey
     }
+
+    /// Ob der Nutzer die Seite in ihrem jetzigen Zustand als geprüft markiert hat.
+    public var isReviewed: Bool { reviewedKey != nil && reviewedKey == corrections.cacheKey }
 }
 
 /// Beschreibende Angaben zu einem Dokument. Alles ist freiwillig.
