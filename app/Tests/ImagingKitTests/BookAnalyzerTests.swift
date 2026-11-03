@@ -117,6 +117,22 @@ struct BookAnalyzerTests {
         #expect(analysis.leftQuad.topRight == analysis.rightQuad.topLeft)
     }
 
+    @Test func aShallowGutterStillCropsBecauseThePositionIsRightEvenIfTheConfidenceIsLow() throws {
+        // An einem echten Buch mit flacher Falzlinie (leere Seite, kaum Schatten) lag die Sicherheit bei 0,4 bis 0,5, die Lage stimmte.
+        let analysis = BookAnalyzer.analyze(spread(depth: 13))
+        let gutter = try #require(analysis.gutter)
+        #expect(gutter.confidence < Corrections.defaultConfidenceThreshold, "Der Fall ist nur dann einer, wenn die Sicherheit niedrig ist: \(gutter.confidence)")
+        let pages = BookAnalyzer.corrections(from: analysis)
+        #expect(pages.left.crop.enabled && pages.right.crop.enabled, "Mit gefundenem Falz wird zugeschnitten")
+        #expect(pages.left.crop.confidence != nil && pages.left.crop.confidence! < Corrections.defaultConfidenceThreshold, "Die niedrige Sicherheit bleibt sichtbar")
+        #expect(analysis.warnings.contains { $0.contains("Falz ist unsicher") }, "Die Warnung bleibt: \(analysis.warnings)")
+    }
+
+    @Test func withoutAGutterNothingIsCroppedAutomatically() {
+        let pages = BookAnalyzer.corrections(from: BookAnalyzer.analyze(spread(depth: 0)))
+        #expect(!pages.left.crop.enabled && !pages.right.crop.enabled)
+    }
+
     @Test func correctionsAreActiveOnlyWhenTheGutterIsConfident() throws {
         let sure = BookAnalyzer.corrections(from: BookAnalyzer.analyze(spread()))
         #expect(sure.left.crop.quad != nil && sure.right.crop.quad != nil)
