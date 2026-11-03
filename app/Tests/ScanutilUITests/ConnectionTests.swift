@@ -208,7 +208,7 @@ struct ConnectionTests {
     }
 
     @Test func unplugInTheMiddleOfACaptureEndsInLostNotReady() async {
-        let scanner = MockScanner(previewsEnabled: false, captureDelay: .milliseconds(300))
+        let scanner = MockScanner(previewsEnabled: false, captureDelay: .seconds(10))   // endet mit dem Verlust, nicht nach der Zeit
         let (model, dir) = makeModel(scanner); defer { try? FileManager.default.removeItem(at: dir) }
         await model.connect()
         let capture = Task { await model.scan() }

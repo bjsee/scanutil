@@ -109,6 +109,10 @@ Die rote Zeile in der Statusleiste zeigt weiterhin nur die jüngste Warnung oder
 Mit „Automatisch auslösen“ nimmt die App selbst auf: Sie wartet auf Bewegung (Seite umblättern) und löst aus, wenn das Bild danach etwa 0,8 Sekunden ruhig ist.
 Bleibt die Seite unverändert (die Hand fuhr nur durchs Bild), nimmt sie nicht nochmals auf.
 Die Leertaste löst weiterhin von Hand aus.
+Bei jeder Aufnahme in einer Serie kommt ein ganz kurzer, tiefer, leiser Ton (400 Hz, 0,06 Sekunden, Amplitude 0,2), automatisch wie von Hand: Dann darf umgeblättert werden.
+Er kommt, sobald das Bild vom Scanner da ist, nicht erst nach dem Speichern, das dauert fast eine Sekunde. Bei einer Doppelseite ist es ein Ton je Aufnahme.
+Fehlgeschlagene Aufnahmen und übersprungene Dubletten haben keinen Ton, ebenso Aufnahmen außerhalb einer Serie.
+Der Schalter „Ton“ in der Serienleiste schaltet ihn ab, die Einstellung bleibt erhalten. Der Ton wird in der App erzeugt und folgt der Ausgabelautstärke des Macs, nicht der Alarmlautstärke.
 Mit dem Schalter „Doppelseiten (Buch)“ vor dem Beginn ergibt jede Aufnahme zwei Seiten, links und rechts.
 Der Falz wird als Schattental in der Mitte des Buchs gesucht (auch schräg), die Seiten werden daran geteilt und ihre Schräglage getrennt gemessen.
 Ist der Falz oder die Schräglage unsicher, wird der Vorschlag nur angezeigt und nicht angewendet; die Warnung steht über den Reglern.
@@ -148,6 +152,7 @@ Die Erkennung hängt hinter der Schnittstelle `TextRecognizer`; Tesseract für m
 | PDF-Export | Tests lesen das erzeugte PDF mit PDFKit: Reihenfolge, Seitengröße, Metadaten, Abbruch, Ersetzen
 | Textebene im PDF | Tests lesen den Text und seine Lage mit PDFKit zurück, prüfen, dass das Bild unverändert bleibt, und einmal mit echtem Vision. Mit absichtlich eingebauten Fehlern geprüft.
 | Protokoll der Meldungen | Tests prüfen Einträge, Zähler, Begrenzung, Textform und die Darstellung der Zeilen
+| Ton bei der Aufnahme | Unit-Tests der erzeugten Tondaten (Format, Länge, Lautstärke, kein Knacken, Frequenz) und des Verhaltens: ein Ton je Aufnahme in der Serie, nicht außerhalb, nicht bei Fehler oder Dublette, nicht bei ausgeschaltetem Schalter, vor dem Speichern, Einstellung bleibt erhalten. Mit absichtlich eingebauten Fehlern geprüft. *Nicht geprüft:* Ob der Ton am Lautsprecher hörbar und angenehm ist, und ob er in der Zeit zwischen zwei Seiten kurz genug ist. Das geht nur mit den Ohren.
 | Auto-Auslösung | Tests mit künstlichen Bildfolgen (Seitenwechsel, Hand, Dublette, schleichende Bewegung). Mit absichtlich eingebauten Fehlern geprüft.
 | Falzerkennung, Teilung der Doppelseite | Tests mit künstlichen Doppelseiten (mittig, versetzt, schräg, ohne Schatten, mit Text). Mit absichtlich eingebauten Fehlern geprüft.
 | Serienmodus im `AppModel` | Tests speisen den Trigger über eine interne Methode ein, der Mock liefert dabei keine eigene Vorschau
@@ -171,6 +176,7 @@ Der Regler wird über „Erhöhen“ und „Verringern“ eingestellt, weil sein
 `document-late` lässt den Scanner erst vier Sekunden nach dem Start auftauchen, wie einen später eingeschalteten.
 `document-unplug` zieht ihn fünf Sekunden nach dem Verbinden ab und schaltet ihn drei Sekunden später wieder ein.
 `document-still` hat eine stehende Vorschau: die Auto-Auslösung sieht Ruhe und löst nach etwa 0,8 Sekunden von selbst aus, die anderen Modi flimmern und lösen nie aus.
+`SCANUTIL_NO_SOUND` macht die App stumm und lässt ihre Einstellungen unberührt (die Tests setzen es).
 `SCANUTIL_EXPORT_DIR` lässt den Speicherdialog des Exports in diesem Ordner öffnen, damit die Tests nicht in Ihre Ordner schreiben.
 Der Speicherdialog wird über die sprachunabhängigen Kennungen seiner Schaltflächen (`OKButton`, `CancelButton`) bedient, nicht über deren Beschriftung.
 Ein Rechner, auf dem gearbeitet wird, ist während des Laufs trotzdem belastet (Bild- und PDF-Berechnung).

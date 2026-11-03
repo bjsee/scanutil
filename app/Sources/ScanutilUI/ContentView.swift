@@ -301,6 +301,10 @@ struct SeriesBar: View {
                 Toggle("Automatisch auslösen", isOn: $model.autoTriggerEnabled)
                     .toggleStyle(.switch)
                     .accessibilityIdentifier("auto-trigger-toggle")
+                Toggle(isOn: $model.soundEnabled) { Label("Ton", systemImage: "speaker.wave.2") }
+                    .toggleStyle(.switch)
+                    .help("Kurzer Ton, sobald eine Aufnahme gemacht ist: dann darf umgeblättert werden")
+                    .accessibilityIdentifier("sound-toggle")
                 if model.autoTriggerEnabled {
                     phaseIndicator
                 }

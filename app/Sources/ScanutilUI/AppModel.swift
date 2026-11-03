@@ -94,6 +94,10 @@ public final class AppModel {
     public private(set) var seriesPhase: AutoTrigger.Phase = .waitingForMotion
     /// Ob in der Serie automatisch ausgelöst wird. Aus: nur von Hand, die Seiten kommen trotzdem ins Dokument.
     public var autoTriggerEnabled = true
+    /// Ob in einer Serie bei jeder Aufnahme ein kurzer Ton kommt. Die Einstellung bleibt erhalten.
+    public var soundEnabled: Bool {
+        didSet { defaults?.set(soundEnabled, forKey: Self.soundKey) }
+    }
     /// Ob die Serie Doppelseiten aufnimmt: jede Aufnahme ergibt eine linke und eine rechte Seite.
     public private(set) var seriesIsBook = false
     /// Verkleinerte Ansicht jeder Buchseite mit ihren Korrekturen, nach Seiten-ID.
@@ -122,6 +126,9 @@ public final class AppModel {
     private var previewTask: Task<Void, Never>?
     private var searchTask: Task<Void, Never>?
     private let retryInterval: Duration?
+    private let sound: any CaptureSound
+    private let defaults: UserDefaults?
+    private static let soundKey = "captureSoundEnabled"
     /// Aus nach `disconnect()`: ein Versuch, der erst danach scheitert, darf die Suche nicht neu starten.
     private var searchAllowed = true
     /// Beobachtet die laufende Sitzung auf Verlust der Verbindung. `sessionGeneration` trennt alte von neuen Sitzungen.
@@ -140,9 +147,15 @@ public final class AppModel {
         analyze: @escaping @Sendable (CGImage) -> AnalysisResult = AppModel.defaultAnalysis,
         analyzeBook: @escaping @Sendable (CGImage) -> BookAnalysisResult = AppModel.defaultBookAnalysis,
         recognizer: any TextRecognizer = VisionTextRecognizer(),
-        retryInterval: Duration? = .seconds(2)
+        retryInterval: Duration? = .seconds(2),
+        sound: (any CaptureSound)? = nil,
+        defaults: UserDefaults? = .standard
     ) {
         self.retryInterval = retryInterval
+        self.sound = sound ?? BeepSound()
+        self.defaults = defaults
+        // Ohne gespeicherte Einstellung ist der Ton an.
+        soundEnabled = defaults?.object(forKey: Self.soundKey) as? Bool ?? true
         self.scanner = scanner
         self.store = store
         self.thumbnailSize = thumbnailSize
@@ -356,6 +369,8 @@ public final class AppModel {
         let started = ContinuousClock.now
         do {
             let capture = try await session.capture()
+            // Der Ton kommt, sobald das Bild da ist, nicht erst nach dem Speichern: Ab jetzt darf umgeblättert werden.
+            if series != nil, soundEnabled { sound.play() }
             let record = try store.store(capture)
             let store = self.store, size = thumbnailSize
             let thumb = await Task.detached { store.thumbnail(for: record, maxPixelSize: size) }.value
