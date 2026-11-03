@@ -86,6 +86,29 @@ struct SerieOberflaechenTests {
         #expect(s.app.wait { s.pages.count == 1 }, "Leertaste hat keine Seite angehängt")
     }
 
+    // MARK: Gespeicherte Dokumente
+
+    @Test func anEndedSeriesCanStillBeExportedThroughTheDocumentMenu() throws {
+        let s = try launch(); defer { s.close() }
+        #expect(s.app.element("saved-documents-menu") == nil, "Ohne Dokument gibt es nichts zu exportieren")
+        startSeries(s)
+        scan(s, expecting: 1)
+        #expect(s.app.wait { pageCount(s) == "1 Seite" })
+        #expect(s.app.press("series-end-button"))
+        #expect(s.app.wait { s.app.element("series-start-button") != nil })
+        // Das war die Lücke: Nach dem Beenden war der Export weg, obwohl das Dokument gespeichert ist.
+        #expect(s.app.wait { s.app.element("saved-documents-menu") != nil }, "Nach dem Beenden gibt es keinen Weg zum PDF")
+        #expect(s.app.element("series-export-button") == nil)
+
+        _ = s.app.pressFirstMenuItem(of: "saved-documents-menu")
+        #expect(s.app.wait(timeout: 10) { s.app.hasDialog }, "Der Speicherdialog öffnet sich nicht")
+        #expect(s.app.confirmDialog())
+        #expect(s.app.wait(timeout: 60) { !s.pdfs.isEmpty }, "Es wurde kein PDF geschrieben")
+        let pdf = try #require(s.pdfs.first)
+        #expect(s.app.wait(timeout: 30) { PDFDocument(url: pdf)?.pageCount == 1 })
+        #expect(s.app.wait { s.app.element("export-reveal-button") != nil }, "Kein Link zum PDF")
+    }
+
     // MARK: Ton
 
     @Test func theSoundSwitchIsInTheSeriesBarAndCanBeToggled() throws {

@@ -152,6 +152,21 @@ final class AppDriver {
     /// Ob ein Dialog der App offen ist. Die Schaltflächen des Speicherdialogs tragen sprachunabhängige Kennungen.
     var hasDialog: Bool { element("OKButton") != nil }
 
+    /// Öffnet ein Menü (Taste mit Menü) und wählt seinen ersten Eintrag. Gibt `false` zurück, wenn das Menü keinen hat.
+    /// Wie bei `pressOpeningDialog` kehrt der Aufruf nicht zurück, solange ein dadurch geöffneter Dialog offen ist.
+    func pressFirstMenuItem(of identifier: String) -> Bool {
+        guard let button = element(identifier) else { return false }
+        _ = AXUIElementPerformAction(button, kAXPressAction as CFString)
+        var item: AXUIElement?
+        _ = wait(timeout: 5) {
+            item = find(button) { Self.string($0, kAXRoleAttribute) == "AXMenuItem" }
+            return item != nil
+        }
+        guard let item else { return false }
+        _ = AXUIElementPerformAction(item, kAXPressAction as CFString)
+        return true
+    }
+
     /// Bestätigt den Dialog („Sichern“). Gibt `false` zurück, wenn keiner offen ist.
     @discardableResult
     func confirmDialog() -> Bool { press("OKButton") }
