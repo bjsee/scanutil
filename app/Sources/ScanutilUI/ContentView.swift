@@ -34,6 +34,7 @@ public struct ContentView: View {
         .onAppear { keyMonitor.start { Task { await model.scan() } } }
         .onDisappear { keyMonitor.stop() }
         .task {
+            await model.loadArchive()
             await model.connect()
         }
     }
@@ -343,6 +344,7 @@ struct SeriesBar: View {
                 Text("Eine Serie sammelt die Aufnahmen als Seiten eines Dokuments und löst nach dem Umblättern selbst aus.")
                     .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 Spacer()
+                savedDocumentsMenu
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
@@ -369,17 +371,48 @@ struct SeriesBar: View {
         }
     }
 
-    private func chooseExportTarget(for series: ScanDocument) {
+    /// Gespeicherte Dokumente exportieren, auch nachdem die Serie beendet oder die App neu gestartet wurde.
+    @ViewBuilder private var savedDocumentsMenu: some View {
+        if let progress = model.exportProgress {
+            ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1))).frame(width: 100)
+            Text("\(progress.done)/\(progress.total)").font(.caption.monospacedDigit())
+        } else if let url = model.lastExportURL {
+            Button("PDF zeigen") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                .buttonStyle(.link)
+                .accessibilityIdentifier("export-reveal-button")
+        }
+        if !model.savedDocuments.isEmpty {
+            Toggle("Mit Texterkennung", isOn: $withOCR)
+                .toggleStyle(.switch)
+                .help("Macht das PDF durchsuchbar. Kostet etwa 1,5 Sekunden je Seite.")
+                .accessibilityIdentifier("export-ocr-toggle")
+            Menu {
+                ForEach(model.savedDocuments.prefix(20)) { document in
+                    Button("\(document.title) · \(document.pages.count) Seite\(document.pages.count == 1 ? "" : "n")") {
+                        chooseExportTarget(for: document)
+                    }
+                    .disabled(document.pages.isEmpty)
+                }
+            } label: {
+                Label("Dokument als PDF exportieren", systemImage: "square.and.arrow.up")
+            }
+            .disabled(model.exportProgress != nil)
+            .fixedSize()
+            .accessibilityIdentifier("saved-documents-menu")
+        }
+    }
+
+    private func chooseExportTarget(for document: ScanDocument) {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.pdf]
-        panel.nameFieldStringValue = series.title + ".pdf"
+        panel.nameFieldStringValue = document.title + ".pdf"
         panel.message = "Das PDF wird aus den Originalen mit den eingestellten Korrekturen erzeugt."
         // Für die Oberflächentests: der Dialog öffnet im Testordner statt in den Ordnern des Nutzers.
         if let dir = ProcessInfo.processInfo.environment["SCANUTIL_EXPORT_DIR"] { panel.directoryURL = URL(fileURLWithPath: dir, isDirectory: true) }
         guard panel.runModal() == .OK, let url = panel.url else { return }
         var options = ExportOptions.archive
         options.ocr = withOCR
-        Task { await model.exportSeries(to: url, options: options) }
+        Task { await model.exportDocument(document, to: url, options: options) }
     }
 
     private func pageCountText(_ count: Int) -> String {

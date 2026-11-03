@@ -102,6 +102,9 @@ public final class AppModel {
     public private(set) var seriesIsBook = false
     /// Verkleinerte Ansicht jeder Buchseite mit ihren Korrekturen, nach Seiten-ID.
     public private(set) var pagePreviews: [UUID: CGImage] = [:]
+    /// Alle gespeicherten Dokumente (Serien) des Archivs, neueste zuerst. Auch eine beendete Serie bleibt hier erhalten
+    /// und lässt sich exportieren.
+    public private(set) var savedDocuments: [ScanDocument] = []
     /// Fortschritt des laufenden PDF-Exports (fertige Seiten, alle Seiten), sonst `nil`.
     public private(set) var exportProgress: (done: Int, total: Int)?
     /// Ort des zuletzt geschriebenen PDFs, für „Im Finder zeigen“.
@@ -233,10 +236,7 @@ public final class AppModel {
             let formats = try await scanner.availableFormats()
             guard let format = Self.captureFormat(from: formats) else { throw ScannerError.deviceNotFound }
             captureFormat = format
-            if !hasLoadedScans {
-                await loadExistingScans()
-                hasLoadedScans = true
-            }
+            await loadArchive()
             let opened = try await scanner.openSession(format: format, settings: .archival)
             // Wurde die Suche inzwischen abgebrochen (disconnect), darf keine Sitzung offen bleiben:
             // sie hielte die Schärfe im Gerät verstellt.
@@ -403,6 +403,7 @@ public final class AppModel {
         do {
             try store.saveDocument(document)
             series = document
+            updateSavedDocuments(with: document)
             seriesIsBook = book
             pagePreviews = [:]
             trigger = AutoTrigger()
@@ -435,11 +436,18 @@ public final class AppModel {
         }
     }
 
-    /// Schreibt das Dokument der Serie als PDF. Läuft im Hintergrund; die Serie kann dabei weitergehen,
+    /// Schreibt das Dokument der laufenden Serie als PDF. Läuft im Hintergrund; die Serie kann dabei weitergehen,
     /// exportiert wird der Stand beim Aufruf.
     public func exportSeries(to url: URL, options: ExportOptions = .archive) async {
-        guard let document = series, exportProgress == nil else { return }
-        guard !document.pages.isEmpty else { post(.warning, "Die Serie hat noch keine Seiten."); return }
+        guard let document = series else { return }
+        await exportDocument(document, to: url, options: options)
+    }
+
+    /// Schreibt ein gespeichertes Dokument als PDF, auch eine längst beendete Serie. Die Seiten tragen ihre Korrekturen
+    /// aus dem Archiv; die Originale bleiben unberührt.
+    public func exportDocument(_ document: ScanDocument, to url: URL, options: ExportOptions = .archive) async {
+        guard exportProgress == nil else { return }
+        guard !document.pages.isEmpty else { post(.warning, "Das Dokument hat noch keine Seiten."); return }
         exportProgress = (0, document.pages.count)
         message = nil
         let exporter = PDFExporter(store: store, recognizer: recognizer)
@@ -462,6 +470,29 @@ public final class AppModel {
             post(.error, "Der Export ist fehlgeschlagen: \(error.localizedDescription)")
         }
         exportProgress = nil
+    }
+
+    /// Lädt Scans und Dokumente des Archivs, einmal. Unabhängig vom Scanner: Auch ohne ihn lässt sich ein gespeichertes
+    /// Dokument ansehen und als PDF ausgeben. Die Oberfläche ruft es beim Start vor dem Verbinden auf.
+    public func loadArchive() async {
+        guard !hasLoadedScans else { return }
+        hasLoadedScans = true
+        await loadExistingScans()
+        await loadSavedDocuments()
+    }
+
+    /// Liest die gespeicherten Dokumente aus dem Archiv. Ein unlesbares Dokument wird gemeldet und übersprungen.
+    private func loadSavedDocuments() async {
+        let store = self.store
+        let loaded: [ScanDocument] = await Task.detached { (try? store.allDocuments()) ?? [] }.value
+        savedDocuments = loaded.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    /// Hält die Liste der gespeicherten Dokumente aktuell, wenn die laufende Serie gespeichert wird.
+    private func updateSavedDocuments(with document: ScanDocument) {
+        savedDocuments.removeAll { $0.id == document.id }
+        savedDocuments.insert(document, at: 0)
+        savedDocuments.sort { $0.createdAt > $1.createdAt }
     }
 
     private func appendToSeries(scanID: UUID) {
@@ -490,6 +521,7 @@ public final class AppModel {
         do {
             try store.saveDocument(document)
             series = document
+            updateSavedDocuments(with: document)
         } catch {
             post(.error, "Das Dokument konnte nicht gespeichert werden: \(error.localizedDescription)")
         }

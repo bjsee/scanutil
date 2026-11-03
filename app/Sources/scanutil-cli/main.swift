@@ -28,6 +28,31 @@ func parseFormat(_ text: String) -> ScanFormat? {
     return parts.count == 2 ? ScanFormat(width: parts[0], height: parts[1]) : nil
 }
 
+/// Zeichnet Rand (blau), Falz (rot) und die beiden Seiten (grün, orange) über ein verkleinertes Bild, zum Ansehen.
+func drawBookOverlay(_ image: CGImage, _ analysis: BookAnalysis) -> CGImage? {
+    let scale = min(1, 1600 / Double(max(image.width, image.height)))
+    let w = Int(Double(image.width) * scale), h = Int(Double(image.height) * scale)
+    guard let context = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+    context.interpolationQuality = .high
+    context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+    func point(_ p: NormalizedPoint) -> CGPoint { CGPoint(x: p.x * Double(w), y: (1 - p.y) * Double(h)) }   // Bild y nach unten
+    func path(_ q: Quad, _ color: CGColor, width: CGFloat = 3) {
+        context.setStrokeColor(color); context.setLineWidth(width)
+        context.move(to: point(q.topLeft)); context.addLine(to: point(q.topRight)); context.addLine(to: point(q.bottomRight))
+        context.addLine(to: point(q.bottomLeft)); context.closePath(); context.strokePath()
+    }
+    if let o = analysis.outer { path(o.quad, CGColor(red: 0.2, green: 0.5, blue: 1, alpha: 1), width: 4) }
+    path(analysis.leftQuad, CGColor(red: 0.1, green: 0.9, blue: 0.2, alpha: 1))
+    path(analysis.rightQuad, CGColor(red: 1, green: 0.6, blue: 0.1, alpha: 1))
+    if let g = analysis.gutter {
+        context.setStrokeColor(CGColor(red: 1, green: 0.1, blue: 0.1, alpha: 1)); context.setLineWidth(3)
+        context.move(to: point(NormalizedPoint(x: g.xTop, y: 0))); context.addLine(to: point(NormalizedPoint(x: g.xBottom, y: 1)))
+        context.strokePath()
+    }
+    return context.makeImage()
+}
+
 let args = Array(CommandLine.arguments.dropFirst())
 guard let command = args.first else { fail("Aufruf: scanutil-cli formats | capture <Archivordner> | verify <Archivordner> | export <Archivordner> <ziel.pdf>") }
 
@@ -77,9 +102,51 @@ do {
 
     case "analyze":
         // scanutil-cli analyze <bild.png> [--out korrigiert.png]
+        // scanutil-cli analyze <bild.png> --book [--out ueberlagerung.png]   Doppelseite: Rand, Falz und Seiten einzeichnen
         guard args.count >= 2 else { fail("Bilddatei fehlt") }
         guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: args[1]) as CFURL, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { fail("Bild nicht lesbar") }
+        if args.contains("--book") {
+            let t0 = ContinuousClock.now
+            let analysis = BookAnalyzer.analyze(image)
+            print("Bild \(image.width)x\(image.height), Analyse \(ContinuousClock.now - t0)")
+            if let o = analysis.outer {
+                print(String(format: "Rand: Plausibilität %.2f, Vision-Konfidenz %.2f", o.plausibility, o.reportedConfidence))
+                print("  Ecken: \(o.quad.topLeft) \(o.quad.topRight) \(o.quad.bottomRight) \(o.quad.bottomLeft)")
+            } else { print("Rand: nicht erkannt oder verworfen") }
+            if let g = analysis.gutter {
+                print(String(format: "Falz: x oben %.3f, unten %.3f, Neigung %+.3f, Sicherheit %.2f", g.xTop, g.xBottom, g.slope, g.confidence))
+            } else { print("Falz: nicht gefunden") }
+            for (name, skew) in [("links", analysis.leftSkew), ("rechts", analysis.rightSkew)] {
+                if let k = skew { print(String(format: "Schräglage %@: %+.2f°, Sicherheit %.2f", name, k.degrees, k.confidence)) }
+                else { print("Schräglage \(name): nicht messbar") }
+            }
+            for w in analysis.warnings { print("  Hinweis: \(w)") }
+            if let out = option("--out", in: args) {
+                guard let overlay = drawBookOverlay(image, analysis),
+                      let dest = CGImageDestinationCreateWithURL(URL(fileURLWithPath: out) as CFURL, UTType.png.identifier as CFString, 1, nil)
+                else { fail("Überlagerung fehlgeschlagen") }
+                CGImageDestinationAddImage(dest, overlay, nil)
+                CGImageDestinationFinalize(dest)
+                print("Überlagerung: \(out)")
+            }
+            if let folder = option("--pages", in: args) {
+                // Die beiden Seiten so, wie der Export sie erzeugt: Korrekturen aus der Analyse, Ausschnitt je Seite.
+                try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+                let pages = BookAnalyzer.corrections(from: analysis)
+                for (side, region, corrections) in [("links", PageRegion.left, pages.left), ("rechts", .right, pages.right)] {
+                    let page = DocumentPage(scanID: UUID(), region: region, corrections: corrections)
+                    let effective = PageGeometry.effectiveCorrections(for: page)
+                    guard let rendered = CorrectionRenderer.render(image, corrections: effective),
+                          let dest = CGImageDestinationCreateWithURL(URL(fileURLWithPath: folder).appendingPathComponent("\(side).png") as CFURL,
+                                                                     UTType.png.identifier as CFString, 1, nil) else { fail("Seite \(side) fehlgeschlagen") }
+                    CGImageDestinationAddImage(dest, rendered, nil)
+                    CGImageDestinationFinalize(dest)
+                    print("Seite \(side): \(rendered.width)x\(rendered.height), Zuschnitt aktiv: \(effective.crop.enabled), Drehung aktiv: \(effective.rotation.enabled) (\(String(format: "%+.2f", effective.rotation.degrees))°)")
+                }
+            }
+            break
+        }
         let t0 = ContinuousClock.now
         let analysis = ImageAnalyzer.analyze(image)
         let t1 = ContinuousClock.now
