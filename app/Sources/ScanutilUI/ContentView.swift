@@ -548,7 +548,15 @@ struct SeriesListView: View {
 
     @State private var renaming: UUID?
     @State private var renameText = ""
-    @State private var deleting: ScanDocument?
+    @State private var deleting: PendingDeletion?
+
+    /// Eine Serie, die gelöscht werden soll, und ob ihre Scans mit.
+    struct PendingDeletion: Identifiable {
+        let document: ScanDocument
+        let withScans: Bool
+        var id: UUID { document.id }
+        var scanCount: Int { Set(document.pages.map(\.scanID)).count }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -577,12 +585,22 @@ struct SeriesListView: View {
         .accessibilityIdentifier("series-list-view")
         .confirmationDialog(
             "Serie löschen?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), presenting: deleting
-        ) { document in
-            Button("Löschen", role: .destructive) { Task { await model.deleteDocument(id: document.id) } }
-                .accessibilityIdentifier("series-delete-confirm")
+        ) { pending in
+            Button(pending.withScans ? (model.scansAreRecoverable ? "Serie und Scans in den Papierkorb" : "Serie und Scans endgültig löschen") : "Löschen",
+                   role: .destructive) {
+                Task { await model.deleteDocument(id: pending.document.id, withScans: pending.withScans) }
+            }
+            .accessibilityIdentifier("series-delete-confirm")
             Button("Abbrechen", role: .cancel) {}
-        } message: { document in
-            Text("„\(document.title)“ mit \(document.pages.count) Seite\(document.pages.count == 1 ? "" : "n") wird gelöscht. Die Scans bleiben im Archiv.")
+        } message: { pending in
+            let pages = "\(pending.document.pages.count) Seite\(pending.document.pages.count == 1 ? "" : "n")"
+            if pending.withScans {
+                Text("„\(pending.document.title)“ mit \(pages) wird gelöscht, dazu \(pending.scanCount) Scan\(pending.scanCount == 1 ? "" : "s"): "
+                     + (model.scansAreRecoverable ? "Sie kommen in den Papierkorb und lassen sich dort zurücklegen. " : "Sie werden endgültig gelöscht. ")
+                     + "Kommt ein Scan auch in einer anderen Serie vor, verschwindet er dort ebenfalls.")
+            } else {
+                Text("„\(pending.document.title)“ mit \(pages) wird gelöscht. Die Scans bleiben im Archiv.")
+            }
         }
     }
 
@@ -618,7 +636,9 @@ struct SeriesListView: View {
                     Button("Umbenennen") { renaming = document.id; renameText = document.title }
                     Button("Als PDF …") { export(document) }.disabled(document.pages.isEmpty)
                     Divider()
-                    Button("Löschen …", role: .destructive) { deleting = document }
+                    Button("Nur die Serie löschen …", role: .destructive) { deleting = PendingDeletion(document: document, withScans: false) }
+                    Button("Serie und Scans löschen …", role: .destructive) { deleting = PendingDeletion(document: document, withScans: true) }
+                        .disabled(document.pages.isEmpty)
                 } label: { Image(systemName: "ellipsis.circle") }
                 .menuStyle(.borderlessButton).fixedSize()
                 .accessibilityLabel("Weitere Aktionen")
@@ -697,6 +717,7 @@ struct BookPageView: View {
 struct ScanDetailView: View {
     @Bindable var model: AppModel
     let item: ScanItem
+    @State private var confirmDelete = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -732,7 +753,40 @@ struct ScanDetailView: View {
             } else {
                 controls.padding(12)
             }
+            deleteButton.padding(.horizontal, 12).padding(.bottom, 10)
         }
+    }
+
+    /// Den Scan löschen: mit Rückfrage, die sagt, was alles weggeht und ob es sich zurücklegen lässt.
+    private var deleteButton: some View {
+        HStack {
+            Spacer()
+            Button(role: .destructive) { confirmDelete = true } label: { Label("Scan löschen …", systemImage: "trash") }
+                .accessibilityIdentifier("scan-delete-button")
+        }
+        .confirmationDialog("Diesen Scan löschen?", isPresented: $confirmDelete) {
+            Button(model.scansAreRecoverable ? "In den Papierkorb legen" : "Endgültig löschen", role: .destructive) {
+                Task { await model.deleteScan(id: item.id) }
+            }
+            .accessibilityIdentifier("scan-delete-confirm")
+            Button("Abbrechen", role: .cancel) {}
+        } message: {
+            Text(deleteMessage)
+        }
+    }
+
+    private var deleteMessage: String {
+        let documents = model.documents(containing: item.id)
+        var text = "Das Bild (\(item.record.original.width)×\(item.record.original.height)) mit seinen Korrekturen "
+            + (model.scansAreRecoverable ? "kommt in den Papierkorb und lässt sich dort zurücklegen." : "wird endgültig gelöscht.")
+        if !documents.isEmpty {
+            let list = documents.map { document -> String in
+                let pages = document.pages.filter { $0.scanID == item.id }.count
+                return "„\(document.title)“ (\(pages) Seite\(pages == 1 ? "" : "n"))"
+            }.joined(separator: ", ")
+            text += " Es verschwindet auch aus: \(list)."
+        }
+        return text
     }
 
     /// Wie viele Pixel des Originals ein Pixel der verkleinerten Ansicht darstellt, für die Prozentanzeige des Zooms.
