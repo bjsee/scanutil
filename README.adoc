@@ -69,6 +69,12 @@ scripts/bundle.sh              # baut build/Scanutil.app (lokal signiert)
 open build/Scanutil.app
 ----
 
+Der Scanner darf auch erst nach dem Start der App eingeschaltet werden: Ist er nicht da, sucht die App alle zwei Sekunden weiter und verbindet sich von selbst, sobald er auftaucht.
+Das gilt für jeden Verbindungsfehler, also auch, wenn noch die CZUR-Software die Kamera belegt und man sie danach schließt.
+„Jetzt suchen“ im Vorschaufenster versucht es sofort.
+Der Fehler steht dabei nur einmal im Protokoll, nicht bei jedem Versuch.
+Wird der Scanner im laufenden Betrieb getrennt, bemerkt die App das noch nicht (siehe unten).
+
 Die Oberfläche zeigt die Live-Vorschau, die Leertaste oder die Schaltfläche „Scannen“ nimmt in 5696x4272 mit Schärfe 0 auf.
 Originale liegen unter `~/Pictures/Scanutil-Archiv`, über die Umgebungsvariable `SCANUTIL_ARCHIVE` ist der Ort änderbar.
 Mit `SCANUTIL_MOCK=1` läuft die App ohne Scanner.
@@ -106,6 +112,7 @@ Ohne Oberfläche, aus allen Scans eines Archivs:
 Ebenso fehlen Messungen zu Dauer und Speicher eines langen Buches mit 24-Megapixel-Seiten.
 Der Buchmodus wurde nur an künstlichen Doppelseiten geprüft, nicht an echten Büchern: ob Vision die Doppelseite als Ganzes erkennt, wie stark gewölbte Seiten stören (Text zum Falz hin ist verzerrt, das wird nicht entzerrt) und ob der Schatten des Falzes bei Ihren Büchern tief genug ist.
 Das PDF ist kein PDF/A.
+Wird der Scanner im laufenden Betrieb ausgeschaltet oder abgezogen, merkt die App das nicht von selbst: Die Vorschau friert ein, und der nächste Scan meldet einen Fehler. Dann hilft ein Neustart; ein automatisches Wiederverbinden gibt es dafür noch nicht.
 
 *Texterkennung:* Mit „Mit Texterkennung“ beim Export (CLI: `--ocr`, `--lang de-DE,en-US`) legt Apple Vision den erkannten Text unsichtbar über jede Seite, das PDF wird durchsuchbar.
 Das kostet rund 1,5 Sekunden je Seite und läuft bei jedem Export neu, ein Zwischenspeicher fehlt noch.
@@ -135,6 +142,7 @@ Die Erkennung hängt hinter der Schnittstelle `TextRecognizer`; Tesseract für m
 | Gerenderte Ansichten | Tests schreiben Bilder (`SCANUTIL_SNAPSHOT_DIR`), die man ansieht. Schalter und Regler erscheinen darin als Platzhalter.
 
 | Oberfläche bedienen (Schaltfläche, Leertaste, Regler, Schalter, Neustart) | `scripts/ui-tests.sh`: startet die echte App im Dokumentmodus und bedient sie über die Bedienungshilfen
+| Scanner später einschalten | Unit-Tests mit einem Mock, den der Test ein- und ausschaltet (Suche, ein Eintrag im Protokoll, genau eine Sitzung, Abbruch bei `disconnect`), dazu Oberflächentests, in denen die echte App ohne Scanner startet und ihn nach vier Sekunden findet
 | Serie, Auto-Auslösung, Buchmodus, Meldungen, PDF-Export | dieselben Oberflächentests (16 weitere): Serie beginnen und beenden, Seiten im gespeicherten Dokument, Auto-Auslösung auf stehender Vorschau (genau eine Aufnahme, keine Wiederholung), Buchseiten einzeln drehen, Protokoll öffnen, kopieren und leeren, Export über den echten Speicherdialog bis zum PDF
 |===
 
@@ -142,7 +150,8 @@ Die Erkennung hängt hinter der Schnittstelle `TextRecognizer`; Tesseract für m
 Dabei gehen Fenster auf, die App kommt kurz in den Vordergrund, währenddessen nichts tippen.
 Sie laufen nicht bei einem normalen `swift test`, nur mit `SCANUTIL_UI_TESTS=1`.
 Der Regler wird über „Erhöhen“ und „Verringern“ eingestellt, weil sein Wert über die Bedienungshilfen nicht schreibbar ist.
-`SCANUTIL_MOCK=document`, `document-still` oder `noise` schaltet die App in den Testmodus ohne Scanner.
+`SCANUTIL_MOCK=document`, `document-still`, `document-late` oder `noise` schaltet die App in den Testmodus ohne Scanner.
+`document-late` lässt den Scanner erst vier Sekunden nach dem Start auftauchen, wie einen später eingeschalteten.
 `document-still` hat eine stehende Vorschau: die Auto-Auslösung sieht Ruhe und löst nach etwa 0,8 Sekunden von selbst aus, die anderen Modi flimmern und lösen nie aus.
 `SCANUTIL_EXPORT_DIR` lässt den Speicherdialog des Exports in diesem Ordner öffnen, damit die Tests nicht in Ihre Ordner schreiben.
 Der Speicherdialog wird über die sprachunabhängigen Kennungen seiner Schaltflächen (`OKButton`, `CancelButton`) bedient, nicht über deren Beschriftung.

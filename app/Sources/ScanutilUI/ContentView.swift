@@ -46,10 +46,23 @@ public struct ContentView: View {
                     .resizable()
                     .aspectRatio(contentMode: .fit)
             } else if case .failed(let text) = model.status {
-                Label(text, systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.white)
-                    .padding()
-                    .multilineTextAlignment(.center)
+                VStack(spacing: 14) {
+                    Label(text, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                    if model.isSearching {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Die App sucht weiter und verbindet sich, sobald der Scanner da ist.")
+                                .font(.callout).foregroundStyle(.white.opacity(0.8))
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("search-status")
+                    }
+                    Button("Jetzt suchen") { Task { await model.connect() } }
+                        .accessibilityIdentifier("reconnect-button")
+                }
+                .padding()
             } else {
                 ProgressView().controlSize(.large)
             }
@@ -151,7 +164,7 @@ public struct ContentView: View {
         case .connecting: "Verbinde …"
         case .ready: model.device.map { "Bereit: \($0.name)" } ?? "Bereit"
         case .capturing: "Aufnahme läuft"
-        case .failed: "Nicht verfügbar"
+        case .failed: model.isSearching ? "Suche Scanner …" : "Nicht verfügbar"
         }
     }
 }

@@ -42,13 +42,14 @@ struct ScanutilApp: App {
     }
 
     /// `SCANUTIL_MOCK`: nicht gesetzt = echter Scanner, `document` = schiefe Textseite, `document-still` = dieselbe Seite mit
-    /// stehender Vorschau (die Auto-Auslösung sieht Ruhe), `noise` = Rauschen (Automatik unsicher),
+    /// stehender Vorschau (die Auto-Auslösung sieht Ruhe), `document-late` = Scanner erscheint erst nach 4 Sekunden, `noise` = Rauschen (Automatik unsicher),
     /// jeder andere Wert = Graustufenverlauf. Für Entwicklung und die Oberflächentests.
     private static func makeScanner(_ mode: String?) -> any ScannerPort {
         switch mode {
         case nil: ET24Scanner()
         case "document": SyntheticPage.scanner(delivering: SyntheticPage.textPage(width: 1600, height: 1600, tiltCounterClockwise: 6, background: 10, raggedEdges: 30))
         case "document-still": SyntheticPage.scanner(delivering: SyntheticPage.textPage(width: 1600, height: 1600, tiltCounterClockwise: 6, background: 10, raggedEdges: 30), stillPreview: true)
+        case "document-late": SyntheticPage.scanner(delivering: SyntheticPage.textPage(width: 1600, height: 1600, tiltCounterClockwise: 6, background: 10, raggedEdges: 30), appearsAfter: 4)
         case "noise": SyntheticPage.scanner(delivering: SyntheticPage.noise(width: 1200, height: 1200))
         default: MockScanner()
         }
