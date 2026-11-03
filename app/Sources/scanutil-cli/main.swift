@@ -106,6 +106,61 @@ do {
         guard args.count >= 2 else { fail("Bilddatei fehlt") }
         guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: args[1]) as CFURL, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { fail("Bild nicht lesbar") }
+        if args.contains("--hands") {
+            // Hände und Daumen: Maske magentafarben über das Bild legen, zum Ansehen.
+            let t0 = ContinuousClock.now
+            let outer = DocumentDetector.detect(in: image)
+            let detection = HandDetector.detect(in: image, page: outer?.quad)
+            print("Bild \(image.width)x\(image.height), Erkennung \(ContinuousClock.now - t0)")
+            print(outer.map { String(format: "Seitenrand: Plausibilität %.2f", $0.plausibility) } ?? "Seitenrand: nicht erkannt")
+            if let d = detection {
+                print(String(format: "Hände: %d Flächen (davon %d Marker), %.1f %% des Bildes, Sicherheit %.2f", d.regions, d.markers, d.mask.coverage * 100, d.confidence))
+            } else { print("Hände: keine erkannt") }
+            if let out = option("--out", in: args) {
+                let scale = min(1, 1600 / Double(max(image.width, image.height)))
+                let w = Int(Double(image.width) * scale), h = Int(Double(image.height) * scale)
+                guard let context = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                              space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+                else { fail("Überlagerung fehlgeschlagen") }
+                context.interpolationQuality = .high
+                context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+                if let mask = detection?.mask {
+                    let provider = CGDataProvider(data: Data(mask.cells.map { $0 > 127 ? UInt8(160) : 0 }) as CFData)!
+                    if let overlay = CGImage(width: mask.width, height: mask.height, bitsPerComponent: 8, bitsPerPixel: 8, bytesPerRow: mask.width,
+                                             space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGBitmapInfo(rawValue: 0), provider: provider,
+                                             decode: nil, shouldInterpolate: true, intent: .defaultIntent) {
+                        context.saveGState()
+                        context.clip(to: CGRect(x: 0, y: 0, width: w, height: h), mask: overlay)
+                        context.setFillColor(CGColor(red: 1, green: 0, blue: 1, alpha: 1))
+                        context.fill(CGRect(x: 0, y: 0, width: w, height: h))
+                        context.restoreGState()
+                    }
+                }
+                if let o = outer {
+                    func pt(_ p: NormalizedPoint) -> CGPoint { CGPoint(x: p.x * Double(w), y: (1 - p.y) * Double(h)) }
+                    context.setStrokeColor(CGColor(red: 0.2, green: 0.5, blue: 1, alpha: 1)); context.setLineWidth(3)
+                    context.move(to: pt(o.quad.topLeft)); context.addLine(to: pt(o.quad.topRight)); context.addLine(to: pt(o.quad.bottomRight))
+                    context.addLine(to: pt(o.quad.bottomLeft)); context.closePath(); context.strokePath()
+                }
+                guard let result = context.makeImage(),
+                      let dest = CGImageDestinationCreateWithURL(URL(fileURLWithPath: out) as CFURL, UTType.png.identifier as CFString, 1, nil)
+                else { fail("Überlagerung fehlgeschlagen") }
+                CGImageDestinationAddImage(dest, result, nil)
+                CGImageDestinationFinalize(dest)
+                print("Überlagerung: \(out)")
+            }
+            if let clean = option("--clean", in: args), let mask = detection?.mask {
+                // Das Bild ohne Hände, in voller Auflösung.
+                let t1 = ContinuousClock.now
+                guard let cleaned = HandRemover.apply(to: image, mask: mask),
+                      let dest = CGImageDestinationCreateWithURL(URL(fileURLWithPath: clean) as CFURL, UTType.png.identifier as CFString, 1, nil)
+                else { fail("Entfernen fehlgeschlagen") }
+                CGImageDestinationAddImage(dest, cleaned, nil)
+                CGImageDestinationFinalize(dest)
+                print("ohne Hände: \(clean) (\(cleaned.width)x\(cleaned.height)), Entfernen \(ContinuousClock.now - t1)")
+            }
+            break
+        }
         if args.contains("--book") {
             let t0 = ContinuousClock.now
             let analysis = BookAnalyzer.analyze(image)

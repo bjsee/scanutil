@@ -20,6 +20,12 @@ struct UISession {
 
     var originals: [URL] { files("originals", ext: "png") }
     var correctionFiles: [URL] { files("corrections", ext: "json") }
+
+    /// Die gespeicherten Korrekturen des ersten Scans als JSON, oder `nil`.
+    var corrections: [String: Any]? {
+        guard let file = correctionFiles.first, let data = try? Data(contentsOf: file) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
     var documentFiles: [URL] { files("documents", ext: "json") }
     var pdfs: [URL] {
         ((try? FileManager.default.contentsOfDirectory(at: exportDir, includingPropertiesForKeys: nil)) ?? []).filter { $0.pathExtension == "pdf" }

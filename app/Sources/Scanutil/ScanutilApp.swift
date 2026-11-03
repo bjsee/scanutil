@@ -54,7 +54,7 @@ struct ScanutilApp: App {
     }
 
     /// `SCANUTIL_MOCK`: nicht gesetzt = echter Scanner, `document` = schiefe Textseite, `document-still` = dieselbe Seite mit
-    /// stehender Vorschau (die Auto-Auslösung sieht Ruhe), `document-late` = Scanner erscheint erst nach 4 Sekunden,
+    /// stehender Vorschau (die Auto-Auslösung sieht Ruhe), `document-late` = Scanner erscheint erst nach 4 Sekunden, `document-hands` = Seite mit Daumen und Finger im Bild,
     /// `document-unplug` = wird 5 Sekunden nach dem Verbinden abgezogen und kommt 3 Sekunden später wieder, `noise` = Rauschen (Automatik unsicher),
     /// jeder andere Wert = Graustufenverlauf. Für Entwicklung und die Oberflächentests.
     private static func makeScanner(_ mode: String?) -> any ScannerPort {
@@ -64,6 +64,7 @@ struct ScanutilApp: App {
         case "document-still": SyntheticPage.scanner(delivering: SyntheticPage.textPage(width: 1600, height: 1600, tiltCounterClockwise: 6, background: 10, raggedEdges: 30), stillPreview: true)
         case "document-late": SyntheticPage.scanner(delivering: SyntheticPage.textPage(width: 1600, height: 1600, tiltCounterClockwise: 6, background: 10, raggedEdges: 30), appearsAfter: 4)
         case "document-unplug": SyntheticPage.scanner(delivering: SyntheticPage.textPage(width: 1600, height: 1600, tiltCounterClockwise: 6, background: 10, raggedEdges: 30), scheduledUnplug: (after: 5, returnsAfter: 3))
+        case "document-hands": SyntheticPage.scanner(delivering: SyntheticPage.pageWithThumb())
         case "noise": SyntheticPage.scanner(delivering: SyntheticPage.noise(width: 1200, height: 1200))
         default: MockScanner()
         }

@@ -71,6 +71,25 @@ public struct RotationCorrection: Codable, Equatable, Sendable {
     }
 }
 
+/// Entfernt Hände und Daumen: Die Flächen der Maske werden mit dem Papierton aus ihrer Umgebung gefüllt.
+public struct HandRemovalCorrection: Codable, Equatable, Sendable {
+    public var enabled: Bool
+    public var source: CorrectionSource
+    public var confidence: Double?
+    /// Die Maske der Hände als PNG in niedriger Auflösung. Ohne Maske gibt es nichts zu entfernen.
+    public var mask: Data?
+
+    public init(enabled: Bool = false, source: CorrectionSource = .automatic, confidence: Double? = nil, mask: Data? = nil) {
+        self.enabled = enabled
+        self.source = source
+        self.confidence = confidence
+        self.mask = mask
+    }
+
+    /// Ob überhaupt Hände erkannt wurden.
+    public var hasMask: Bool { mask != nil }
+}
+
 /// Alle Korrekturen zu einem Original. Das Original bleibt unverändert, daraus entsteht jederzeit reproduzierbar das korrigierte Bild.
 public struct Corrections: Codable, Equatable, Sendable {
     /// Ab dieser Sicherheit wird eine automatische Erkennung angewendet, darunter nur vorgeschlagen und zur Prüfung markiert.
@@ -81,14 +100,29 @@ public struct Corrections: Codable, Equatable, Sendable {
     public var enabled: Bool
     public var crop: CropCorrection
     public var rotation: RotationCorrection
+    /// Hände und Daumen entfernen. Wird zuerst angewendet, vor Zuschnitt und Drehung.
+    public var handRemoval: HandRemovalCorrection
     /// Hochgezählt bei jeder Änderung.
     public var revision: Int
 
-    public init(enabled: Bool = true, crop: CropCorrection = .init(), rotation: RotationCorrection = .init(), revision: Int = 0) {
+    public init(enabled: Bool = true, crop: CropCorrection = .init(), rotation: RotationCorrection = .init(),
+                handRemoval: HandRemovalCorrection = .init(), revision: Int = 0) {
         self.enabled = enabled
         self.crop = crop
         self.rotation = rotation
+        self.handRemoval = handRemoval
         self.revision = revision
+    }
+
+    /// Ältere Dateien kennen `handRemoval` nicht: dann gilt der Standard, keine Hände entfernen.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
+        enabled = try c.decode(Bool.self, forKey: .enabled)
+        crop = try c.decode(CropCorrection.self, forKey: .crop)
+        rotation = try c.decode(RotationCorrection.self, forKey: .rotation)
+        handRemoval = try c.decodeIfPresent(HandRemovalCorrection.self, forKey: .handRemoval) ?? .init()
+        revision = try c.decode(Int.self, forKey: .revision)
     }
 
     public static let none = Corrections()
@@ -107,6 +141,13 @@ public struct Corrections: Codable, Equatable, Sendable {
 
     public mutating func setCrop(_ quad: Quad) {
         crop = CropCorrection(quad: quad, enabled: true, source: .manual, confidence: nil)
+        revision += 1
+    }
+
+    /// Schaltet das Entfernen der Hände ein oder aus. Ab dann gilt es als manuell.
+    public mutating func setHandRemovalEnabled(_ on: Bool) {
+        handRemoval.enabled = on
+        handRemoval.source = .manual
         revision += 1
     }
 

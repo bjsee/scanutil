@@ -112,6 +112,22 @@ public enum SyntheticPage {
         return data as Data
     }
 
+    /// Wie `textPage`, aber mit einem Daumen an der unteren linken Seitenecke und einem Finger darunter, der aus dem Bild ragt.
+    /// Für Tests und den Demomodus der Handentfernung.
+    public static func pageWithThumb(width: Int = 1600, height: Int = 1600) -> CGImage {
+        let page = textPage(width: width, height: height, tiltCounterClockwise: 6, background: 10, raggedEdges: 30)
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+        else { return page }
+        context.draw(page, in: CGRect(x: 0, y: 0, width: width, height: height))
+        context.setFillColor(CGColor(red: 205 / 255, green: 150 / 255, blue: 125 / 255, alpha: 1))
+        let w = Double(width), h = Double(height)
+        // CoreGraphics zählt y von unten: der Daumen sitzt unten links auf dem Papier, der Finger reicht bis zum Bildrand.
+        context.fillEllipse(in: CGRect(x: w * 0.12, y: h * 0.10, width: w * 0.11, height: h * 0.14))
+        context.fillEllipse(in: CGRect(x: w * 0.12, y: -h * 0.04, width: w * 0.10, height: h * 0.16))
+        return context.makeImage() ?? page
+    }
+
     /// Ein Mock-Scanner, der immer dieses Bild als Aufnahme liefert.
     /// Mit `stillPreview` zeigt die Vorschau ein stehendes Bild statt eines flimmernden.
     /// Mit `appearsAfter` ist der Scanner erst nach so vielen Sekunden da, wie einer, den man später einschaltet.

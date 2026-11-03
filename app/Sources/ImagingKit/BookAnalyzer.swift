@@ -13,6 +13,8 @@ public struct BookAnalysis: Equatable, Sendable {
     public let leftQuad: Quad
     public let rightQuad: Quad
     public let warnings: [String]
+    /// Hände, Daumen und Daumen-Marker auf der Doppelseite. Für die Erkennung von Rand und Falz sind sie herausgenommen.
+    public let hands: HandDetection?
 }
 
 /// Teilt eine aufgeschlagene Doppelseite am Falz in zwei Seiten und misst deren Schräglage getrennt.
@@ -22,7 +24,11 @@ public enum BookAnalyzer {
 
     public static func analyze(_ original: CGImage) -> BookAnalysis {
         var warnings: [String] = []
-        let working = downscaled(original, maxDimension: workingSize)
+        var working = downscaled(original, maxDimension: workingSize)
+
+        // Zuerst die Hände und Daumen-Marker herausnehmen: Sie stören die Randerkennung von Vision und verfälschen den Falz.
+        var hands = HandDetector.detect(in: working)
+        if let found = hands, let cleaned = HandRemover.apply(to: working, mask: found.mask) { working = cleaned }
 
         // Rand der Doppelseite. Erkennt Vision nur eine der beiden Seiten, ist das Ergebnis hochkant und wird verworfen.
         var outer = DocumentDetector.detect(in: working)
@@ -34,6 +40,10 @@ public enum BookAnalyzer {
         }
         if outer == nil, warnings.isEmpty { warnings.append("Der Rand der Doppelseite wurde nicht erkannt.") }
         let outerQuad = outer?.quad ?? .full
+        // Zweiter Durchgang mit bekanntem Seitenrand: findet auch Daumen und Marker, die den Bildrand nicht berühren.
+        if let page = outer?.quad, let more = HandDetector.detect(in: downscaled(original, maxDimension: workingSize), page: page) {
+            hands = HandDetector.union(hands, more)
+        }
 
         // Falz in der Mitte des Buchs suchen.
         let box = boundingBox(of: outerQuad)
@@ -57,7 +67,7 @@ public enum BookAnalyzer {
             warnings.append("Die Schräglage einer Seite ist unsicher.")
         }
         return BookAnalysis(outer: outer, gutter: gutter, leftSkew: leftSkew, rightSkew: rightSkew,
-                            leftQuad: left, rightQuad: right, warnings: warnings)
+                            leftQuad: left, rightQuad: right, warnings: warnings, hands: hands)
     }
 
     /// Aus der Analyse werden Korrekturen je Seite. Sichere Ergebnisse sind aktiv, unsichere nur vorgeschlagen.
@@ -71,6 +81,11 @@ public enum BookAnalyzer {
             result.crop = CropCorrection(quad: quad, enabled: cropConfident, source: .automatic, confidence: cropConfidence)
             if let s = skew {
                 result.rotation = RotationCorrection(degrees: s.degrees, enabled: s.confidence >= threshold, source: .automatic, confidence: s.confidence)
+            }
+            // Beide Seiten tragen dieselbe Maske: jede schneidet danach ihren eigenen Ausschnitt.
+            if let hands = analysis.hands {
+                result.handRemoval = HandRemovalCorrection(enabled: hands.confidence >= threshold, source: .automatic,
+                                                           confidence: hands.confidence, mask: hands.mask.pngData())
             }
             return result
         }
