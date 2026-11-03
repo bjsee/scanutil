@@ -73,7 +73,10 @@ Der Scanner darf auch erst nach dem Start der App eingeschaltet werden: Ist er n
 Das gilt für jeden Verbindungsfehler, also auch, wenn noch die CZUR-Software die Kamera belegt und man sie danach schließt.
 „Jetzt suchen“ im Vorschaufenster versucht es sofort.
 Der Fehler steht dabei nur einmal im Protokoll, nicht bei jedem Versuch.
-Wird der Scanner im laufenden Betrieb getrennt, bemerkt die App das noch nicht (siehe unten).
+Wird der Scanner im laufenden Betrieb ausgeschaltet oder abgezogen, bemerkt die App das: Die Vorschau verschwindet (statt einzufrieren), die Anzeige nennt den Verlust, und die Suche beginnt von vorn.
+Kommt der Scanner wieder, verbindet sie sich von selbst. Eine laufende Serie, alle Scans und die Auswahl bleiben dabei erhalten, die nächste Seite landet im selben Dokument.
+Eine Aufnahme, die gerade läuft, wenn der Scanner verschwindet, scheitert sofort und gilt als Verlust, nicht als Aufnahmefehler.
+Erkannt wird der Verlust auf drei Wegen: die Meldung von macOS (Gerät getrennt), ein Laufzeitfehler der Kamerasitzung und eine Wache, die anschlägt, wenn länger als fünf Sekunden kein Bild kommt.
 
 Die Oberfläche zeigt die Live-Vorschau, die Leertaste oder die Schaltfläche „Scannen“ nimmt in 5696x4272 mit Schärfe 0 auf.
 Originale liegen unter `~/Pictures/Scanutil-Archiv`, über die Umgebungsvariable `SCANUTIL_ARCHIVE` ist der Ort änderbar.
@@ -112,7 +115,7 @@ Ohne Oberfläche, aus allen Scans eines Archivs:
 Ebenso fehlen Messungen zu Dauer und Speicher eines langen Buches mit 24-Megapixel-Seiten.
 Der Buchmodus wurde nur an künstlichen Doppelseiten geprüft, nicht an echten Büchern: ob Vision die Doppelseite als Ganzes erkennt, wie stark gewölbte Seiten stören (Text zum Falz hin ist verzerrt, das wird nicht entzerrt) und ob der Schatten des Falzes bei Ihren Büchern tief genug ist.
 Das PDF ist kein PDF/A.
-Wird der Scanner im laufenden Betrieb ausgeschaltet oder abgezogen, merkt die App das nicht von selbst: Die Vorschau friert ein, und der nächste Scan meldet einen Fehler. Dann hilft ein Neustart; ein automatisches Wiederverbinden gibt es dafür noch nicht.
+Das Erkennen eines abgezogenen Scanners wurde nur mit dem Mock geprüft, nicht an der echten Hardware: Ob macOS beim ET24 die Meldung „Gerät getrennt“ schickt und ob die Wache mit fünf Sekunden nie fälschlich anschlägt (etwa bei sehr langsamem Strom im Aufnahmeformat), ist ungeprüft.
 
 *Texterkennung:* Mit „Mit Texterkennung“ beim Export (CLI: `--ocr`, `--lang de-DE,en-US`) legt Apple Vision den erkannten Text unsichtbar über jede Seite, das PDF wird durchsuchbar.
 Das kostet rund 1,5 Sekunden je Seite und läuft bei jedem Export neu, ein Zwischenspeicher fehlt noch.
@@ -142,7 +145,7 @@ Die Erkennung hängt hinter der Schnittstelle `TextRecognizer`; Tesseract für m
 | Gerenderte Ansichten | Tests schreiben Bilder (`SCANUTIL_SNAPSHOT_DIR`), die man ansieht. Schalter und Regler erscheinen darin als Platzhalter.
 
 | Oberfläche bedienen (Schaltfläche, Leertaste, Regler, Schalter, Neustart) | `scripts/ui-tests.sh`: startet die echte App im Dokumentmodus und bedient sie über die Bedienungshilfen
-| Scanner später einschalten | Unit-Tests mit einem Mock, den der Test ein- und ausschaltet (Suche, ein Eintrag im Protokoll, genau eine Sitzung, Abbruch bei `disconnect`), dazu Oberflächentests, in denen die echte App ohne Scanner startet und ihn nach vier Sekunden findet
+| Scanner später einschalten, Scanner im Betrieb abziehen | Unit-Tests mit einem Mock, den der Test ein- und ausschaltet und „abzieht“ (Suche, ein Eintrag im Protokoll, genau eine Sitzung je Verbindung, Verlust mitten in einer Aufnahme, Serie und Scans bleiben, Abbruch bei `disconnect`), dazu Oberflächentests, in denen die echte App ohne Scanner startet oder ihn im Betrieb verliert und sich wieder verbindet. Mit absichtlich eingebauten Fehlern geprüft. Die echte Hardware ist nicht abgedeckt.
 | Serie, Auto-Auslösung, Buchmodus, Meldungen, PDF-Export | dieselben Oberflächentests (16 weitere): Serie beginnen und beenden, Seiten im gespeicherten Dokument, Auto-Auslösung auf stehender Vorschau (genau eine Aufnahme, keine Wiederholung), Buchseiten einzeln drehen, Protokoll öffnen, kopieren und leeren, Export über den echten Speicherdialog bis zum PDF
 |===
 
@@ -150,8 +153,9 @@ Die Erkennung hängt hinter der Schnittstelle `TextRecognizer`; Tesseract für m
 Dabei gehen Fenster auf, die App kommt kurz in den Vordergrund, währenddessen nichts tippen.
 Sie laufen nicht bei einem normalen `swift test`, nur mit `SCANUTIL_UI_TESTS=1`.
 Der Regler wird über „Erhöhen“ und „Verringern“ eingestellt, weil sein Wert über die Bedienungshilfen nicht schreibbar ist.
-`SCANUTIL_MOCK=document`, `document-still`, `document-late` oder `noise` schaltet die App in den Testmodus ohne Scanner.
+`SCANUTIL_MOCK=document`, `document-still`, `document-late`, `document-unplug` oder `noise` schaltet die App in den Testmodus ohne Scanner.
 `document-late` lässt den Scanner erst vier Sekunden nach dem Start auftauchen, wie einen später eingeschalteten.
+`document-unplug` zieht ihn fünf Sekunden nach dem Verbinden ab und schaltet ihn drei Sekunden später wieder ein.
 `document-still` hat eine stehende Vorschau: die Auto-Auslösung sieht Ruhe und löst nach etwa 0,8 Sekunden von selbst aus, die anderen Modi flimmern und lösen nie aus.
 `SCANUTIL_EXPORT_DIR` lässt den Speicherdialog des Exports in diesem Ordner öffnen, damit die Tests nicht in Ihre Ordner schreiben.
 Der Speicherdialog wird über die sprachunabhängigen Kennungen seiner Schaltflächen (`OKButton`, `CancelButton`) bedient, nicht über deren Beschriftung.

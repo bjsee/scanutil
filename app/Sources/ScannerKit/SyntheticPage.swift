@@ -115,14 +115,16 @@ public enum SyntheticPage {
     /// Ein Mock-Scanner, der immer dieses Bild als Aufnahme liefert.
     /// Mit `stillPreview` zeigt die Vorschau ein stehendes Bild statt eines flimmernden.
     /// Mit `appearsAfter` ist der Scanner erst nach so vielen Sekunden da, wie einer, den man später einschaltet.
-    public static func scanner(delivering image: CGImage, stillPreview: Bool = false, appearsAfter: TimeInterval = 0) -> MockScanner {
+    public static func scanner(delivering image: CGImage, stillPreview: Bool = false, appearsAfter: TimeInterval = 0,
+                               scheduledUnplug: (after: TimeInterval, returnsAfter: TimeInterval)? = nil) -> MockScanner {
         let data = png(image)
         let size = ScanFormat(width: image.width, height: image.height)
         return MockScanner(
             formats: [size],
             imageProvider: { _ in MockImage(data: data, width: image.width, height: image.height) },
             stillPreview: stillPreview,
-            appearsAfter: appearsAfter
+            appearsAfter: appearsAfter,
+            scheduledUnplug: scheduledUnplug
         )
     }
 }

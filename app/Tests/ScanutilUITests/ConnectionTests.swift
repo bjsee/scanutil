@@ -155,4 +155,136 @@ struct ConnectionTests {
         #expect(seen.count == 1, "Status wechselte: \(seen)")
         await model.disconnect()
     }
+
+    // MARK: Verlust im laufenden Betrieb
+
+    private static let lostText = AppModel.connectionLostText
+
+    @Test func unplugDuringOperationIsDetectedAndTheAppReconnectsWhenItIsBack() async {
+        let scanner = MockScanner()
+        let (model, dir) = makeModel(scanner); defer { try? FileManager.default.removeItem(at: dir) }
+        await model.connect()
+        #expect(model.status == .ready)
+        #expect(await eventually { model.previewImage != nil })
+
+        scanner.simulateConnectionLoss()
+        #expect(await eventually { model.status == .failed(Self.lostText) }, "Status: \(model.status)")
+        #expect(model.isSearching)
+        #expect(model.previewImage == nil, "Ein eingefrorenes Bild bleibt stehen")
+        #expect(scanner.closedSessions == 1, "Die verlorene Sitzung muss geschlossen werden")
+        #expect(model.log.contains { $0.level == .error && $0.text == Self.lostText })
+
+        scanner.setSwitchedOn(true)
+        #expect(await eventually { model.status == .ready }, "Status: \(model.status)")
+        #expect(!model.isSearching)
+        #expect(scanner.openedSessions == 2)
+        #expect(await eventually { model.previewImage != nil }, "Die Vorschau kommt nach dem Wiederverbinden nicht zurück")
+        await model.scan()
+        #expect(model.scans.count == 1)
+        await model.disconnect()
+    }
+
+    @Test func aSeriesAndItsScansSurviveAnUnplug() async throws {
+        let scanner = MockScanner(previewsEnabled: false)
+        let (model, dir) = makeModel(scanner); defer { try? FileManager.default.removeItem(at: dir) }
+        await model.connect()
+        model.startSeries(title: "Chronik")
+        await model.scan()
+        let documentID = try #require(model.series?.id)
+        let firstScan = try #require(model.scans.first?.id)
+
+        scanner.simulateConnectionLoss()
+        #expect(await eventually { model.status == .failed(Self.lostText) })
+        #expect(model.isSeriesActive, "Die Serie wurde beendet")
+        #expect(model.scans.map(\.id) == [firstScan], "Die Scans gingen verloren")
+
+        scanner.setSwitchedOn(true)
+        #expect(await eventually { model.status == .ready })
+        #expect(model.scans.map(\.id).contains(firstScan), "Das Wiederverbinden hat die Scans neu geladen")
+        await model.scan()
+        #expect(model.series?.id == documentID)
+        #expect(model.series?.pages.count == 2, "Die zweite Seite gehört in dasselbe Dokument")
+        await model.disconnect()
+    }
+
+    @Test func unplugInTheMiddleOfACaptureEndsInLostNotReady() async {
+        let scanner = MockScanner(previewsEnabled: false, captureDelay: .milliseconds(300))
+        let (model, dir) = makeModel(scanner); defer { try? FileManager.default.removeItem(at: dir) }
+        await model.connect()
+        let capture = Task { await model.scan() }
+        #expect(await eventually { model.status == .capturing })
+        scanner.simulateConnectionLoss()
+        await capture.value
+
+        #expect(model.status == .failed(Self.lostText), "Status nach verlorener Aufnahme: \(model.status)")
+        #expect(model.scans.isEmpty)
+        #expect(model.isSearching)
+        // Nur die Meldung über den Verlust, nicht zusätzlich ein Fehler „Gerät nicht gefunden“ der Aufnahme.
+        #expect(model.log.filter { $0.level == .error }.map(\.text) == [Self.lostText])
+        await model.disconnect()
+    }
+
+    @Test func aScanTriggeredWhileLostIsImpossible() async {
+        let scanner = MockScanner(previewsEnabled: false)
+        let (model, dir) = makeModel(scanner); defer { try? FileManager.default.removeItem(at: dir) }
+        await model.connect()
+        scanner.simulateConnectionLoss()
+        #expect(await eventually { model.status == .failed(Self.lostText) })
+        await model.scan()
+        #expect(model.scans.isEmpty)
+        #expect(model.status == .failed(Self.lostText))
+        await model.disconnect()
+    }
+
+    @Test func theAppSurvivesSeveralUnplugsAndOpensOneSessionEach() async {
+        let scanner = MockScanner(previewsEnabled: false)
+        let (model, dir) = makeModel(scanner); defer { try? FileManager.default.removeItem(at: dir) }
+        await model.connect()
+        for round in 1...3 {
+            scanner.simulateConnectionLoss()
+            #expect(await eventually { model.status == .failed(Self.lostText) }, "Runde \(round): \(model.status)")
+            scanner.setSwitchedOn(true)
+            #expect(await eventually { model.status == .ready }, "Runde \(round): \(model.status)")
+        }
+        #expect(scanner.openedSessions == 4)
+        #expect(scanner.closedSessions == 3)
+        #expect(model.log.filter { $0.text == Self.lostText }.count == 3, "Jeder Verlust genau einmal im Protokoll")
+        await model.disconnect()
+        #expect(scanner.closedSessions == 4)
+    }
+
+    @Test func unplugAfterDisconnectChangesNothing() async {
+        let scanner = MockScanner(previewsEnabled: false)
+        let (model, dir) = makeModel(scanner); defer { try? FileManager.default.removeItem(at: dir) }
+        await model.connect()
+        await model.disconnect()
+        let before = model.log.count
+        scanner.simulateConnectionLoss()
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(model.status == .disconnected)
+        #expect(!model.isSearching)
+        #expect(model.log.count == before)
+    }
+
+    @Test func withoutRetryAnUnplugEndsInLostWithoutSearching() async {
+        let scanner = MockScanner(previewsEnabled: false)
+        let (model, dir) = makeModel(scanner, retry: nil); defer { try? FileManager.default.removeItem(at: dir) }
+        await model.connect()
+        scanner.simulateConnectionLoss()
+        #expect(await eventually { model.status == .failed(Self.lostText) })
+        #expect(!model.isSearching)
+        await model.disconnect()
+    }
+
+    @Test func aManualSearchAfterAnUnplugReconnects() async {
+        let scanner = MockScanner(previewsEnabled: false)
+        let (model, dir) = makeModel(scanner, retry: .seconds(30)); defer { try? FileManager.default.removeItem(at: dir) }
+        await model.connect()
+        scanner.simulateConnectionLoss()
+        #expect(await eventually { model.status == .failed(Self.lostText) })
+        scanner.setSwitchedOn(true)
+        await model.connect()                     // „Jetzt suchen“, ohne auf den Takt zu warten
+        #expect(model.status == .ready)
+        await model.disconnect()
+    }
 }

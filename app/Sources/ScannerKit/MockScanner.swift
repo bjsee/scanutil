@@ -37,6 +37,10 @@ public final class MockScanner: ScannerPort, @unchecked Sendable {
     private let appearsAfter: TimeInterval
     private var switchedOn: Bool
     private let connectDelay: Duration
+    fileprivate let captureDelay: Duration
+    private let scheduledUnplug: (after: TimeInterval, returnsAfter: TimeInterval)?
+    private var unplugScheduled = false
+    private var liveSessions: [MockSession] = []
     private let created = ProcessInfo.processInfo.systemUptime
     private var attempts = 0
 
@@ -51,9 +55,13 @@ public final class MockScanner: ScannerPort, @unchecked Sendable {
         stillPreview: Bool = false,
         appearsAfter: TimeInterval = 0,
         startsSwitchedOff: Bool = false,
-        connectDelay: Duration = .zero
+        connectDelay: Duration = .zero,
+        captureDelay: Duration = .zero,
+        scheduledUnplug: (after: TimeInterval, returnsAfter: TimeInterval)? = nil
     ) {
         self.connectDelay = connectDelay
+        self.captureDelay = captureDelay
+        self.scheduledUnplug = scheduledUnplug
         self.appearsAfter = appearsAfter
         switchedOn = !startsSwitchedOff
         self.previewsEnabled = previewsEnabled
@@ -76,6 +84,16 @@ public final class MockScanner: ScannerPort, @unchecked Sendable {
     /// Ob das Gerät schon „eingeschaltet“ ist. Mit `appearsAfter` taucht es erst nach dieser Zeit auf,
     /// wie ein Scanner, den man nach dem Start der App einschaltet.
     private var isPresent: Bool { lock.withLock { switchedOn } && ProcessInfo.processInfo.systemUptime - created >= appearsAfter }
+
+    /// Zieht das Gerät ab: Offene Sitzungen melden den Verlust, und das Gerät ist aus, bis man es wieder einschaltet.
+    public func simulateConnectionLoss() {
+        setSwitchedOn(false)
+        let sessions = lock.withLock { liveSessions }
+        for session in sessions { session.loseConnection() }
+    }
+
+    fileprivate func register(_ session: MockSession) { lock.withLock { liveSessions.append(session) } }
+    fileprivate func unregister(_ session: MockSession) { lock.withLock { liveSessions.removeAll { $0 === session } } }
 
     /// Schaltet das Gerät ein oder aus, für Tests, die den Zeitpunkt genau bestimmen müssen.
     public func setSwitchedOn(_ on: Bool) { lock.withLock { switchedOn = on } }
@@ -101,7 +119,26 @@ public final class MockScanner: ScannerPort, @unchecked Sendable {
         guard isPresent else { throw ScannerError.deviceNotFound }
         guard formats.contains(format) else { throw ScannerError.formatUnavailable(format) }
         lock.withLock { opened += 1 }
-        return MockSession(owner: self, device: device, format: format, settings: settings)
+        let session = MockSession(owner: self, device: device, format: format, settings: settings)
+        register(session)
+        scheduleUnplugOnce()
+        return session
+    }
+
+    /// Für den Testmodus der App: Beim ersten Öffnen wird das Gerät nach `after` Sekunden abgezogen und kommt
+    /// `returnsAfter` Sekunden später wieder.
+    private func scheduleUnplugOnce() {
+        guard let plan = scheduledUnplug, lock.withLock({ () -> Bool in
+            if unplugScheduled { return false }
+            unplugScheduled = true
+            return true
+        }) else { return }
+        Task {
+            try? await Task.sleep(for: .seconds(plan.after))
+            simulateConnectionLoss()
+            try? await Task.sleep(for: .seconds(plan.returnsAfter))
+            setSwitchedOn(true)
+        }
     }
 
     fileprivate func record(_ call: Call) { lock.withLock { recordedCalls.append(call) } }
@@ -129,11 +166,24 @@ public final class MockScanner: ScannerPort, @unchecked Sendable {
     }
 }
 
+/// Ein Merkmal, das einmal gesetzt wird und von mehreren Threads gelesen. Liegt vor `self`, damit die Vorschau-Task es
+/// im Initialisierer schon benutzen kann.
+private final class OnceFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    var isSet: Bool { lock.withLock { value } }
+    /// Gibt `true` zurück, wenn dieser Aufruf es gesetzt hat.
+    func set() -> Bool { lock.withLock { let first = !value; value = true; return first } }
+}
+
 private final class MockSession: ScanSession, @unchecked Sendable {
     let device: DeviceInfo
     let format: ScanFormat
     let previewFrames: AsyncStream<PreviewFrame>
+    let connectionLost: AsyncStream<ScannerError>
 
+    private let lostContinuation: AsyncStream<ScannerError>.Continuation
+    private let lost = OnceFlag()
     private let owner: MockScanner
     private let settings: CaptureSettings
     private let previewTask: Task<Void, Never>
@@ -145,12 +195,16 @@ private final class MockSession: ScanSession, @unchecked Sendable {
         self.device = device
         self.format = format
         self.settings = settings
+        let (lostStream, lostContinuation) = AsyncStream<ScannerError>.makeStream()
+        connectionLost = lostStream
+        self.lostContinuation = lostContinuation
         let (stream, continuation) = AsyncStream<PreviewFrame>.makeStream(bufferingPolicy: .bufferingNewest(1))
         previewFrames = stream
+        let lost = self.lost
         previewTask = Task {
             var shade: CGFloat = 0
             while !Task.isCancelled {
-                if owner.previewsEnabled, let image = Self.previewImage(shade: shade) { continuation.yield(PreviewFrame(image: image)) }
+                if owner.previewsEnabled, !lost.isSet, let image = Self.previewImage(shade: shade) { continuation.yield(PreviewFrame(image: image)) }
                 // Eine stehende Vorschau ändert sich nie: wie ein ruhig liegendes Buch, die Auto-Auslösung sieht nur Ruhe.
                 if !owner.stillPreview { shade = (shade + 0.1).truncatingRemainder(dividingBy: 1) }
                 try? await Task.sleep(for: .milliseconds(30))
@@ -159,9 +213,19 @@ private final class MockSession: ScanSession, @unchecked Sendable {
         }
     }
 
+    /// Das Gerät ist weg: der Strom endet, eine Aufnahme scheitert, und der Verlust wird einmal gemeldet.
+    func loseConnection() {
+        guard !lock.withLock({ isClosed }), lost.set() else { return }
+        lostContinuation.yield(.deviceNotFound)
+        lostContinuation.finish()
+    }
+
     func capture() async throws -> Capture {
         if let error = owner.captureError { throw error }
-        guard !lock.withLock({ isClosed }) else { throw ScannerError.deviceNotFound }
+        guard !lock.withLock({ isClosed }), !lost.isSet else { throw ScannerError.deviceNotFound }
+        // Eine Aufnahme, die dauert: der Verlust kann mitten hinein fallen.
+        if owner.captureDelay > .zero { try? await Task.sleep(for: owner.captureDelay) }
+        guard !lock.withLock({ isClosed }), !lost.isSet else { throw ScannerError.deviceNotFound }
         owner.record(.init(format: format, settings: settings))
         let image = try owner.image(for: format)
         return Capture(
@@ -178,6 +242,8 @@ private final class MockSession: ScanSession, @unchecked Sendable {
         }
         guard first else { return }
         previewTask.cancel()
+        lostContinuation.finish()
+        owner.unregister(self)
         owner.recordClose()
     }
 

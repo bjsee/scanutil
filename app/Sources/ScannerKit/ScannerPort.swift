@@ -25,9 +25,19 @@ public protocol ScanSession: Sendable {
     /// Laufender Bilderstrom für die Live-Vorschau, verkleinert. Es darf nur ein Verbraucher lesen.
     var previewFrames: AsyncStream<PreviewFrame> { get }
 
+    /// Meldet höchstens einmal, dass die Verbindung zum Gerät verloren ging (abgezogen, ausgeschaltet, Strom steht),
+    /// und endet dann. Danach liefert die Sitzung keine Bilder mehr, ein laufender `capture()` scheitert.
+    /// Schließen muss man sie trotzdem.
+    var connectionLost: AsyncStream<ScannerError> { get }
+
     /// Nimmt das nächste Bild des Stroms in voller Auflösung als Original auf.
     func capture() async throws -> Capture
 
     /// Beendet die Sitzung und setzt die Einstellungen zurück. Mehrfaches Schließen ist harmlos.
     func close() async
+}
+
+extension ScanSession {
+    /// Umsetzungen ohne Erkennung eines Verlusts melden nie einen.
+    public var connectionLost: AsyncStream<ScannerError> { AsyncStream { $0.finish() } }
 }
