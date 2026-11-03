@@ -123,6 +123,12 @@ public final class AppModel {
     private let retryInterval: Duration?
     /// Aus nach `disconnect()`: ein Versuch, der erst danach scheitert, darf die Suche nicht neu starten.
     private var searchAllowed = true
+    /// Beobachtet die laufende Sitzung auf Verlust der Verbindung. `sessionGeneration` trennt alte von neuen Sitzungen.
+    private var lossTask: Task<Void, Never>?
+    private var sessionGeneration = 0
+    /// Die Scans werden nur beim ersten Verbinden vom Archiv geladen: ein Wiederverbinden nach einem Verlust darf
+    /// Ansichten, Korrekturen und die Auswahl nicht wegwerfen.
+    private var hasLoadedScans = false
     private var trigger = AutoTrigger()
     private var lastSignature: FrameSignature?
 
@@ -211,13 +217,17 @@ public final class AppModel {
             let formats = try await scanner.availableFormats()
             guard let format = Self.captureFormat(from: formats) else { throw ScannerError.deviceNotFound }
             captureFormat = format
-            await loadExistingScans()
+            if !hasLoadedScans {
+                await loadExistingScans()
+                hasLoadedScans = true
+            }
             let opened = try await scanner.openSession(format: format, settings: .archival)
             // Wurde die Suche inzwischen abgebrochen (disconnect), darf keine Sitzung offen bleiben:
             // sie hielte die Schärfe im Gerät verstellt.
             if Task.isCancelled { await opened.close(); return false }
             session = opened
             startPreview(from: opened)
+            watchConnection(of: opened)
             searchTask?.cancel()
             searchTask = nil
             isSearching = false
@@ -228,6 +238,12 @@ public final class AppModel {
             // Nach disconnect() ist es vorbei: ein Versuch, der erst jetzt scheitert, ändert weder Status noch Protokoll
             // und startet keine neue Suche.
             guard searchAllowed else { return false }
+            // Nach einem Verlust ist „Scanner nicht gefunden“ dieselbe Ursache: die Anzeige bleibt beim Verlust,
+            // solange die Suche läuft. Ein anderer Fehler (etwa verweigerter Kamerazugriff) ersetzt sie.
+            if previous == .failed(Self.connectionLostText), (error as? ScannerError) == .deviceNotFound {
+                startSearching()
+                return false
+            }
             let text = error.localizedDescription
             // Derselbe Fehler wie beim letzten Versuch steht schon im Protokoll: nicht alle paar Sekunden erneut.
             if previous != .failed(text) { post(.error, text, asMessage: false) }
@@ -250,9 +266,47 @@ public final class AppModel {
         }
     }
 
+    static let connectionLostText = "Die Verbindung zum Scanner ging verloren. Ist er noch angeschlossen und eingeschaltet?"
+
+    /// Wartet darauf, dass die Sitzung den Verlust der Verbindung meldet, und reagiert darauf.
+    private func watchConnection(of opened: any ScanSession) {
+        lossTask?.cancel()
+        sessionGeneration += 1
+        let generation = sessionGeneration
+        lossTask = Task { [weak self] in
+            for await _ in opened.connectionLost {
+                guard let self, !Task.isCancelled, self.sessionGeneration == generation else { return }
+                await self.handleConnectionLoss()
+                return
+            }
+        }
+    }
+
+    /// Der Scanner wurde abgezogen oder ausgeschaltet: Vorschau und Sitzung wegräumen und von vorn suchen,
+    /// bis er wieder da ist. Eine laufende Serie und alle Scans bleiben erhalten. Wiederholbar ohne Wirkung.
+    private func handleConnectionLoss() async {
+        guard let lost = session else { return }
+        session = nil
+        sessionGeneration += 1
+        previewTask?.cancel()
+        previewTask = nil
+        lossTask = nil
+        previewImage = nil          // ein eingefrorenes Bild wäre schlimmer als keines
+        await lost.close()
+        // Wurde inzwischen beendet (disconnect), ist es vorbei. Sonst wird der Zustand in einem Zug veröffentlicht:
+        // erst jetzt ist die alte Sitzung zu, der Status „verloren“ gesetzt und die Suche gestartet.
+        guard searchAllowed else { return }
+        status = .failed(Self.connectionLostText)
+        post(.error, Self.connectionLostText, asMessage: false)
+        startSearching()
+    }
+
     /// Beendet die Sitzung und setzt die Geräteeinstellungen zurück. Vor dem Beenden der App aufrufen.
     public func disconnect() async {
         searchAllowed = false
+        sessionGeneration += 1
+        lossTask?.cancel()
+        lossTask = nil
         searchTask?.cancel()
         searchTask = nil
         isSearching = false
@@ -307,11 +361,17 @@ public final class AppModel {
             selectedID = item.id
             lastScanDuration = ContinuousClock.now - started
             appendToSeries(scanID: record.id)
-            status = .ready
+            // Ging die Verbindung während der Aufnahme verloren, bleibt der Status bei „verloren“.
+            if self.session != nil { status = .ready }
             analyzeInBackground(id: item.id)
         } catch {
+            // „Gerät nicht gefunden“ mitten in einer Aufnahme heißt: der Scanner ist weg.
+            if (error as? ScannerError) == .deviceNotFound {
+                await handleConnectionLoss()
+                if self.session == nil { return }
+            }
             post(.error, error.localizedDescription)
-            status = .ready
+            if self.session != nil { status = .ready }
         }
     }
 

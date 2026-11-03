@@ -107,13 +107,14 @@ struct DocumentStorageTests {
     }
 
     /// Zeitpunkte sind als ISO 8601 mit Millisekunden gespeichert, exakte Gleichheit von `Date` gilt nicht.
+    /// Die Abweichung kann knapp über einer Millisekunde liegen (gemessen: 0,0010000467), daher zwei Millisekunden Toleranz.
     private func expectSame(_ a: ScanDocument, _ b: ScanDocument, sourceLocation: SourceLocation = #_sourceLocation) {
         #expect(a.id == b.id, sourceLocation: sourceLocation)
         #expect(a.title == b.title, sourceLocation: sourceLocation)
         #expect(a.metadata == b.metadata, sourceLocation: sourceLocation)
         #expect(a.pages == b.pages, sourceLocation: sourceLocation)
         #expect(a.revision == b.revision, sourceLocation: sourceLocation)
-        #expect(abs(a.createdAt.timeIntervalSince(b.createdAt)) < 0.001, sourceLocation: sourceLocation)
+        #expect(abs(a.createdAt.timeIntervalSince(b.createdAt)) < 0.002, sourceLocation: sourceLocation)
     }
 
     @Test func rejectsPageWithUnknownScan() throws {

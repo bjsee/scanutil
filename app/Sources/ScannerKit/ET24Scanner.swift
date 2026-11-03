@@ -115,13 +115,18 @@ private final class LiveSession: NSObject, ScanSession, AVCaptureVideoDataOutput
     let device: DeviceInfo
     let format: ScanFormat
     let previewFrames: AsyncStream<PreviewFrame>
+    let connectionLost: AsyncStream<ScannerError>
 
     /// Breite der Vorschaubilder in Pixeln.
     private static let previewWidth = 1536.0
+    /// So lange darf kein Bild kommen, bevor die Verbindung als verloren gilt. Der Strom liefert sonst viele Bilder je Sekunde;
+    /// bleibt er stehen, ist das Gerät weg oder hängt, auch wenn macOS keine Meldung schickt.
+    private static let stallLimit: TimeInterval = 5
 
     private let settings: CaptureSettings
     private let onClosed: @Sendable () -> Void
     private let previewContinuation: AsyncStream<PreviewFrame>.Continuation
+    private let lostContinuation: AsyncStream<ScannerError>.Continuation
     private let queue = DispatchQueue(label: "scanutil.et24.session")
     private let avSession = AVCaptureSession()
     private let ciContext = CIContext()
@@ -132,6 +137,11 @@ private final class LiveSession: NSObject, ScanSession, AVCaptureVideoDataOutput
     private var isClosed = false
     private var waiters: [UUID: CheckedContinuation<UncheckedBuffer, Error>] = [:]
     private var frameCount = 0
+    private var avDevice: AVCaptureDevice?
+    private var lostReported = false
+    private var lastFrame = Date()
+    private var observers: [NSObjectProtocol] = []
+    private var watchdog: DispatchSourceTimer?
 
     init(device: DeviceInfo, format: ScanFormat, settings: CaptureSettings, onClosed: @escaping @Sendable () -> Void) {
         self.device = device
@@ -141,6 +151,9 @@ private final class LiveSession: NSObject, ScanSession, AVCaptureVideoDataOutput
         let (stream, continuation) = AsyncStream<PreviewFrame>.makeStream(bufferingPolicy: .bufferingNewest(1))
         previewFrames = stream
         previewContinuation = continuation
+        let (lostStream, lostContinuation) = AsyncStream<ScannerError>.makeStream()
+        connectionLost = lostStream
+        self.lostContinuation = lostContinuation
         super.init()
     }
 
@@ -155,6 +168,7 @@ private final class LiveSession: NSObject, ScanSession, AVCaptureVideoDataOutput
             }
             queue.asyncAfter(deadline: .now() + 20) { [self] in failStart(ScannerError.timeout) }
         }
+        startMonitoring()
     }
 
     private func configure() throws {
@@ -164,6 +178,7 @@ private final class LiveSession: NSObject, ScanSession, AVCaptureVideoDataOutput
             return Int(d.width) == format.width && Int(d.height) == format.height
         }) else { throw ScannerError.formatUnavailable(format) }
 
+        lock.withLock { self.avDevice = avDevice }
         let input = try AVCaptureDeviceInput(device: avDevice)
         let output = AVCaptureVideoDataOutput()
         output.alwaysDiscardsLateVideoFrames = true
@@ -201,6 +216,7 @@ private final class LiveSession: NSObject, ScanSession, AVCaptureVideoDataOutput
 
         let (ready, pending, closed) = lock.withLock { () -> (CheckedContinuation<Void, Error>?, [CheckedContinuation<UncheckedBuffer, Error>], Bool) in
             frameCount += 1
+            lastFrame = Date()
             let r = readyContinuation
             readyContinuation = nil
             isReady = true
@@ -220,6 +236,66 @@ private final class LiveSession: NSObject, ScanSession, AVCaptureVideoDataOutput
         if let cg = ciContext.createCGImage(small, from: small.extent) {
             previewContinuation.yield(PreviewFrame(image: cg))
         }
+    }
+
+    // MARK: Verlust der Verbindung
+
+    /// Beobachtet das Gerät auf drei Wegen: macOS meldet das Abziehen, die Sitzung meldet einen Laufzeitfehler,
+    /// und eine Wache schlägt an, wenn länger kein Bild kommt.
+    private func startMonitoring() {
+        let device = lock.withLock { avDevice }
+        let center = NotificationCenter.default
+        let disconnected = center.addObserver(forName: AVCaptureDevice.wasDisconnectedNotification, object: device, queue: nil) { [weak self] _ in
+            Trace.log("session: Gerät getrennt")
+            self?.markLost()
+        }
+        let failed = center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: avSession, queue: nil) { [weak self] _ in
+            Trace.log("session: Laufzeitfehler")
+            self?.markLost()
+        }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 1, repeating: 1)
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            let silent = Date().timeIntervalSince(lock.withLock { lastFrame })
+            if silent > Self.stallLimit {
+                Trace.log("session: seit \(Int(silent)) s kein Bild")
+                markLost()
+            }
+        }
+        lock.withLock {
+            observers = [disconnected, failed]
+            watchdog = timer
+        }
+        timer.resume()
+    }
+
+    /// Das Gerät ist weg. Wartende Aufnahmen scheitern sofort statt nach zehn Sekunden, und der Verlust wird einmal gemeldet.
+    private func markLost() {
+        let (first, pending, starting) = lock.withLock { () -> (Bool, [CheckedContinuation<UncheckedBuffer, Error>], Bool) in
+            if lostReported || isClosed { return (false, [], false) }
+            lostReported = true
+            let p = Array(waiters.values)
+            waiters.removeAll()
+            return (true, p, readyContinuation != nil)
+        }
+        guard first else { return }
+        for waiter in pending { waiter.resume(throwing: ScannerError.deviceNotFound) }
+        if starting { failStart(ScannerError.deviceNotFound) }
+        stopMonitoring()
+        lostContinuation.yield(.deviceNotFound)
+        lostContinuation.finish()
+    }
+
+    private func stopMonitoring() {
+        let (tokens, timer) = lock.withLock { () -> ([NSObjectProtocol], DispatchSourceTimer?) in
+            let t = observers, w = watchdog
+            observers = []
+            watchdog = nil
+            return (t, w)
+        }
+        for token in tokens { NotificationCenter.default.removeObserver(token) }
+        timer?.cancel()
     }
 
     // MARK: ScanSession
@@ -268,6 +344,8 @@ private final class LiveSession: NSObject, ScanSession, AVCaptureVideoDataOutput
         }
         guard first else { return }
         for waiter in pending { waiter.resume(throwing: ScannerError.deviceNotFound) }
+        stopMonitoring()
+        lostContinuation.finish()
         await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
             queue.async { [self] in
                 avSession.stopRunning()
