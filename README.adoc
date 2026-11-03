@@ -164,7 +164,7 @@ Die Erkennung hängt hinter der Schnittstelle `TextRecognizer`; Tesseract für m
 
 *Oberflächentests:* Sie brauchen für das startende Programm die Berechtigung „Bedienungshilfen“ (Systemeinstellungen, Datenschutz und Sicherheit).
 Die App wird im Hintergrund gestartet (`SCANUTIL_NO_ACTIVATE`: ohne Dock-Symbol, ohne Fokus, das Fenster erscheint hinter der aktiven App) und über die Bedienungshilfen bedient. Tasten und Mausrad gehen direkt an den Prozess, der Mauszeiger wird nicht bewegt.
-Ob das auf dem Rechner wirklich so ist, prüft `HintergrundTests`: Er merkt sich die vorn liegende App und die Mausposition und vergleicht nach jedem Schritt (Scannen, Leertaste, Protokoll, Speicherdialog, Export, Mausrad). *Stand:* Der Hintergrundbetrieb ist gebaut, aber noch nicht auf einem Rechner bestätigt. Bis dahin können Fenster und Fokus doch auftauchen.
+Ob das auf dem Rechner wirklich so ist, prüft `HintergrundTests`: Er merkt sich die vorn liegende App und die Mausposition und vergleicht nach jedem Schritt (Scannen, Leertaste, Protokoll, Speicherdialog, Export, Mausrad). *Stand:* Am 3. November 2026 lief `HintergrundTests` auf dem Entwicklerrechner durch, ohne dass dort etwas auffiel: Die App blieb bei allen Schritten im Hintergrund, auch beim Speicherdialog, die Leertaste und das Mausrad kamen an. Geprüft wird der Fokus, nicht die Mausposition: Wer am Rechner sitzt, bewegt sie selbst.
 Sie laufen nicht bei einem normalen `swift test`, nur mit `SCANUTIL_UI_TESTS=1`.
 Der Regler wird über „Erhöhen“ und „Verringern“ eingestellt, weil sein Wert über die Bedienungshilfen nicht schreibbar ist.
 `SCANUTIL_MOCK=document`, `document-still`, `document-late`, `document-unplug` oder `noise` schaltet die App in den Testmodus ohne Scanner.
