@@ -34,6 +34,11 @@ public final class MockScanner: ScannerPort, @unchecked Sendable {
     private let imageProvider: (@Sendable (ScanFormat) throws -> MockImage)?
     fileprivate let previewsEnabled: Bool
     fileprivate let stillPreview: Bool
+    private let appearsAfter: TimeInterval
+    private var switchedOn: Bool
+    private let connectDelay: Duration
+    private let created = ProcessInfo.processInfo.systemUptime
+    private var attempts = 0
 
     public init(
         formats: [ScanFormat] = [ScanFormat(width: 640, height: 480), ScanFormat(width: 320, height: 240)],
@@ -43,8 +48,14 @@ public final class MockScanner: ScannerPort, @unchecked Sendable {
         clock: @escaping @Sendable () -> Date = { Date() },
         imageProvider: (@Sendable (ScanFormat) throws -> MockImage)? = nil,
         previewsEnabled: Bool = true,
-        stillPreview: Bool = false
+        stillPreview: Bool = false,
+        appearsAfter: TimeInterval = 0,
+        startsSwitchedOff: Bool = false,
+        connectDelay: Duration = .zero
     ) {
+        self.connectDelay = connectDelay
+        self.appearsAfter = appearsAfter
+        switchedOn = !startsSwitchedOff
         self.previewsEnabled = previewsEnabled
         self.stillPreview = stillPreview
         self.formats = formats
@@ -59,19 +70,35 @@ public final class MockScanner: ScannerPort, @unchecked Sendable {
     public var calls: [Call] { lock.withLock { recordedCalls } }
     public var openedSessions: Int { lock.withLock { opened } }
     public var closedSessions: Int { lock.withLock { closed } }
+    /// Wie oft `connect()` aufgerufen wurde, auch erfolglos.
+    public var connectAttempts: Int { lock.withLock { attempts } }
+
+    /// Ob das Gerät schon „eingeschaltet“ ist. Mit `appearsAfter` taucht es erst nach dieser Zeit auf,
+    /// wie ein Scanner, den man nach dem Start der App einschaltet.
+    private var isPresent: Bool { lock.withLock { switchedOn } && ProcessInfo.processInfo.systemUptime - created >= appearsAfter }
+
+    /// Schaltet das Gerät ein oder aus, für Tests, die den Zeitpunkt genau bestimmen müssen.
+    public func setSwitchedOn(_ on: Bool) { lock.withLock { switchedOn = on } }
 
     public func connect() async throws -> DeviceInfo {
+        lock.withLock { attempts += 1 }
+        // Ein Versuch, der dauert: damit Tests Ereignisse mitten in einem Versuch auslösen können.
+        // Ein Abbruch beendet das Warten, nicht den Versuch, wie bei einem echten Gerät.
+        if connectDelay > .zero { try? await Task.sleep(for: connectDelay) }
         if let failure { throw failure }
+        guard isPresent else { throw ScannerError.deviceNotFound }
         return device
     }
 
     public func availableFormats() async throws -> [ScanFormat] {
         if let failure { throw failure }
+        guard isPresent else { throw ScannerError.deviceNotFound }
         return formats
     }
 
     public func openSession(format: ScanFormat, settings: CaptureSettings) async throws -> any ScanSession {
         if let failure { throw failure }
+        guard isPresent else { throw ScannerError.deviceNotFound }
         guard formats.contains(format) else { throw ScannerError.formatUnavailable(format) }
         lock.withLock { opened += 1 }
         return MockSession(owner: self, device: device, format: format, settings: settings)

@@ -70,6 +70,8 @@ public final class AppModel {
     }
 
     public private(set) var status: Status = .disconnected
+    /// Die App sucht den Scanner im Hintergrund weiter, weil die Verbindung fehlschlug. Sobald er da ist, verbindet sie sich.
+    public private(set) var isSearching = false
     public private(set) var device: DeviceInfo?
     public private(set) var previewImage: CGImage?
     public private(set) var scans: [ScanItem] = []
@@ -117,6 +119,10 @@ public final class AppModel {
     private let recognizer: any TextRecognizer
     private var session: (any ScanSession)?
     private var previewTask: Task<Void, Never>?
+    private var searchTask: Task<Void, Never>?
+    private let retryInterval: Duration?
+    /// Aus nach `disconnect()`: ein Versuch, der erst danach scheitert, darf die Suche nicht neu starten.
+    private var searchAllowed = true
     private var trigger = AutoTrigger()
     private var lastSignature: FrameSignature?
 
@@ -124,8 +130,10 @@ public final class AppModel {
         scanner: any ScannerPort, store: ArchiveStore, thumbnailSize: Int = 1600,
         analyze: @escaping @Sendable (CGImage) -> AnalysisResult = AppModel.defaultAnalysis,
         analyzeBook: @escaping @Sendable (CGImage) -> BookAnalysisResult = AppModel.defaultBookAnalysis,
-        recognizer: any TextRecognizer = VisionTextRecognizer()
+        recognizer: any TextRecognizer = VisionTextRecognizer(),
+        retryInterval: Duration? = .seconds(2)
     ) {
+        self.retryInterval = retryInterval
         self.scanner = scanner
         self.store = store
         self.thumbnailSize = thumbnailSize
@@ -185,8 +193,18 @@ public final class AppModel {
     /// Verbindet den Scanner, öffnet die Sitzung im Aufnahmeformat und lädt vorhandene Scans.
     /// Die Vorschau kommt aus derselben Sitzung wie die Aufnahme.
     public func connect() async {
-        guard status != .connecting, status != .capturing, session == nil else { return }
-        status = .connecting
+        searchAllowed = true
+        _ = await attemptConnect()
+    }
+
+    /// Ein Verbindungsversuch. Scheitert er, sucht die App im Hintergrund weiter (`startSearching`), denn der Scanner
+    /// wird oft erst nach dem Start der App eingeschaltet. Gibt zurück, ob die Verbindung steht.
+    @discardableResult
+    private func attemptConnect() async -> Bool {
+        guard status != .connecting, status != .capturing, session == nil else { return session != nil }
+        let previous = status
+        // Während der Suche bleibt die Anzeige ruhig: kein Wechsel zu „Verbinde …“ im Takt der Versuche.
+        if !isSearching { status = .connecting }
         message = nil
         do {
             device = try await scanner.connect()
@@ -195,18 +213,49 @@ public final class AppModel {
             captureFormat = format
             await loadExistingScans()
             let opened = try await scanner.openSession(format: format, settings: .archival)
+            // Wurde die Suche inzwischen abgebrochen (disconnect), darf keine Sitzung offen bleiben:
+            // sie hielte die Schärfe im Gerät verstellt.
+            if Task.isCancelled { await opened.close(); return false }
             session = opened
             startPreview(from: opened)
+            searchTask?.cancel()
+            searchTask = nil
+            isSearching = false
             status = .ready
             post(.info, "Verbunden mit \(device?.name ?? "Scanner"), Aufnahme \(format.description).")
+            return true
         } catch {
-            status = .failed(error.localizedDescription)
-            post(.error, error.localizedDescription, asMessage: false)
+            // Nach disconnect() ist es vorbei: ein Versuch, der erst jetzt scheitert, ändert weder Status noch Protokoll
+            // und startet keine neue Suche.
+            guard searchAllowed else { return false }
+            let text = error.localizedDescription
+            // Derselbe Fehler wie beim letzten Versuch steht schon im Protokoll: nicht alle paar Sekunden erneut.
+            if previous != .failed(text) { post(.error, text, asMessage: false) }
+            status = .failed(text)
+            startSearching()
+            return false
+        }
+    }
+
+    /// Versucht es regelmäßig erneut, bis der Scanner da ist oder `disconnect()` aufgerufen wird.
+    private func startSearching() {
+        guard searchTask == nil, let interval = retryInterval else { return }
+        isSearching = true
+        searchTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                guard let self, !Task.isCancelled else { return }
+                if await self.attemptConnect() { return }
+            }
         }
     }
 
     /// Beendet die Sitzung und setzt die Geräteeinstellungen zurück. Vor dem Beenden der App aufrufen.
     public func disconnect() async {
+        searchAllowed = false
+        searchTask?.cancel()
+        searchTask = nil
+        isSearching = false
         previewTask?.cancel()
         previewTask = nil
         let closing = session

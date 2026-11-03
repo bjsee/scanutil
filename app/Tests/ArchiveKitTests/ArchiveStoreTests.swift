@@ -65,8 +65,10 @@ struct ArchiveStoreTests {
         #expect(loaded.capture.requestedFormat == record.capture.requestedFormat)
         #expect(loaded.capture.sharpness == record.capture.sharpness)
         // Zeitpunkte sind als ISO 8601 mit Millisekunden gespeichert, exakte Gleichheit von Date gilt nicht.
-        #expect(abs(loaded.capture.capturedAt.timeIntervalSince(record.capture.capturedAt)) < 0.001)
-        #expect(abs(loaded.storedAt.timeIntervalSince(record.storedAt)) < 0.001)
+        // Die Abweichung kann durch die Gleitkommadarstellung knapp über einer Millisekunde liegen (gemessen: 0,0010000467),
+        // deshalb zwei Millisekunden Toleranz: ein Test mit „< 0,001“ schlug zufällig fehl.
+        #expect(abs(loaded.capture.capturedAt.timeIntervalSince(record.capture.capturedAt)) < 0.002)
+        #expect(abs(loaded.storedAt.timeIntervalSince(record.storedAt)) < 0.002)
     }
 
     @Test func loadUnknownIdFails() throws {
