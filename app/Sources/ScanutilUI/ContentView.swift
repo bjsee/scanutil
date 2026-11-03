@@ -544,6 +544,11 @@ struct ScanDetailView: View {
                            isOn: Binding(get: { c.crop.enabled }, set: { model.setPageCropEnabled(pageID: page.id, $0) }))
                         .disabled(c.crop.quad == nil)
                         .accessibilityIdentifier("book-crop-\(side)")
+                    if c.handRemoval.hasMask {
+                        Toggle("Hände und Daumen entfernen \(side)",
+                               isOn: Binding(get: { c.handRemoval.enabled }, set: { model.setPageHandRemovalEnabled(pageID: page.id, $0) }))
+                            .accessibilityIdentifier("book-hands-\(side)")
+                    }
                     HStack {
                         Text("Drehung \(side)").font(.callout).frame(width: 90, alignment: .leading)
                         Slider(value: Binding(get: { c.rotation.degrees }, set: { model.setPageRotation(pageID: page.id, degrees: $0) }), in: -15...15, step: 0.05)
@@ -595,6 +600,14 @@ struct ScanDetailView: View {
             Toggle(rotationLabel(c), isOn: Binding(get: { c.rotation.enabled }, set: { model.setRotationEnabled(id: item.id, $0) }))
                 .disabled(!c.enabled)
                 .accessibilityIdentifier("rotation-toggle")
+            // Nur wenn Hände, Daumen oder Marker erkannt wurden.
+            if c.handRemoval.hasMask {
+                Toggle("Hände und Daumen entfernen" + sourceText(c.handRemoval.source, c.handRemoval.confidence, hasValue: true),
+                       isOn: Binding(get: { c.handRemoval.enabled }, set: { model.setHandRemovalEnabled(id: item.id, $0) }))
+                    .disabled(!c.enabled)
+                    .help("Füllt die Stellen mit dem Papierton der Umgebung. Text unter einem Daumen lässt sich nicht wiederherstellen.")
+                    .accessibilityIdentifier("hands-toggle")
+            }
             HStack {
                 Slider(
                     value: Binding(get: { c.rotation.degrees }, set: { model.setRotation(id: item.id, degrees: $0) }),

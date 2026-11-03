@@ -86,6 +86,43 @@ struct SerieOberflaechenTests {
         #expect(s.app.wait { s.pages.count == 1 }, "Leertaste hat keine Seite angehängt")
     }
 
+    // MARK: Hände und Daumen
+
+    private func handRemoval(_ json: [String: Any]?) -> (enabled: Bool, source: String, hasMask: Bool)? {
+        guard let h = (json?["corrections"] as? [String: Any] ?? json)?["handRemoval"] as? [String: Any],
+              let enabled = h["enabled"] as? Bool, let source = h["source"] as? String else { return nil }
+        return (enabled, source, h["mask"] != nil)
+    }
+
+    @Test func aThumbInTheScanIsRemovedAndTheSwitchWorks() throws {
+        let s = try launch(mode: "document-hands"); defer { s.close() }
+        #expect(s.app.element("hands-toggle") == nil)
+        #expect(s.app.press("scan-button"))
+        #expect(s.app.wait { s.originals.count == 1 })
+        #expect(s.app.wait(timeout: 60) { s.app.element("hands-toggle") != nil }, "Der Daumen wurde nicht erkannt: kein Schalter")
+        #expect(s.app.number("hands-toggle") == 1, "Sicher erkannt: wird angewendet")
+        #expect(s.app.wait(timeout: 30) { handRemoval(s.corrections)?.hasMask == true && handRemoval(s.corrections)?.enabled == true })
+
+        #expect(s.app.press("hands-toggle"))
+        #expect(s.app.wait { s.app.number("hands-toggle") == 0 })
+        #expect(s.app.wait { handRemoval(s.corrections).map { !$0.enabled && $0.source == "manual" && $0.hasMask } ?? false },
+                "Der Schalter wurde nicht gespeichert: \(String(describing: handRemoval(s.corrections)))")
+        #expect(s.app.press("hands-toggle"))
+        #expect(s.app.wait { s.app.number("hands-toggle") == 1 })
+    }
+
+    @Test func bookPagesHaveTheirOwnHandSwitch() throws {
+        let s = try launch(mode: "document-hands"); defer { s.close() }
+        startSeries(s, book: true)
+        scan(s, expecting: 1)
+        #expect(s.app.wait(timeout: 60) { s.app.element("book-hands-links") != nil && s.app.element("book-hands-rechts") != nil },
+                "Die Seiten haben keinen Schalter für die Hände")
+        #expect(s.app.press("book-hands-links"))
+        #expect(s.app.wait { s.app.number("book-hands-links") == 0 })
+        #expect(s.app.wait { s.pages.count == 2 && handRemoval(s.pages[0])?.enabled == false })
+        #expect(handRemoval(s.pages[1])?.enabled == true, "Die rechte Seite bleibt")
+    }
+
     // MARK: Gespeicherte Dokumente
 
     @Test func anEndedSeriesCanStillBeExportedThroughTheDocumentMenu() throws {

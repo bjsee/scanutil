@@ -10,6 +10,12 @@ public enum CorrectionRenderer {
     /// Reihenfolge: erst Zuschnitt mit Perspektive, dann Drehung, dann Beschnitt auf das größte Rechteck ohne leere Ecken.
     public static func render(_ image: CGImage, corrections: Corrections) -> CGImage? {
         guard corrections.enabled else { return image }
+        // Zuerst die Hände: Zuschnitt und Drehung arbeiten dann auf dem bereinigten Bild.
+        var image = image
+        if corrections.handRemoval.enabled, let data = corrections.handRemoval.mask, let mask = HandMask(pngData: data),
+           let cleaned = HandRemover.apply(to: image, mask: mask) {
+            image = cleaned
+        }
         var ci = CIImage(cgImage: image)
         let width = Double(image.width), height = Double(image.height)
 

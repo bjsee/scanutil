@@ -644,6 +644,7 @@ public final class AppModel {
 
     public func setPageRotation(pageID: UUID, degrees: Double) { updatePageCorrections(pageID: pageID) { $0.setRotation(degrees: degrees) } }
     public func setPageCropEnabled(pageID: UUID, _ on: Bool) { updatePageCorrections(pageID: pageID) { $0.setCropEnabled(on) } }
+    public func setPageHandRemovalEnabled(pageID: UUID, _ on: Bool) { updatePageCorrections(pageID: pageID) { $0.setHandRemovalEnabled(on) } }
 
     /// Rendert die Ansicht der Seiten eines Scans neu: dieselben Korrekturen wie im PDF, nur kleiner.
     private func refreshPagePreviews(scanID: UUID) {
@@ -678,6 +679,7 @@ public final class AppModel {
     public func setRotation(id: UUID, degrees: Double) { updateCorrections(id: id) { $0.setRotation(degrees: degrees) } }
     public func setRotationEnabled(id: UUID, _ on: Bool) { updateCorrections(id: id) { $0.setRotationEnabled(on) } }
     public func setCropEnabled(id: UUID, _ on: Bool) { updateCorrections(id: id) { $0.setCropEnabled(on) } }
+    public func setHandRemovalEnabled(id: UUID, _ on: Bool) { updateCorrections(id: id) { $0.setHandRemovalEnabled(on) } }
     public func setCorrectionsEnabled(id: UUID, _ on: Bool) { updateCorrections(id: id) { $0.setEnabled(on) } }
 
     private func persistAndRender(index: Int) {
