@@ -83,6 +83,18 @@ Originale liegen unter `~/Pictures/Scanutil-Archiv`, über die Umgebungsvariable
 Mit `SCANUTIL_MOCK=1` läuft die App ohne Scanner.
 Beenden mit Cmd-Q setzt die Schärfe im Gerät auf den Standardwert zurück.
 
+=== Zoom
+
+Vorschau und Scanansicht (auch jede Seite einer Doppelseite) lassen sich vergrößern:
+
+* *Knöpfe* unten rechts im Bild: Verkleinern, Vergrößern (je Schritt 1,5-fach), Einpassen und „1:1“ (ein Bildpixel je Bildschirmpixel). Dazwischen steht der Zoom in Prozent der Bildpixel, 100 % ist 1:1.
+* *Mausrad* vergrößert und verkleinert um den Mauszeiger, auf dem Trackpad ebenso mit gedrückter ⌘- oder ⌥-Taste, *Pinch* zoomt ebenfalls. Mit zwei Fingern auf dem Trackpad wird das gezoomte Bild verschoben.
+* *Ziehen* mit der Maus verschiebt das Bild. *Doppelklick* wechselt zwischen Einpassen und Zoom (auf 1:1, wenn das eine Vergrößerung ist, sonst dreifach).
+* Kleiner als eingepasst wird nicht gezoomt. „1:1“ ist gesperrt, wenn das eingepasste Bild schon mehr als 100 % zeigt (großes Fenster, kleines Bild).
+
+Die Ansichten in der Liste sind auf 1600 Pixel verkleinert und würden beim Hineinzoomen unscharf. Deshalb lädt die Scanansicht ab etwa 1,5-fachem Zoom das Original mit den aktuellen Korrekturen in voller Auflösung nach und tauscht es aus (Hinweis „volle Auflösung“). Das braucht einen Moment und rund 100 MB je Bild; die App hält höchstens zwei. Ändert man Korrekturen, wird das Bild neu berechnet, kurz verzögert, damit ein Regler nicht bei jedem Schritt ein 24-Megapixel-Bild auslöst.
+*Grenze:* Die Live-Vorschau hat nur rund 1500 Pixel Breite, die Aufnahme ist 5696 Pixel breit. Zoomen zeigt in der Vorschau, was sie hergibt; ob die Schärfe stimmt, sieht man erst am Scan. Ein Zoom auf den vollen Sensor in der Vorschau gibt es nicht.
+
 === Meldungen
 
 Warnungen und Hinweise gehen nicht verloren: Der Knopf „Meldungen“ unten rechts öffnet das Protokoll der Sitzung, ein roter Zähler zeigt die seit dem letzten Öffnen neuen Warnungen und Fehler.
@@ -145,12 +157,14 @@ Die Erkennung hängt hinter der Schnittstelle `TextRecognizer`; Tesseract für m
 | Gerenderte Ansichten | Tests schreiben Bilder (`SCANUTIL_SNAPSHOT_DIR`), die man ansieht. Schalter und Regler erscheinen darin als Platzhalter.
 
 | Oberfläche bedienen (Schaltfläche, Leertaste, Regler, Schalter, Neustart) | `scripts/ui-tests.sh`: startet die echte App im Dokumentmodus und bedient sie über die Bedienungshilfen
+| Zoom | Unit-Tests der Rechnung (Zoom um einen Punkt, Verschieben, Grenzen, 1:1), der Umsetzung von Mausrad und Trackpad, der Darstellung (vergrößerter Ausschnitt) und des Bildes in voller Auflösung samt Zwischenspeicher. Oberflächentests bedienen Knöpfe und Mausrad an der echten App. Mit absichtlich eingebauten Fehlern geprüft. Der Weg „1:1 anklicken“ ist an der App nicht abgedeckt: In den Testmodi ist das eingepasste Bild schon größer als 100 %, der Knopf deshalb gesperrt; abgedeckt ist er nur durch die Rechentests. Pinch ist nicht getestet.
 | Scanner später einschalten, Scanner im Betrieb abziehen | Unit-Tests mit einem Mock, den der Test ein- und ausschaltet und „abzieht“ (Suche, ein Eintrag im Protokoll, genau eine Sitzung je Verbindung, Verlust mitten in einer Aufnahme, Serie und Scans bleiben, Abbruch bei `disconnect`), dazu Oberflächentests, in denen die echte App ohne Scanner startet oder ihn im Betrieb verliert und sich wieder verbindet. Mit absichtlich eingebauten Fehlern geprüft. Die echte Hardware ist nicht abgedeckt.
 | Serie, Auto-Auslösung, Buchmodus, Meldungen, PDF-Export | dieselben Oberflächentests (16 weitere): Serie beginnen und beenden, Seiten im gespeicherten Dokument, Auto-Auslösung auf stehender Vorschau (genau eine Aufnahme, keine Wiederholung), Buchseiten einzeln drehen, Protokoll öffnen, kopieren und leeren, Export über den echten Speicherdialog bis zum PDF
 |===
 
 *Oberflächentests:* Sie brauchen für das startende Programm die Berechtigung „Bedienungshilfen“ (Systemeinstellungen, Datenschutz und Sicherheit).
-Dabei gehen Fenster auf, die App kommt kurz in den Vordergrund, währenddessen nichts tippen.
+Die App wird im Hintergrund gestartet (`SCANUTIL_NO_ACTIVATE`: ohne Dock-Symbol, ohne Fokus, das Fenster erscheint hinter der aktiven App) und über die Bedienungshilfen bedient. Tasten und Mausrad gehen direkt an den Prozess, der Mauszeiger wird nicht bewegt.
+Ob das auf dem Rechner wirklich so ist, prüft `HintergrundTests`: Er merkt sich die vorn liegende App und die Mausposition und vergleicht nach jedem Schritt (Scannen, Leertaste, Protokoll, Speicherdialog, Export, Mausrad). *Stand:* Der Hintergrundbetrieb ist gebaut, aber noch nicht auf einem Rechner bestätigt. Bis dahin können Fenster und Fokus doch auftauchen.
 Sie laufen nicht bei einem normalen `swift test`, nur mit `SCANUTIL_UI_TESTS=1`.
 Der Regler wird über „Erhöhen“ und „Verringern“ eingestellt, weil sein Wert über die Bedienungshilfen nicht schreibbar ist.
 `SCANUTIL_MOCK=document`, `document-still`, `document-late`, `document-unplug` oder `noise` schaltet die App in den Testmodus ohne Scanner.
@@ -159,6 +173,7 @@ Der Regler wird über „Erhöhen“ und „Verringern“ eingestellt, weil sein
 `document-still` hat eine stehende Vorschau: die Auto-Auslösung sieht Ruhe und löst nach etwa 0,8 Sekunden von selbst aus, die anderen Modi flimmern und lösen nie aus.
 `SCANUTIL_EXPORT_DIR` lässt den Speicherdialog des Exports in diesem Ordner öffnen, damit die Tests nicht in Ihre Ordner schreiben.
 Der Speicherdialog wird über die sprachunabhängigen Kennungen seiner Schaltflächen (`OKButton`, `CancelButton`) bedient, nicht über deren Beschriftung.
+Ein Rechner, auf dem gearbeitet wird, ist während des Laufs trotzdem belastet (Bild- und PDF-Berechnung).
 Nach Änderungen an der App zuerst `scripts/bundle.sh`: die Tests starten das gebaute Bundle, nicht den Quelltext. `scripts/ui-tests.sh` tut das selbst.
 
 *Nicht automatisch abgesichert:* die Hardware selbst und die Eichung der Sicherheitsschwelle an mehr als den bisherigen echten Vorlagen.

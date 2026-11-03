@@ -2,6 +2,7 @@ import ArchiveKit
 import CoreGraphics
 import ExportKit
 import Foundation
+import ImageIO
 import ImagingKit
 import Observation
 import ScannerKit
@@ -131,6 +132,8 @@ public final class AppModel {
     private var hasLoadedScans = false
     private var trigger = AutoTrigger()
     private var lastSignature: FrameSignature?
+    /// Zuletzt berechnete Bilder in voller Auflösung. Ein 24-Megapixel-Bild belegt rund 100 MB: höchstens zwei.
+    private var fullResolutionCache: [(key: String, corrections: Corrections, image: CGImage)] = []
 
     public init(
         scanner: any ScannerPort, store: ArchiveStore, thumbnailSize: Int = 1600,
@@ -475,6 +478,37 @@ public final class AppModel {
         } catch {
             post(.error, "Das Dokument konnte nicht gespeichert werden: \(error.localizedDescription)")
         }
+    }
+
+    // MARK: Volle Auflösung
+
+    /// Das Original eines Scans in voller Auflösung mit den aktuellen Korrekturen, für den Zoom. Die Ansichten in der Liste
+    /// sind verkleinert und würden beim Hineinzoomen unscharf. Bei einer Buchseite gelten deren Korrekturen und ihr Ausschnitt.
+    /// `nil`, wenn das Original nicht lesbar ist.
+    public func fullResolutionImage(scanID: UUID, pageID: UUID? = nil) async -> CGImage? {
+        let corrections: Corrections
+        if let pageID, let page = series?.page(id: pageID) {
+            corrections = PageGeometry.effectiveCorrections(for: page)
+        } else if let item = scans.first(where: { $0.id == scanID }) {
+            corrections = item.corrections
+        } else {
+            return nil
+        }
+        let key = "\(scanID.uuidString)/\(pageID?.uuidString ?? "-")"
+        if let cached = fullResolutionCache.first(where: { $0.key == key && $0.corrections == corrections }) { return cached.image }
+
+        let store = self.store
+        let image: CGImage? = await Task.detached {
+            guard let record = try? store.load(id: scanID),
+                  let source = CGImageSourceCreateWithURL(store.originalURL(for: record) as CFURL, nil),
+                  let original = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+            return CorrectionRenderer.render(original, corrections: corrections)
+        }.value
+        guard let image else { return nil }
+        fullResolutionCache.removeAll { $0.key == key }
+        fullResolutionCache.append((key, corrections, image))
+        if fullResolutionCache.count > 2 { fullResolutionCache.removeFirst(fullResolutionCache.count - 2) }
+        return image
     }
 
     // MARK: Archiv

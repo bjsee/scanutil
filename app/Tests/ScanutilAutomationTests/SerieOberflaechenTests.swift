@@ -81,7 +81,7 @@ struct SerieOberflaechenTests {
     @Test func spaceBarAddsAPageToTheSeries() throws {
         let s = try launch(); defer { s.close() }
         startSeries(s)
-        #expect(s.app.pressSpace(), "Die App kam nicht in den Vordergrund")
+        #expect(s.app.pressSpace())
         #expect(s.app.wait { s.originals.count == 1 })
         #expect(s.app.wait { s.pages.count == 1 }, "Leertaste hat keine Seite angehängt")
     }

@@ -11,6 +11,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var model: AppModel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Für die Oberflächentests: im Hintergrund bleiben. Ohne Dock-Symbol, ohne Fokus, das Fenster erscheint hinter der
+        // aktiven App. Sonst würde jeder Testlauf dem Nutzer Tastatur und Maus wegnehmen.
+        if ProcessInfo.processInfo.environment["SCANUTIL_NO_ACTIVATE"] != nil {
+            NSApp.setActivationPolicy(.accessory)
+            return
+        }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
     }

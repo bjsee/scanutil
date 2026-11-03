@@ -62,8 +62,7 @@ struct OberflaechenTests {
 
     @Test func spaceBarTriggersScan() throws {
         let s = try launch(); defer { s.close(); try? FileManager.default.removeItem(at: s.dir) }
-        let delivered = s.app.pressSpace()
-        #expect(delivered, "Die App kam nicht in den Vordergrund, die Leertaste wurde nicht gesendet")
+        #expect(s.app.pressSpace())
         #expect(s.app.wait { originals(s.dir).count == 1 }, "Leertaste hat keinen Scan ausgelöst")
     }
 
