@@ -167,6 +167,73 @@ final class AppDriver {
         return true
     }
 
+    /// Drückt in einem Element mit Unterelementen (etwa einem Umschalter mit Segmenten) das Unterelement mit diesem Titel.
+    @discardableResult
+    func pressChild(of identifier: String, titled title: String) -> Bool {
+        guard let parent = element(identifier) else { return false }
+        let hit = find(parent) { el in
+            [kAXTitleAttribute, kAXDescriptionAttribute, kAXValueAttribute].contains { Self.string(el, $0) == title }
+                && el != parent
+        }
+        guard let hit else { return false }
+        return AXUIElementPerformAction(hit, kAXPressAction as CFString) == .success
+    }
+
+    /// Die erste Taste mit diesem Titel irgendwo in der App (etwa in einer Rückfrage).
+    private func button(titled title: String) -> AXUIElement? {
+        for window in windows {
+            // Die Beschriftung steht je nach Taste im Titel oder in der Beschreibung (Tasten einer Rückfrage tragen sie dort).
+            if let hit = find(window, where: {
+                Self.string($0, kAXRoleAttribute) == "AXButton"
+                    && (Self.string($0, kAXTitleAttribute) == title || Self.string($0, kAXDescriptionAttribute) == title)
+            }) { return hit }
+        }
+        return nil
+    }
+
+    func hasButton(titled title: String) -> Bool { button(titled: title) != nil }
+
+    @discardableResult
+    func pressButton(titled title: String) -> Bool {
+        guard let b = button(titled: title) else { return false }
+        return AXUIElementPerformAction(b, kAXPressAction as CFString) == .success
+    }
+
+    /// Wählt den ersten Menüeintrag mit diesem Titel, der gerade irgendwo in der App offen ist.
+    @discardableResult
+    func pressMenuItem(titled title: String, timeout: Double = 5) -> Bool {
+        var item: AXUIElement?
+        _ = wait(timeout: timeout) {
+            for window in windows {
+                if let hit = find(window, where: { Self.string($0, kAXRoleAttribute) == "AXMenuItem" && Self.string($0, kAXTitleAttribute) == title }) {
+                    item = hit; return true
+                }
+            }
+            return false
+        }
+        guard let item else { return false }
+        return AXUIElementPerformAction(item, kAXPressAction as CFString) == .success
+    }
+
+    /// Tippt Text in ein Feld, ohne die App nach vorn zu holen: Das Feld bekommt den Fokus der App, die Zeichen gehen als
+    /// Tastenereignisse direkt an den Prozess.
+    func type(_ text: String, into identifier: String) -> Bool {
+        guard let field = element(identifier) else { return false }
+        _ = AXUIElementSetAttributeValue(field, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        Thread.sleep(forTimeInterval: 0.2)
+        let source = CGEventSource(stateID: .hidSystemState)
+        for character in text {
+            for down in [true, false] {
+                let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: down)
+                var unit = Array(String(character).utf16)
+                event?.keyboardSetUnicodeString(stringLength: unit.count, unicodeString: &unit)
+                event?.postToPid(pid)
+            }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        return true
+    }
+
     /// Bestätigt den Dialog („Sichern“). Gibt `false` zurück, wenn keiner offen ist.
     @discardableResult
     func confirmDialog() -> Bool { press("OKButton") }

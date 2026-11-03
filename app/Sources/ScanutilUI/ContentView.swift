@@ -289,6 +289,9 @@ struct SeriesBar: View {
     @State private var bookMode = false
     /// Beim Export Text erkennen und unsichtbar ins PDF legen.
     @State private var withOCR = false
+    /// Der Dialog „neu oder fortsetzen?“ beim Beginnen, und die Liste der Serien.
+    @State private var showStartSheet = false
+    @State private var showList = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -319,6 +322,7 @@ struct SeriesBar: View {
                         .buttonStyle(.link)
                         .accessibilityIdentifier("export-reveal-button")
                 }
+                seriesListButton
                 Toggle("Mit Texterkennung", isOn: $withOCR)
                     .toggleStyle(.switch)
                     .help("Macht das PDF durchsuchbar. Kostet etwa 1,5 Sekunden je Seite.")
@@ -330,7 +334,12 @@ struct SeriesBar: View {
                     .accessibilityIdentifier("series-end-button")
             } else {
                 Button {
-                    model.startSeries(title: Self.defaultTitle(), book: bookMode)
+                    // Gibt es schon Serien, fragt ein Dialog: neu beginnen oder in einer fortsetzen. Sonst geht es sofort los.
+                    if model.savedDocuments.isEmpty {
+                        model.startSeries(title: Self.defaultTitle(), book: bookMode)
+                    } else {
+                        showStartSheet = true
+                    }
                 } label: {
                     Label("Serie beginnen", systemImage: "books.vertical")
                 }
@@ -341,15 +350,44 @@ struct SeriesBar: View {
                     .toggleStyle(.switch)
                     .help("Jede Aufnahme wird am Falz in eine linke und eine rechte Seite geteilt")
                     .accessibilityIdentifier("book-mode-toggle")
-                Text("Eine Serie sammelt die Aufnahmen als Seiten eines Dokuments und löst nach dem Umblättern selbst aus.")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                if let opened = model.openedDocument {
+                    Label("Angesehen: \(opened.title) · \(opened.pages.count) Seite\(opened.pages.count == 1 ? "" : "n")", systemImage: "eye")
+                        .font(.callout).lineLimit(1)
+                        .accessibilityIdentifier("opened-document-label")
+                    Button("Hier fortsetzen") { Task { await model.resumeSeries(id: opened.id) } }
+                        .disabled(model.status != .ready)
+                        .accessibilityIdentifier("resume-opened-button")
+                    Button("Schließen") { Task { await model.closeDocument() } }
+                        .accessibilityIdentifier("close-document-button")
+                } else {
+                    Text("Eine Serie sammelt die Aufnahmen als Seiten eines Dokuments und löst nach dem Umblättern selbst aus.")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
                 Spacer()
+                seriesListButton
                 savedDocumentsMenu
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("series-bar")
+        .sheet(isPresented: $showStartSheet) {
+            StartSeriesSheet(model: model, initialBook: bookMode) { showStartSheet = false }
+        }
+    }
+
+    /// Die Liste aller Serien: öffnen, fortsetzen, umbenennen, als PDF ausgeben, löschen.
+    private var seriesListButton: some View {
+        Button { showList.toggle() } label: {
+            Label("Serien (\(model.savedDocuments.count))", systemImage: "list.bullet.rectangle")
+        }
+        .help("Alle Serien: ansehen, fortsetzen, umbenennen, als PDF ausgeben oder löschen")
+        .accessibilityLabel("Serien")
+        .accessibilityValue("\(model.savedDocuments.count)")
+        .accessibilityIdentifier("series-list-button")
+        .popover(isPresented: $showList, arrowEdge: .top) {
+            SeriesListView(model: model) { document in chooseExportTarget(for: document) }
+        }
     }
 
     @ViewBuilder private var phaseIndicator: some View {
@@ -419,8 +457,184 @@ struct SeriesBar: View {
         count == 1 ? "1 Seite" : "\(count) Seiten"
     }
 
-    static func defaultTitle(now: Date = Date()) -> String {
-        "Serie " + now.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+    static func defaultTitle(now: Date = Date()) -> String { AppModel.defaultSeriesTitle(now: now) }
+}
+
+/// Der Dialog beim Beginnen, wenn es schon Serien gibt: eine neue beginnen (mit Namen) oder in einer vorhandenen fortsetzen.
+struct StartSeriesSheet: View {
+    @Bindable var model: AppModel
+    let done: () -> Void
+
+    private enum Mode: Hashable { case new, resume }
+    @State private var mode: Mode = .new
+    @State private var name = ""
+    @State private var book: Bool
+    @State private var resumeID: UUID?
+
+    init(model: AppModel, initialBook: Bool, done: @escaping () -> Void) {
+        self.model = model
+        self.done = done
+        _book = State(initialValue: initialBook)
+        _resumeID = State(initialValue: model.savedDocuments.first?.id)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Serie beginnen").font(.headline)
+            Text("Es gibt schon \(model.savedDocuments.count) Serie\(model.savedDocuments.count == 1 ? "" : "n"). Neu beginnen oder in einer fortsetzen?")
+                .font(.callout).foregroundStyle(.secondary)
+            Picker("", selection: $mode) {
+                Text("Neue Serie").tag(Mode.new)
+                Text("Fortsetzen").tag(Mode.resume)
+            }
+            .pickerStyle(.segmented).labelsHidden()
+            .accessibilityIdentifier("start-mode-picker")
+
+            switch mode {
+            case .new:
+                TextField("Name", text: $name, prompt: Text(AppModel.defaultSeriesTitle()))
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("series-name-field")
+                Toggle("Doppelseiten (Buch)", isOn: $book)
+                    .help("Jede Aufnahme wird am Falz in eine linke und eine rechte Seite geteilt")
+                    .accessibilityIdentifier("sheet-book-toggle")
+            case .resume:
+                Picker("Serie", selection: $resumeID) {
+                    ForEach(model.savedDocuments) { document in
+                        Text("\(document.title) · \(document.pages.count) Seite\(document.pages.count == 1 ? "" : "n")")
+                            .tag(Optional(document.id))
+                    }
+                }
+                .accessibilityIdentifier("resume-picker")
+                if let chosen = model.savedDocuments.first(where: { $0.id == resumeID }) {
+                    Text("Neue Aufnahmen kommen ans Ende von „\(chosen.title)“, als " + (chosen.pages.contains { $0.region != .whole } ? "Doppelseiten." : "Einzelseiten."))
+                        .font(.caption).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("resume-note")
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button("Abbrechen") { done() }
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier("series-sheet-cancel")
+                Button("Beginnen") { confirm() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(mode == .resume && resumeID == nil)
+                    .accessibilityIdentifier("series-sheet-confirm")
+            }
+        }
+        .padding(20)
+        .frame(width: 440)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("start-series-sheet")
+    }
+
+    private func confirm() {
+        switch mode {
+        case .new:
+            model.startSeries(title: name, book: book)
+        case .resume:
+            if let id = resumeID { Task { await model.resumeSeries(id: id) } }
+        }
+        done()
+    }
+}
+
+/// Alle Serien als Liste. Eine Serie öffnen heißt ansehen (die Miniaturleiste zeigt ihre Scans), fortsetzen heißt weiter aufnehmen.
+struct SeriesListView: View {
+    @Bindable var model: AppModel
+    let export: (ScanDocument) -> Void
+
+    @State private var renaming: UUID?
+    @State private var renameText = ""
+    @State private var deleting: ScanDocument?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Serien").font(.headline)
+                Text("\(model.savedDocuments.count)").font(.callout).foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(10)
+            Divider()
+            if model.savedDocuments.isEmpty {
+                Text("Noch keine Serie.").foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 80)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(model.savedDocuments) { document in
+                            row(document)
+                            Divider()
+                        }
+                    }
+                }
+            }
+        }
+        .frame(width: 560, height: 340)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("series-list-view")
+        .confirmationDialog(
+            "Serie löschen?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), presenting: deleting
+        ) { document in
+            Button("Löschen", role: .destructive) { Task { await model.deleteDocument(id: document.id) } }
+                .accessibilityIdentifier("series-delete-confirm")
+            Button("Abbrechen", role: .cancel) {}
+        } message: { document in
+            Text("„\(document.title)“ mit \(document.pages.count) Seite\(document.pages.count == 1 ? "" : "n") wird gelöscht. Die Scans bleiben im Archiv.")
+        }
+    }
+
+    private func row(_ document: ScanDocument) -> some View {
+        let isRunning = model.series?.id == document.id, isOpened = model.openedDocument?.id == document.id
+        return HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                if renaming == document.id {
+                    TextField("Name", text: $renameText)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { commitRename(document) }
+                        .accessibilityIdentifier("series-rename-field")
+                } else {
+                    Text(document.title).font(.callout.bold()).lineLimit(1)
+                }
+                Text("\(document.pages.count) Seite\(document.pages.count == 1 ? "" : "n") · "
+                     + document.createdAt.formatted(.dateTime.day().month().year().hour().minute()))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if isRunning { Text("läuft").font(.caption).foregroundStyle(.red) }
+            else if isOpened { Text("angesehen").font(.caption).foregroundStyle(.secondary) }
+            if renaming == document.id {
+                Button("OK") { commitRename(document) }.accessibilityIdentifier("series-rename-ok")
+            } else {
+                Button("Ansehen") { Task { await model.openDocument(id: document.id) } }
+                    .disabled(model.isSeriesActive || isOpened)
+                    .accessibilityIdentifier("series-open-button")
+                Button("Fortsetzen") { Task { await model.resumeSeries(id: document.id) } }
+                    .disabled(model.isSeriesActive || model.status != .ready)
+                    .accessibilityIdentifier("series-resume-button")
+                Menu {
+                    Button("Umbenennen") { renaming = document.id; renameText = document.title }
+                    Button("Als PDF …") { export(document) }.disabled(document.pages.isEmpty)
+                    Divider()
+                    Button("Löschen …", role: .destructive) { deleting = document }
+                } label: { Image(systemName: "ellipsis.circle") }
+                .menuStyle(.borderlessButton).fixedSize()
+                .accessibilityLabel("Weitere Aktionen")
+                .accessibilityIdentifier("series-menu")
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(isRunning || isOpened ? Color.accentColor.opacity(0.10) : Color.clear)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(document.title), \(document.pages.count) Seiten")
+        .accessibilityIdentifier("series-row")
+    }
+
+    private func commitRename(_ document: ScanDocument) {
+        model.renameDocument(id: document.id, to: renameText)
+        renaming = nil
     }
 }
 

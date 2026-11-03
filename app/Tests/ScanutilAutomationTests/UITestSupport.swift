@@ -37,6 +37,13 @@ struct UISession {
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
+    /// Die Titel aller gespeicherten Dokumente.
+    var documentTitles: [String] {
+        documentFiles.compactMap { file in
+            (try? Data(contentsOf: file)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }?["title"] as? String
+        }
+    }
+
     var pages: [[String: Any]] { (document?["pages"] as? [[String: Any]]) ?? [] }
 
     /// Der Drehwinkel und die Herkunft der Seite `index` im gespeicherten Dokument.

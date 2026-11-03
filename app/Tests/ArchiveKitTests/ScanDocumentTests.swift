@@ -155,3 +155,48 @@ struct DocumentStorageTests {
         #expect(try store.loadDocument(id: doc.id).title == "neu")
     }
 }
+
+@Suite("Dokument löschen")
+struct DocumentDeletionTests {
+    private func makeStore() -> (ArchiveStore, URL) {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("scanutil-del-\(UUID().uuidString)")
+        return (ArchiveStore(root: dir), dir)
+    }
+
+    private func storeScan(_ store: ArchiveStore) async throws -> ScanRecord {
+        let session = try await MockScanner().openSession(format: ScanFormat(width: 320, height: 240), settings: .archival)
+        let capture = try await session.capture()
+        await session.close()
+        return try store.store(capture)
+    }
+
+    @Test func removesTheDocumentButNeverTheOriginals() async throws {
+        let (store, dir) = makeStore(); defer { try? FileManager.default.removeItem(at: dir) }
+        let scan = try await storeScan(store)
+        var doc = ScanDocument(title: "Weg")
+        doc.append(DocumentPage(scanID: scan.id))
+        try store.saveDocument(doc)
+
+        try store.deleteDocument(id: doc.id)
+        #expect(try store.allDocuments().isEmpty)
+        #expect(throws: ArchiveError.documentNotFound(doc.id)) { _ = try store.loadDocument(id: doc.id) }
+        // Das Original ist unberührt, geprüft und wieder frei.
+        #expect(FileManager.default.fileExists(atPath: store.originalURL(for: scan).path))
+        #expect(try store.verify(scan))
+        #expect(try store.unassignedScans().map(\.id) == [scan.id])
+    }
+
+    @Test func deletingAnUnknownDocumentThrows() {
+        let (store, dir) = makeStore(); defer { try? FileManager.default.removeItem(at: dir) }
+        let id = UUID()
+        #expect(throws: ArchiveError.documentNotFound(id)) { try store.deleteDocument(id: id) }
+    }
+
+    @Test func otherDocumentsStayWhenOneIsDeleted() throws {
+        let (store, dir) = makeStore(); defer { try? FileManager.default.removeItem(at: dir) }
+        let a = ScanDocument(title: "A"), b = ScanDocument(title: "B")
+        try store.saveDocument(a); try store.saveDocument(b)
+        try store.deleteDocument(id: a.id)
+        #expect(try store.allDocuments().map(\.id) == [b.id])
+    }
+}
