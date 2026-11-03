@@ -87,6 +87,10 @@ public final class AppModel {
 
     /// Das Dokument der laufenden Serie, sonst `nil`. Jede Aufnahme der Serie wird als Seite angehängt und sofort gespeichert.
     public private(set) var series: ScanDocument?
+    /// Das Dokument, das gerade angesehen wird, wenn keine Serie läuft. Es bestimmt, welche Seiten die Scans der Miniaturleiste haben.
+    public private(set) var openedDocument: ScanDocument?
+    /// Das Dokument, dessen Seiten angezeigt und bearbeitet werden: die laufende Serie, sonst das geöffnete Dokument.
+    public var shownDocument: ScanDocument? { series ?? openedDocument }
     public var isSeriesActive: Bool { series != nil }
     /// Wie lange das Bild ruhig sein muss, bis ausgelöst wird, für den Fortschrittsbalken.
     public var seriesCalmDuration: TimeInterval { trigger.configuration.calmDuration }
@@ -399,9 +403,13 @@ public final class AppModel {
     /// Mit `book` ergibt jede Aufnahme zwei Seiten (links und rechts), geteilt am erkannten Falz.
     public func startSeries(title: String, book: Bool = false) {
         guard status == .ready, series == nil else { return }
-        let document = ScanDocument(title: title)
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let document = ScanDocument(title: trimmed.isEmpty ? Self.defaultSeriesTitle() : trimmed)
         do {
             try store.saveDocument(document)
+            // Wurde gerade eine andere Serie angesehen, zeigt die Miniaturleiste deren Scans: die neue Serie beginnt leer.
+            if openedDocument != nil { scans = []; selectedID = nil }
+            openedDocument = nil
             series = document
             updateSavedDocuments(with: document)
             seriesIsBook = book
@@ -409,18 +417,113 @@ public final class AppModel {
             trigger = AutoTrigger()
             seriesPhase = trigger.phase
             message = nil
-            post(.info, "Serie „\(title)“ begonnen" + (book ? " (Doppelseiten)." : "."))
+            post(.info, "Serie „\(document.title)“ begonnen" + (book ? " (Doppelseiten)." : "."))
         } catch {
             post(.error, "Die Serie konnte nicht begonnen werden: \(error.localizedDescription)")
         }
     }
 
-    /// Beendet die Serie. Das Dokument bleibt gespeichert.
+    /// Beendet die Serie. Das Dokument bleibt gespeichert und geöffnet: Seiten und Regler einer Doppelseite bleiben da.
     public func endSeries() {
         if let series { post(.info, "Serie „\(series.title)“ beendet: \(series.pages.count) Seite(n).") }
+        openedDocument = series
         series = nil
         seriesIsBook = false
         seriesPhase = .waitingForMotion
+    }
+
+    /// Ein Name für eine neue Serie, wenn der Nutzer keinen vergibt: das Datum mit Uhrzeit.
+    public static func defaultSeriesTitle(now: Date = Date()) -> String {
+        "Serie " + now.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+    }
+
+    /// Setzt eine gespeicherte Serie fort: Neue Aufnahmen kommen ans Ende desselben Dokuments, im selben Modus (Einzelseiten oder
+    /// Doppelseiten, aus den vorhandenen Seiten abgelesen; `book` gilt nur für ein noch leeres Dokument).
+    public func resumeSeries(id: UUID, book: Bool = false) async {
+        guard status == .ready, series == nil, let document = savedDocuments.first(where: { $0.id == id }) else { return }
+        openedDocument = nil
+        series = document          // vor dem Laden, damit die Seiten der Scans bekannt sind
+        seriesIsBook = document.pages.isEmpty ? book : document.pages.contains { $0.region != .whole }
+        await showScans(of: document)
+        trigger = AutoTrigger()
+        seriesPhase = trigger.phase
+        message = nil
+        post(.info, "Serie „\(document.title)“ fortgesetzt (\(document.pages.count) Seite(n)" + (seriesIsBook ? ", Doppelseiten)." : ")."))
+    }
+
+    /// Öffnet eine gespeicherte Serie zum Ansehen: Die Miniaturleiste zeigt deren Scans, Seiten und Korrekturen lassen sich bearbeiten.
+    /// Nicht möglich, solange eine Serie läuft.
+    public func openDocument(id: UUID) async {
+        guard series == nil, let document = savedDocuments.first(where: { $0.id == id }) else { return }
+        openedDocument = document
+        await showScans(of: document)
+    }
+
+    /// Schließt die angesehene Serie. Die Miniaturleiste zeigt wieder die letzten Scans des Archivs.
+    public func closeDocument() async {
+        guard series == nil, openedDocument != nil else { return }
+        openedDocument = nil
+        pagePreviews = [:]
+        await loadExistingScans()
+    }
+
+    /// Gibt einer Serie einen Namen. Leere Namen werden abgelehnt. Gibt zurück, ob der Name gilt.
+    @discardableResult
+    public func renameDocument(id: UUID, to title: String) -> Bool {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { post(.warning, "Der Name einer Serie darf nicht leer sein."); return false }
+        var candidates: [ScanDocument?] = [series, openedDocument]
+        candidates.append(savedDocuments.first { $0.id == id })
+        guard var document = candidates.compactMap({ $0 }).first(where: { $0.id == id }) else { return false }
+        guard document.title != trimmed else { return true }
+        document.title = trimmed
+        document.revision += 1
+        commit(document)
+        return true
+    }
+
+    /// Löscht eine Serie, also ihre Seitenliste. Die Scans (Originale) bleiben im Archiv: Sie sind schreibgeschützt und gehören zu
+    /// historischen Vorlagen. Läuft die Serie gerade, endet sie.
+    public func deleteDocument(id: UUID) async {
+        guard let document = savedDocuments.first(where: { $0.id == id }) else { return }
+        do { try store.deleteDocument(id: id) } catch {
+            post(.error, "Die Serie konnte nicht gelöscht werden: \(error.localizedDescription)")
+            return
+        }
+        if series?.id == id { series = nil; seriesIsBook = false; seriesPhase = .waitingForMotion }
+        savedDocuments.removeAll { $0.id == id }
+        for page in document.pages { pagePreviews[page.id] = nil }
+        if openedDocument?.id == id {
+            openedDocument = nil
+            await loadExistingScans()
+        }
+        post(.info, "Serie „\(document.title)“ gelöscht (\(document.pages.count) Seite(n)). Die Scans bleiben im Archiv.")
+    }
+
+    /// Lädt die Scans eines Dokuments in die Miniaturleiste, in der Reihenfolge der Seiten, den neuesten zuerst. Fehlende Originale
+    /// werden übersprungen.
+    private func showScans(of document: ScanDocument) async {
+        let store = self.store, size = thumbnailSize
+        var seen = Set<UUID>()
+        var ids: [UUID] = []
+        for page in document.pages where seen.insert(page.scanID).inserted { ids.append(page.scanID) }
+        // Einzelseiten tragen ihre Korrekturen im Dokument, Doppelseiten je Seite.
+        var wholePageCorrections: [UUID: Corrections] = [:]
+        for page in document.pages where page.region == .whole { wholePageCorrections[page.scanID] = page.corrections }
+        let corrections = wholePageCorrections
+        let items: [ScanItem] = await Task.detached {
+            ids.reversed().compactMap { id -> ScanItem? in
+                guard let record = try? store.load(id: id) else { return nil }
+                let thumb = store.thumbnail(for: record, maxPixelSize: size)
+                let c = corrections[id] ?? (try? store.corrections(for: id)) ?? .none
+                let corrected = thumb.flatMap { CorrectionRenderer.render($0, corrections: c) }
+                return ScanItem(record: record, thumbnail: thumb, corrections: c, corrected: corrected, warnings: [])
+            }
+        }.value
+        scans = items
+        selectedID = items.first?.id
+        pagePreviews = [:]
+        for item in items where isBookScan(item.id) { refreshPagePreviews(scanID: item.id) }
     }
 
     /// Meldet der Auto-Auslösung ein Vorschaubild. Löst eine Aufnahme aus, wenn die Seite gewechselt hat und Ruhe herrscht.
@@ -503,24 +606,26 @@ public final class AppModel {
         } else {
             document.append(DocumentPage(scanID: scanID))
         }
-        saveSeries(document)
+        commit(document)
     }
 
     /// Übernimmt die Korrekturen eines Scans in die zugehörige Seite der Serie, denn die Seite trägt sie selbst.
     private func mirrorToSeries(_ item: ScanItem) {
-        guard var document = series else { return }
+        guard var document = shownDocument else { return }
         var changed = false
         for page in document.pages where page.scanID == item.id && page.region == .whole && page.corrections != item.corrections {
             document.updateCorrections(pageID: page.id) { $0 = item.corrections }
             changed = true
         }
-        if changed { saveSeries(document) }
+        if changed { commit(document) }
     }
 
-    private func saveSeries(_ document: ScanDocument) {
+    /// Speichert ein Dokument und hält die Anzeige aktuell: die laufende Serie, das geöffnete Dokument und die Liste.
+    private func commit(_ document: ScanDocument) {
         do {
             try store.saveDocument(document)
-            series = document
+            if series?.id == document.id { series = document }
+            else if openedDocument?.id == document.id { openedDocument = document }
             updateSavedDocuments(with: document)
         } catch {
             post(.error, "Das Dokument konnte nicht gespeichert werden: \(error.localizedDescription)")
@@ -534,7 +639,7 @@ public final class AppModel {
     /// `nil`, wenn das Original nicht lesbar ist.
     public func fullResolutionImage(scanID: UUID, pageID: UUID? = nil) async -> CGImage? {
         let corrections: Corrections
-        if let pageID, let page = series?.page(id: pageID) {
+        if let pageID, let page = shownDocument?.page(id: pageID) {
             corrections = PageGeometry.effectiveCorrections(for: page)
         } else if let item = scans.first(where: { $0.id == scanID }) {
             corrections = item.corrections
@@ -607,12 +712,12 @@ public final class AppModel {
 
     /// Ob der Scan eine Doppelseite ist, die in zwei Seiten geteilt wird.
     public func isBookScan(_ id: UUID) -> Bool {
-        series?.pages.contains { $0.scanID == id && $0.region != .whole } ?? false
+        shownDocument?.pages.contains { $0.scanID == id && $0.region != .whole } ?? false
     }
 
     /// Die Seiten eines Scans in der Reihenfolge des Dokuments.
     public func pages(of scanID: UUID) -> [DocumentPage] {
-        series?.pages.filter { $0.scanID == scanID } ?? []
+        shownDocument?.pages.filter { $0.scanID == scanID } ?? []
     }
 
     /// `force` verwirft auch manuelle Änderungen, sonst gelten sie vor der Automatik.
@@ -621,14 +726,14 @@ public final class AppModel {
         let analyzeBook = self.analyzeBook
         let result = await Task.detached { analyzeBook(image) }.value
         analyzing.remove(id)
-        guard var document = series else { return }
+        guard var document = shownDocument else { return }
         for page in document.pages where page.scanID == id {
             let corrections = page.region == .left ? result.left : result.right
             // Hat der Nutzer die Seite schon angefasst, gilt das und nicht die Automatik.
             guard force || page.corrections.revision == 0 else { continue }
             document.updateCorrections(pageID: page.id) { $0 = corrections }
         }
-        saveSeries(document)
+        commit(document)
         if let index = scans.firstIndex(where: { $0.id == id }) { scans[index].warnings = result.warnings }
         for warning in result.warnings { post(.warning, warning, scanID: id, asMessage: false) }
         refreshPagePreviews(scanID: id)
@@ -636,9 +741,9 @@ public final class AppModel {
 
     /// Ändert die Korrekturen einer Buchseite, speichert das Dokument und rendert die Seitenansicht neu.
     public func updatePageCorrections(pageID: UUID, _ change: (inout Corrections) -> Void) {
-        guard var document = series, let page = document.page(id: pageID) else { return }
+        guard var document = shownDocument, let page = document.page(id: pageID) else { return }
         document.updateCorrections(pageID: pageID, change)
-        saveSeries(document)
+        commit(document)
         refreshPagePreviews(scanID: page.scanID)
     }
 
@@ -656,7 +761,7 @@ public final class AppModel {
             }.value
             for (id, preview) in rendered {
                 // Nur übernehmen, wenn die Seite noch dieselben Korrekturen hat wie beim Rendern.
-                guard let current = series?.page(id: id), pages.first(where: { $0.id == id })?.corrections == current.corrections else { continue }
+                guard let current = shownDocument?.page(id: id), pages.first(where: { $0.id == id })?.corrections == current.corrections else { continue }
                 pagePreviews[id] = preview
             }
         }

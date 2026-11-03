@@ -127,6 +127,18 @@ Mit dem Schalter „Doppelseiten (Buch)“ vor dem Beginn ergibt jede Aufnahme z
 Der Falz wird als Schattental in der Mitte des Buchs gesucht (auch schräg), die Seiten werden daran geteilt und ihre Schräglage getrennt gemessen.
 Ist der Falz oder die Schräglage unsicher, wird der Vorschlag nur angezeigt und nicht angewendet; die Warnung steht über den Reglern.
 Zuschnitt und Drehung lassen sich je Seite von Hand ändern, „Automatisch neu erkennen“ verwirft das wieder.
+=== Mehrere Serien
+
+Jede Serie ist ein Dokument mit Namen. Gibt es schon Serien, fragt ein Dialog beim Beginnen: *neue Serie* (mit eigenem Namen, sonst Datum und Uhrzeit, und der Wahl Einzel- oder Doppelseiten) oder *fortsetzen* (in einer vorhandenen, deren Modus und Seiten erhalten bleiben: neue Aufnahmen kommen ans Ende). Ohne vorhandene Serie geht es wie bisher sofort los.
+Der Knopf „Serien“ öffnet die Liste aller Serien, neueste zuerst:
+
+* *Ansehen* öffnet eine Serie: Die Miniaturleiste zeigt ihre Scans, Seiten und Korrekturen lassen sich bearbeiten und werden gespeichert. Das geht nur, solange keine Serie läuft. „Hier fortsetzen“ macht aus der angesehenen Serie die laufende, „Schließen“ zeigt wieder die letzten Scans des Archivs.
+* *Fortsetzen* nimmt in einer Serie weiter auf, auch nach einem Neustart und ohne die Scans neu anzulegen.
+* Im Menü je Serie: *Umbenennen*, *Als PDF …* und *Löschen …*.
+* *Löschen* fragt zuerst nach und entfernt nur die Serie, also ihre Seitenliste. Die Scans (Originale) bleiben im Archiv: Sie sind schreibgeschützt und mit Prüfsumme gesichert, und ein Scan einer historischen Vorlage lässt sich nicht neu aufnehmen. Ein Scan, der in keiner Serie mehr vorkommt, bleibt im Archiv und lässt sich einer Serie wieder zuordnen. Eine Funktion dafür gibt es noch nicht.
+Nach „Serie beenden“ bleibt die Serie angesehen, damit auch die Seiten und Regler einer Doppelseite da bleiben.
+Eine neue Serie, die beginnt, während eine andere angesehen wird, beginnt mit leerer Miniaturleiste.
+
 Auch nach „Serie beenden“ und nach einem Neustart bleibt das Dokument gespeichert und lässt sich ausgeben: Ohne laufende Serie steht in der Leiste das Menü „Dokument als PDF exportieren“ mit allen gespeicherten Dokumenten (neueste zuerst, mit Seitenzahl). Das geht auch ohne eingeschalteten Scanner.
 „Als PDF exportieren …“ erzeugt das PDF aus den Originalen mit den Korrekturen der Seiten; die Originale bleiben unberührt.
 
@@ -166,6 +178,7 @@ Die Erkennung hängt hinter der Schnittstelle `TextRecognizer`; Tesseract für m
 | PDF-Export | Tests lesen das erzeugte PDF mit PDFKit: Reihenfolge, Seitengröße, Metadaten, Abbruch, Ersetzen
 | Textebene im PDF | Tests lesen den Text und seine Lage mit PDFKit zurück, prüfen, dass das Bild unverändert bleibt, und einmal mit echtem Vision. Mit absichtlich eingebauten Fehlern geprüft.
 | Protokoll der Meldungen | Tests prüfen Einträge, Zähler, Begrenzung, Textform und die Darstellung der Zeilen
+| Mehrere Serien | Unit-Tests von Archiv und Modell (fortsetzen nach einem Neustart und im selben Modus, benennen, löschen ohne ein Original anzufassen, ansehen, Seiten eines angesehenen Buchs bearbeiten, fehlende Originale) und Oberflächentests an der echten App: Dialog beim Beginnen, benennen, fortsetzen, Liste, ansehen, umbenennen, Löschen mit Rückfrage. Mit absichtlich eingebauten Fehlern geprüft.
 | Hände, Daumen, Marker | Unit-Tests mit künstlichen Bildern, deren Farben an echten Aufnahmen gemessen sind (Erkennung, Randbedingung, Marker mit Punktfeld, Füllung, Tuch statt Papier außerhalb der Seite, Maske im Archiv, ältere Korrekturen bleiben lesbar), Modelltests und Oberflächentests an der echten App. Mit absichtlich eingebauten Fehlern geprüft. *Nicht automatisch geprüft:* wie gut die Füllung an echten Büchern aussieht (das ist an echten Scans von Hand beurteilt), andere Beleuchtung und hellen Hintergrund.
 | Ton bei der Aufnahme | Unit-Tests der erzeugten Tondaten (Format, Länge, Lautstärke, kein Knacken, Frequenz) und des Verhaltens: ein Ton je Aufnahme in der Serie, nicht außerhalb, nicht bei Fehler oder Dublette, nicht bei ausgeschaltetem Schalter, vor dem Speichern, Einstellung bleibt erhalten. Mit absichtlich eingebauten Fehlern geprüft. *Nicht geprüft:* Ob der Ton am Lautsprecher hörbar und angenehm ist, und ob er in der Zeit zwischen zwei Seiten kurz genug ist. Das geht nur mit den Ohren.
 | Auto-Auslösung | Tests mit künstlichen Bildfolgen (Seitenwechsel, Hand, Dublette, schleichende Bewegung). Mit absichtlich eingebauten Fehlern geprüft.

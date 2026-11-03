@@ -16,6 +16,15 @@ extension ArchiveStore {
         try Self.encoder().encode(document).write(to: documentURL(for: document.id), options: .atomic)
     }
 
+    /// Löscht ein Dokument, also die Seitenliste. Die Originale, ihre Prüfsummen und Korrekturen bleiben unberührt: Sie sind
+    /// schreibgeschützt und gehören zu historischen Vorlagen, ein Löschen wäre nicht rückgängig zu machen. Ein Scan, der
+    /// danach in keinem Dokument mehr vorkommt, erscheint in `unassignedScans()` und lässt sich wieder zuordnen.
+    public func deleteDocument(id: UUID) throws {
+        let url = documentURL(for: id)
+        guard FileManager.default.fileExists(atPath: url.path) else { throw ArchiveError.documentNotFound(id) }
+        try FileManager.default.removeItem(at: url)
+    }
+
     public func loadDocument(id: UUID) throws -> ScanDocument {
         let url = documentURL(for: id)
         guard FileManager.default.fileExists(atPath: url.path) else { throw ArchiveError.documentNotFound(id) }
