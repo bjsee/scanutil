@@ -75,4 +75,15 @@ struct SerieBearbeitenOberflaechenTests {
         #expect(s.app.wait(timeout: 10) { s.rotation(ofPage: 0).map { abs($0.degrees - 4) < 0.1 && $0.source == "manual" } ?? false }, "Winkel nicht gespeichert")
         #expect(s.app.wait { s.app.string("editor-page-1") != "geprüft" }, "Nach der Änderung muss die Seite wieder offen sein")
     }
+
+    @Test func theSelectedPageShowsTheOriginalWithItsCropAndCanSwitchToTheResult() throws {
+        let s = try recordedSeries(scans: 1); defer { s.close() }
+        openEditor(s)
+        #expect(s.app.wait { s.app.element("editor-page-1") != nil })
+        #expect(s.app.press("editor-page-1"))
+        #expect(s.app.wait(timeout: 15) { s.app.element("editor-preview") != nil }, "Keine große Ansicht der gewählten Seite")
+        #expect(s.app.wait(timeout: 15) { s.app.element("editor-preview-zoom-in") != nil }, "Die große Ansicht lässt sich nicht zoomen")
+        #expect(s.app.element("editor-preview-mode") != nil)
+        #expect(s.app.element("editor-card-size") != nil, "Der Größenregler fehlt")
+    }
 }

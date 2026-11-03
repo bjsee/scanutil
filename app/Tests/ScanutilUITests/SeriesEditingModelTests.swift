@@ -233,4 +233,18 @@ struct SeriesEditingModelTests {
         #expect(model.savedDocuments.first { $0.id == id }?.title == "Chronik")
         await model.disconnect()
     }
+
+    @Test func theOriginalViewHasTheScansSizeAndIsNilForUnknownPages() async throws {
+        let (model, _, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "Buch", book: true)
+        await model.scan()
+        let id = try #require(model.series?.id), page = try #require(model.series?.pages.first)
+        let image = try #require(await model.pageOriginalWithCrop(documentID: id, pageID: page.id, maxPixelSize: 300))
+        let plain = try #require(await model.pagePreview(documentID: id, pageID: page.id, maxPixelSize: 300))
+        #expect(max(image.width, image.height) <= 300 && max(image.width, image.height) > 100)
+        #expect(image.width != plain.width || image.height != plain.height, "Das Original zeigt das ganze Bild, das Ergebnis nur die Seite")
+        #expect(await model.pageOriginalWithCrop(documentID: id, pageID: UUID()) == nil)
+        #expect(await model.pageOriginalWithCrop(documentID: UUID(), pageID: page.id) == nil)
+        await model.disconnect()
+    }
 }

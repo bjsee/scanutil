@@ -809,6 +809,28 @@ public final class AppModel {
         return image
     }
 
+    /// Das Original des Scans mit dem Zuschnitt, den die App für diese Seite verwendet (grün; orange, wenn die Automatik unsicher war
+    /// oder nur die Bildhälfte gilt) und bei einer Doppelseite dem Rahmen der Nachbarseite (gestrichelt). Außerhalb des Rahmens
+    /// ist das Bild abgedunkelt. `nil`, wenn das Original fehlt.
+    public func pageOriginalWithCrop(documentID: UUID, pageID: UUID, maxPixelSize: Int = 1600) async -> CGImage? {
+        guard let document = latestDocument(id: documentID), let page = document.page(id: pageID) else { return nil }
+        let effective = PageGeometry.effectiveCorrections(for: page)
+        var frames: [CropOverlay.Frame] = []
+        if let quad = effective.crop.quad {
+            let own = page.corrections.crop
+            let sure = own.enabled && own.quad != nil && (own.source == .manual || (own.confidence ?? 0) >= PageReviewer.defaultThreshold)
+            frames.append(.init(quad: quad, style: sure ? .used : .uncertain))
+        }
+        for other in document.pages where other.scanID == page.scanID && other.id != page.id && other.region != .whole {
+            if let quad = PageGeometry.effectiveCorrections(for: other).crop.quad { frames.append(.init(quad: quad, style: .neighbour)) }
+        }
+        let store = self.store, scanID = page.scanID
+        return await Task.detached {
+            guard let record = try? store.load(id: scanID), let image = store.thumbnail(for: record, maxPixelSize: maxPixelSize) else { return nil }
+            return CropOverlay.draw(frames, on: image)
+        }.value
+    }
+
     /// Nimmt den Geprüft-Vermerk von den Seiten eines Scans: Nach „Neu erkennen“ kann das Ergebnis zufällig dem alten gleichen,
     /// geprüft ist es deshalb nicht.
     private func clearReviewed(documentID: UUID, scanID: UUID) {
