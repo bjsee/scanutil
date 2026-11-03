@@ -8,6 +8,8 @@ public struct SeriesEditorView: View {
     @Bindable var model: AppModel
     let documentID: UUID?
     @State private var editor = SeriesEditorModel()
+    /// Höhe der Seitenkarten im Raster, vom Nutzer einstellbar.
+    @State private var cardHeight = 170.0
 
     public init(model: AppModel, documentID: UUID?) { self.model = model; self.documentID = documentID }
 
@@ -34,11 +36,11 @@ public struct SeriesEditorView: View {
             Divider()
             filterBar(document, review: review)
             Divider()
-            HStack(spacing: 0) {
+            HSplitView {
                 grid(document, visible: visible, review: review)
-                Divider()
+                    .frame(minWidth: 260)
                 inspector(document, review: review, visible: visible)
-                    .frame(width: 320)
+                    .frame(minWidth: 380, idealWidth: 520)
             }
         }
         .onAppear { if editor.selectedPageID == nil { editor.selectedPageID = document.pages.first?.id } }
@@ -76,6 +78,11 @@ public struct SeriesEditorView: View {
                 .accessibilityIdentifier("editor-filter-\(filter.rawValue)")
             }
             Spacer()
+            Image(systemName: "photo").foregroundStyle(.secondary)
+            Slider(value: $cardHeight, in: 100...360).frame(width: 120)
+                .accessibilityLabel("Größe der Seiten im Raster")
+                .accessibilityIdentifier("editor-card-size")
+            Image(systemName: "photo.fill").foregroundStyle(.secondary)
         }
         .padding(.horizontal, 12).padding(.vertical, 6)
     }
@@ -88,11 +95,11 @@ public struct SeriesEditorView: View {
                 Text("Keine Seite passt zu diesem Filter.").foregroundStyle(.secondary).padding(40)
                     .accessibilityIdentifier("editor-empty")
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 200), spacing: 10)], spacing: 10) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: cardHeight * 0.8, maximum: cardHeight * 1.2), spacing: 10)], spacing: 10) {
                 ForEach(visible) { page in
                     let number = (document.pages.firstIndex { $0.id == page.id } ?? 0) + 1
                     PageCard(model: model, documentID: document.id, page: page, number: number,
-                             review: review.pages[page.id], selected: editor.selectedPageID == page.id)
+                             review: review.pages[page.id], selected: editor.selectedPageID == page.id, height: cardHeight)
                         .onTapGesture { editor.selectedPageID = page.id }
                 }
             }
@@ -117,6 +124,7 @@ public struct SeriesEditorView: View {
                     Button { editor.step(1, in: visible) } label: { Image(systemName: "chevron.right") }
                         .accessibilityLabel("Nächste Seite").accessibilityIdentifier("editor-next")
                 }
+                PagePreview(model: model, documentID: document.id, page: page)
                 findings(pageReview)
                 Divider()
                 tools(document, page: page)
@@ -185,6 +193,7 @@ struct PageCard: View {
     let number: Int
     let review: PageReview?
     let selected: Bool
+    var height = 170.0
     @State private var image: CGImage?
 
     var body: some View {
@@ -194,7 +203,7 @@ struct PageCard: View {
                     if let image { Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fit) }
                     else { Rectangle().fill(.quaternary).aspectRatio(0.75, contentMode: .fit) }
                 }
-                .frame(height: 170)
+                .frame(height: height)
                 badge
             }
             Text("\(number)\(page.region == .left ? " links" : page.region == .right ? " rechts" : "")")
@@ -276,5 +285,51 @@ public enum SeriesEditorWindow {
         window.center()
         windows[documentID] = window
         window.makeKeyAndOrderFront(nil)
+    }
+}
+
+/// Die große Ansicht der gewählten Seite: wahlweise das Original mit dem Zuschnitt, den die App verwendet, oder das Ergebnis
+/// fürs PDF. Beide lassen sich zoomen.
+struct PagePreview: View {
+    enum Mode: String, CaseIterable, Identifiable {
+        case original = "Original mit Zuschnitt", result = "Ergebnis"
+        var id: String { rawValue }
+    }
+
+    let model: AppModel
+    let documentID: UUID
+    let page: DocumentPage
+    @State private var mode = Mode.original
+    @State private var image: CGImage?
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Picker("Ansicht", selection: $mode) {
+                ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented).labelsHidden()
+            .accessibilityIdentifier("editor-preview-mode")
+            ZStack {
+                Rectangle().fill(.quaternary)
+                if let image {
+                    ZoomableImageView(image: image, identifier: "editor-preview")
+                        .id("\(page.id)/\(mode.rawValue)")
+                } else {
+                    ProgressView()
+                }
+            }
+            .frame(minHeight: 280, maxHeight: .infinity)
+            .accessibilityIdentifier("editor-preview")
+            Text(mode == .original
+                 ? "Grün: Zuschnitt fürs PDF. Orange: unsicher oder nur die Bildhälfte. Gestrichelt: die andere Seite. Dunkel fällt weg."
+                 : "So kommt die Seite ins PDF.")
+                .font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .task(id: "\(page.id)/\(mode.rawValue)/\(page.corrections.cacheKey)") {
+            switch mode {
+            case .original: image = await model.pageOriginalWithCrop(documentID: documentID, pageID: page.id)
+            case .result: image = await model.pagePreview(documentID: documentID, pageID: page.id, maxPixelSize: 1600)
+            }
+        }
     }
 }
