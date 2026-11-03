@@ -135,7 +135,19 @@ Der Knopf „Serien“ öffnet die Liste aller Serien, neueste zuerst:
 * *Ansehen* öffnet eine Serie: Die Miniaturleiste zeigt ihre Scans, Seiten und Korrekturen lassen sich bearbeiten und werden gespeichert. Das geht nur, solange keine Serie läuft. „Hier fortsetzen“ macht aus der angesehenen Serie die laufende, „Schließen“ zeigt wieder die letzten Scans des Archivs.
 * *Fortsetzen* nimmt in einer Serie weiter auf, auch nach einem Neustart und ohne die Scans neu anzulegen.
 * Im Menü je Serie: *Umbenennen*, *Als PDF …* und *Löschen …*.
-* *Löschen* fragt zuerst nach und entfernt nur die Serie, also ihre Seitenliste. Die Scans (Originale) bleiben im Archiv: Sie sind schreibgeschützt und mit Prüfsumme gesichert, und ein Scan einer historischen Vorlage lässt sich nicht neu aufnehmen. Ein Scan, der in keiner Serie mehr vorkommt, bleibt im Archiv und lässt sich einer Serie wieder zuordnen. Eine Funktion dafür gibt es noch nicht.
+* *Löschen* fragt immer zuerst nach. „Nur die Serie löschen“ entfernt die Seitenliste, die Scans (Originale) bleiben im Archiv. „Serie und Scans löschen“ nimmt auch die Scans mit, siehe unten. Ein Scan, der in keiner Serie mehr vorkommt, bleibt im Archiv liegen; eine Funktion, ihn einer Serie wieder zuzuordnen, gibt es noch nicht.
+==== Scans löschen
+
+Die Originale sind sonst unantastbar (schreibgeschützt, mit Prüfsumme), aber ein missglückter Scan darf weg. Zwei Wege, beide mit Rückfrage:
+
+* In der Scanansicht: *Scan löschen …* für den ausgewählten Scan. Die Rückfrage nennt, aus welchen Serien er verschwindet.
+* In der Serienliste: *Serie und Scans löschen …*.
+
+Gelöscht werden Original, Eintrag mit Prüfsumme und Korrekturen. Der Scan verschwindet auch aus *allen* Serien, in denen er vorkam, bei einer Doppelseite mit beiden Seiten, ebenso aus der Miniaturleiste. Die Auswahl rückt weiter.
+*Die App legt die Dateien in den macOS-Papierkorb* und löscht nichts endgültig: Mit „Zurücklegen“ im Papierkorb kommen alle drei Dateien an ihren Platz im Archiv zurück, die Prüfsumme stimmt dann wieder. Erst „Papierkorb entleeren“ macht es endgültig. Die Serien, aus denen der Scan genommen wurde, zeigen ihn nach dem Zurücklegen nicht wieder: Die Seitenliste wird beim Löschen angepasst und wird nicht rückgängig gemacht.
+Reihenfolge beim Entsorgen: Eintrag, Korrekturen, zuletzt das Original. Bricht etwas ab, bleibt höchstens ein Original ohne Eintrag liegen und geht nicht verloren. Scheitert die Entsorgung bei einem Scan (etwa weil der Papierkorb nicht erreichbar ist), meldet die App den Fehler im Protokoll und löscht die übrigen weiter.
+Die Oberflächentests löschen endgültig (`SCANUTIL_NO_TRASH`), damit ihre Scans nicht im Papierkorb des Entwicklers landen.
+
 Nach „Serie beenden“ bleibt die Serie angesehen, damit auch die Seiten und Regler einer Doppelseite da bleiben.
 Eine neue Serie, die beginnt, während eine andere angesehen wird, beginnt mit leerer Miniaturleiste.
 
@@ -179,6 +191,7 @@ Die Erkennung hängt hinter der Schnittstelle `TextRecognizer`; Tesseract für m
 | Textebene im PDF | Tests lesen den Text und seine Lage mit PDFKit zurück, prüfen, dass das Bild unverändert bleibt, und einmal mit echtem Vision. Mit absichtlich eingebauten Fehlern geprüft.
 | Protokoll der Meldungen | Tests prüfen Einträge, Zähler, Begrenzung, Textform und die Darstellung der Zeilen
 | Mehrere Serien | Unit-Tests von Archiv und Modell (fortsetzen nach einem Neustart und im selben Modus, benennen, löschen ohne ein Original anzufassen, ansehen, Seiten eines angesehenen Buchs bearbeiten, fehlende Originale) und Oberflächentests an der echten App: Dialog beim Beginnen, benennen, fortsetzen, Liste, ansehen, umbenennen, Löschen mit Rückfrage. Mit absichtlich eingebauten Fehlern geprüft.
+| Scans löschen | Unit-Tests von Archiv (alle drei Dateien, Reihenfolge, schreibgeschütztes Original, Fehler lässt das Original liegen, Papierkorb-Weg ist umkehrbar und die Prüfsumme stimmt danach) und Modell (aus allen Serien, Doppelseiten, laufende Serie, Auswahl, mehrere Serien, Fehler bei einem Scan, nachträgliche Analyse schreibt nichts) und Oberflächentests an der echten App mit Rückfrage. Mit absichtlich eingebauten Fehlern geprüft. *Nicht automatisch geprüft:* der echte Papierkorb (die Tests legen nichts in den Papierkorb des Entwicklers); `ScanDisposal.trash` ist ein einziger Aufruf von `FileManager.trashItem`.
 | Hände, Daumen, Marker | Unit-Tests mit künstlichen Bildern, deren Farben an echten Aufnahmen gemessen sind (Erkennung, Randbedingung, Marker mit Punktfeld, Füllung, Tuch statt Papier außerhalb der Seite, Maske im Archiv, ältere Korrekturen bleiben lesbar), Modelltests und Oberflächentests an der echten App. Mit absichtlich eingebauten Fehlern geprüft. *Nicht automatisch geprüft:* wie gut die Füllung an echten Büchern aussieht (das ist an echten Scans von Hand beurteilt), andere Beleuchtung und hellen Hintergrund.
 | Ton bei der Aufnahme | Unit-Tests der erzeugten Tondaten (Format, Länge, Lautstärke, kein Knacken, Frequenz) und des Verhaltens: ein Ton je Aufnahme in der Serie, nicht außerhalb, nicht bei Fehler oder Dublette, nicht bei ausgeschaltetem Schalter, vor dem Speichern, Einstellung bleibt erhalten. Mit absichtlich eingebauten Fehlern geprüft. *Nicht geprüft:* Ob der Ton am Lautsprecher hörbar und angenehm ist, und ob er in der Zeit zwischen zwei Seiten kurz genug ist. Das geht nur mit den Ohren.
 | Auto-Auslösung | Tests mit künstlichen Bildfolgen (Seitenwechsel, Hand, Dublette, schleichende Bewegung). Mit absichtlich eingebauten Fehlern geprüft.

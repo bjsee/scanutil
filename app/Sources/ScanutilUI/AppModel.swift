@@ -135,6 +135,9 @@ public final class AppModel {
     private let retryInterval: Duration?
     private let sound: any CaptureSound
     private let defaults: UserDefaults?
+    /// Wie gelöschte Scans entsorgt werden. Das Modell ist von sich aus endgültig und damit für Tests sicher: Erst die App
+    /// übergibt den Papierkorb.
+    private let scanDisposal: ScanDisposal
     private static let soundKey = "captureSoundEnabled"
     /// Aus nach `disconnect()`: ein Versuch, der erst danach scheitert, darf die Suche nicht neu starten.
     private var searchAllowed = true
@@ -156,8 +159,10 @@ public final class AppModel {
         recognizer: any TextRecognizer = VisionTextRecognizer(),
         retryInterval: Duration? = .seconds(2),
         sound: any CaptureSound = SilentSound(),
-        defaults: UserDefaults? = nil
+        defaults: UserDefaults? = nil,
+        scanDisposal: ScanDisposal = .permanent
     ) {
+        self.scanDisposal = scanDisposal
         self.retryInterval = retryInterval
         self.sound = sound
         self.defaults = defaults
@@ -484,8 +489,11 @@ public final class AppModel {
 
     /// Löscht eine Serie, also ihre Seitenliste. Die Scans (Originale) bleiben im Archiv: Sie sind schreibgeschützt und gehören zu
     /// historischen Vorlagen. Läuft die Serie gerade, endet sie.
-    public func deleteDocument(id: UUID) async {
+    /// - Parameter withScans: Löscht auch die Scans der Serie (in den Papierkorb, wenn die App ihn übergeben hat). Sonst bleiben sie.
+    public func deleteDocument(id: UUID, withScans: Bool = false) async {
         guard let document = savedDocuments.first(where: { $0.id == id }) else { return }
+        var seen = Set<UUID>()
+        let scanIDs = document.pages.map(\.scanID).filter { seen.insert($0).inserted }
         do { try store.deleteDocument(id: id) } catch {
             post(.error, "Die Serie konnte nicht gelöscht werden: \(error.localizedDescription)")
             return
@@ -497,7 +505,61 @@ public final class AppModel {
             openedDocument = nil
             await loadExistingScans()
         }
-        post(.info, "Serie „\(document.title)“ gelöscht (\(document.pages.count) Seite(n)). Die Scans bleiben im Archiv.")
+        if withScans {
+            post(.info, "Serie „\(document.title)“ gelöscht (\(document.pages.count) Seite(n)).")
+            await removeScans(scanIDs)
+        } else {
+            post(.info, "Serie „\(document.title)“ gelöscht (\(document.pages.count) Seite(n)). Die Scans bleiben im Archiv.")
+        }
+    }
+
+    /// Ob gelöschte Scans in den Papierkorb kommen und sich zurücklegen lassen.
+    public var scansAreRecoverable: Bool { scanDisposal.isRecoverable }
+
+    /// Die Serien, in denen ein Scan vorkommt. Ein gelöschter Scan verschwindet aus allen.
+    public func documents(containing scanID: UUID) -> [ScanDocument] {
+        savedDocuments.filter { $0.pages.contains { $0.scanID == scanID } }
+    }
+
+    /// Löscht einen Scan: Original, Eintrag und Korrekturen (in den Papierkorb, wenn die App ihn übergeben hat). Er verschwindet
+    /// auch aus allen Serien, in denen er vorkam, bei einer Doppelseite mit beiden Seiten.
+    public func deleteScan(id: UUID) async {
+        await removeScans([id])
+    }
+
+    /// Entfernt Scans aus dem Archiv und bereinigt alles, was sie kennt: Serien, Miniaturleiste, Auswahl, Zwischenspeicher.
+    private func removeScans(_ ids: [UUID]) async {
+        var removed: [UUID] = []
+        for id in ids {
+            do {
+                try store.deleteScan(id: id, disposal: scanDisposal)
+                removed.append(id)
+            } catch {
+                post(.error, "Der Scan konnte nicht gelöscht werden: \(error.localizedDescription)")
+            }
+        }
+        guard !removed.isEmpty else { return }
+        let gone = Set(removed)
+
+        // Seiten, die auf die gelöschten Scans verweisen, aus allen Serien nehmen. Die aktuellste Fassung zählt: die laufende
+        // Serie oder das angesehene Dokument kann neuer sein als die Liste.
+        for listed in savedDocuments where listed.pages.contains(where: { gone.contains($0.scanID) }) {
+            var document = [series, openedDocument].compactMap { $0 }.first { $0.id == listed.id } ?? listed
+            for page in document.pages where gone.contains(page.scanID) { pagePreviews[page.id] = nil }
+            document.pages.removeAll { gone.contains($0.scanID) }
+            document.revision += 1
+            commit(document)
+        }
+        scans.removeAll { gone.contains($0.id) }
+        if let selected = selectedID, gone.contains(selected) { selectedID = scans.first?.id }
+        analyzing.subtract(gone)
+        fullResolutionCache.removeAll { cached in gone.contains { cached.key.hasPrefix($0.uuidString) } }
+
+        let count = removed.count
+        let noun = count == 1 ? "Scan" : "Scans"
+        post(.info, scanDisposal.isRecoverable
+            ? "\(count) \(noun) in den Papierkorb gelegt. Mit „Zurücklegen“ im Papierkorb kommen sie an ihren Platz im Archiv zurück."
+            : "\(count) \(noun) gelöscht.")
     }
 
     /// Lädt die Scans eines Dokuments in die Miniaturleiste, in der Reihenfolge der Seiten, den neuesten zuerst. Fehlende Originale

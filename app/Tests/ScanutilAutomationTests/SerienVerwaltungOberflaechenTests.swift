@@ -132,7 +132,7 @@ struct SerienVerwaltungOberflaechenTests {
         #expect(s.app.press("series-list-button"))
         #expect(s.app.wait { s.app.element("series-list-view") != nil })
         _ = s.app.press("series-menu")
-        #expect(s.app.pressMenuItem(titled: "Löschen …"), "Der Menüeintrag „Löschen …“ fehlt")
+        #expect(s.app.pressMenuItem(titled: "Nur die Serie löschen …"), "Der Menüeintrag „Nur die Serie löschen …“ fehlt")
 
         // Erst die Rückfrage: noch ist nichts gelöscht. Abbrechen lässt alles, wie es war.
         #expect(s.app.wait(timeout: 10) { s.app.hasButton(titled: "Abbrechen") && s.app.hasButton(titled: "Löschen") }, "Keine Rückfrage vor dem Löschen")
@@ -143,11 +143,57 @@ struct SerienVerwaltungOberflaechenTests {
         #expect(s.documentFiles.count == 1)
 
         _ = s.app.press("series-menu")
-        #expect(s.app.pressMenuItem(titled: "Löschen …"))
+        #expect(s.app.pressMenuItem(titled: "Nur die Serie löschen …"))
         #expect(s.app.wait(timeout: 10) { s.app.hasButton(titled: "Löschen") })
         s.app.pressButton(titled: "Löschen")
         #expect(s.app.wait(timeout: 10) { s.documentFiles.isEmpty }, "Die Serie wurde nicht gelöscht")
         #expect(s.originals.count == 2, "Die Originale müssen bleiben")
+        #expect(s.app.wait { s.app.elements("series-row").isEmpty })
+    }
+
+    @Test func deletingAScanAsksFirstAndRemovesItFromTheSeries() throws {
+        // Die Tests löschen endgültig (SCANUTIL_NO_TRASH): Die Scans landen nicht im Papierkorb des Entwicklers.
+        let s = try launch(); defer { s.close() }
+        #expect(s.app.press("series-start-button"))
+        #expect(s.app.wait { s.app.element("series-page-count") != nil })
+        for n in 1...2 {
+            #expect(s.app.wait { s.app.isEnabled("scan-button") == true })
+            #expect(s.app.press("scan-button"))
+            #expect(s.app.wait { s.originals.count == n })
+        }
+        #expect(s.app.wait { s.pages.count == 2 && s.app.string("series-page-count") == "2 Seiten" })
+        #expect(s.app.wait(timeout: 30) { s.app.element("scan-delete-button") != nil }, "Die Scanansicht hat keinen Löschen-Knopf")
+
+        // Erst die Rückfrage: nichts ist gelöscht. Abbrechen lässt alles.
+        s.app.pressOpeningDialog("scan-delete-button")
+        #expect(s.app.wait(timeout: 10) { s.app.hasButton(titled: "Abbrechen") && s.app.hasButton(titled: "Endgültig löschen") }, "Keine Rückfrage")
+        #expect(s.originals.count == 2 && s.pages.count == 2, "Vor der Bestätigung darf nichts weg sein")
+        s.app.pressButton(titled: "Abbrechen")
+        #expect(s.app.wait { !s.app.hasButton(titled: "Endgültig löschen") })
+        #expect(s.originals.count == 2)
+
+        s.app.pressOpeningDialog("scan-delete-button")
+        #expect(s.app.wait(timeout: 10) { s.app.hasButton(titled: "Endgültig löschen") })
+        s.app.pressButton(titled: "Endgültig löschen")
+        #expect(s.app.wait(timeout: 10) { s.originals.count == 1 }, "Das Original wurde nicht gelöscht")
+        #expect(s.app.wait { s.app.string("series-page-count") == "1 Seite" }, "Zähler: \(s.app.string("series-page-count") ?? "keiner")")
+        #expect(s.app.wait { s.pages.count == 1 }, "Die Seite steht noch in der Serie")
+        #expect(s.app.wait { s.app.string("thumbnail-strip") == "1" })
+        #expect(s.correctionFiles.count <= 1)
+    }
+
+    @Test func deletingASeriesWithItsScansFromTheListLeavesNothingBehind() throws {
+        let s = try launch(); defer { s.close() }
+        recordFirstSeries(s, scans: 2)
+        #expect(s.originals.count == 2 && s.documentFiles.count == 1)
+        #expect(s.app.press("series-list-button"))
+        #expect(s.app.wait { s.app.element("series-list-view") != nil })
+        _ = s.app.press("series-menu")
+        #expect(s.app.pressMenuItem(titled: "Serie und Scans löschen …"), "Der Menüeintrag fehlt")
+        #expect(s.app.wait(timeout: 10) { s.app.hasButton(titled: "Serie und Scans endgültig löschen") }, "Keine Rückfrage")
+        #expect(s.originals.count == 2, "Vor der Bestätigung bleibt alles")
+        s.app.pressButton(titled: "Serie und Scans endgültig löschen")
+        #expect(s.app.wait(timeout: 10) { s.documentFiles.isEmpty && s.originals.isEmpty }, "Serie und Scans sind nicht beide gelöscht")
         #expect(s.app.wait { s.app.elements("series-row").isEmpty })
     }
 }

@@ -49,7 +49,10 @@ struct ScanutilApp: App {
         _model = State(initialValue: AppModel(
             scanner: scanner, store: ArchiveStore(root: URL(fileURLWithPath: path, isDirectory: true)),
             // Das Modell ist von sich aus stumm und speichert nichts: erst die App schaltet Ton und Einstellung ein.
-            sound: silent ? SilentSound() : BeepSound(), defaults: silent ? nil : .standard
+            sound: silent ? SilentSound() : BeepSound(), defaults: silent ? nil : .standard,
+            // Gelöschte Scans kommen in den Papierkorb und lassen sich zurücklegen. Die Oberflächentests löschen endgültig,
+            // sonst landeten ihre Scans im Papierkorb des Entwicklers.
+            scanDisposal: ProcessInfo.processInfo.environment["SCANUTIL_NO_TRASH"] != nil ? .permanent : .trash
         ))
     }
 
