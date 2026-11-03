@@ -213,6 +213,21 @@ struct SeriesSoundTests {
         await model.disconnect()
     }
 
+    @Test func aModelWithoutAnExplicitSoundIsSilent() throws {
+        // Viele Tests erzeugen ein Modell und nehmen in einer Serie auf. Ein Standard mit Ton ließe `swift test` piepen.
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("scanutil-snd-\(UUID().uuidString)")
+        let model = AppModel(scanner: MockScanner(previewsEnabled: false), store: ArchiveStore(root: dir))
+        let sound = try #require(Mirror(reflecting: model).children.first { $0.label == "sound" }?.value)
+        #expect(sound is SilentSound, "Der Standardton ist \(type(of: sound)), nicht stumm")
+    }
+
+    @Test func aModelWithoutDefaultsStoresNothingInTheUsersSettings() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("scanutil-snd-\(UUID().uuidString)")
+        let model = AppModel(scanner: MockScanner(previewsEnabled: false), store: ArchiveStore(root: dir))
+        let defaults = try #require(Mirror(reflecting: model).children.first { $0.label == "defaults" }?.value)
+        #expect((defaults as? UserDefaults?).map { $0 == nil } ?? true, "Ein Modell ohne Angabe darf keine Einstellungen schreiben")
+    }
+
     // MARK: Einstellung
 
     @Test func soundIsOnByDefault() async {

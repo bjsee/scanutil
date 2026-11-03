@@ -151,11 +151,11 @@ public final class AppModel {
         analyzeBook: @escaping @Sendable (CGImage) -> BookAnalysisResult = AppModel.defaultBookAnalysis,
         recognizer: any TextRecognizer = VisionTextRecognizer(),
         retryInterval: Duration? = .seconds(2),
-        sound: (any CaptureSound)? = nil,
-        defaults: UserDefaults? = .standard
+        sound: any CaptureSound = SilentSound(),
+        defaults: UserDefaults? = nil
     ) {
         self.retryInterval = retryInterval
-        self.sound = sound ?? BeepSound()
+        self.sound = sound
         self.defaults = defaults
         // Ohne gespeicherte Einstellung ist der Ton an.
         soundEnabled = defaults?.object(forKey: Self.soundKey) as? Bool ?? true
