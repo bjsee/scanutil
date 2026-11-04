@@ -97,6 +97,7 @@ public enum HandDetector {
         }
         // Die Daumen-Marker: gelb, mit schwarz-weißem Punktfeld, das Schließen und Löcherfüllen einbezieht.
         var markerCount = 0
+        var markerCells = [Bool](repeating: false, count: w * h)
         var yellow = [Bool](repeating: false, count: w * h)
         rgb.pixels.withUnsafeBufferPointer { p in
             for i in 0..<(w * h) { yellow[i] = isMarkerYellow(r: p[i * 4], g: p[i * 4 + 1], b: p[i * 4 + 2]) }
@@ -108,7 +109,7 @@ public enum HandDetector {
             // Ein Marker liegt am Rand der Seite. Ist der Seitenrand noch unbekannt, genügt die Farbe: so lässt sich das Bild
             // bereinigen, bevor Vision den Rand sucht.
             guard page == nil || component.cells.contains(where: { edge[$0] }) else { continue }
-            for cell in component.cells { mask[cell] = 255 }
+            for cell in component.cells { mask[cell] = 255; markerCells[cell] = true }
             markerCount += 1
         }
         kept += markerCount
@@ -116,7 +117,13 @@ public enum HandDetector {
         // Etwas verbreitern: Schatten und die weichen Ränder der Finger gehören dazu.
         // Danach Löcher füllen: Ein überstrahlter Glanzpunkt mitten im Marker ist weder gelb noch hautfarben, wäre sonst aber
         // eine Lücke in der Maske. Das Verbreitern schließt vorher feine Spalten, durch die das Füllen sonst entwiche.
-        let grown = fillHoles(dilate(mask.map { $0 > 127 }, width: w, height: h, radius: max(3, w / 130)), width: w, height: h)
+        var grown = fillHoles(dilate(mask.map { $0 > 127 }, width: w, height: h, radius: max(3, w / 130)), width: w, height: h)
+        // Ein Marker wirft einen Schatten aufs Papier, der als dunkler Saum neben der Füllung stehen bliebe: Um ihn herum
+        // wird deutlich weiter verbreitert als um Finger.
+        if markerCount > 0 {
+            let shadow = dilate(markerCells, width: w, height: h, radius: max(8, w / 40))
+            for i in 0..<(w * h) where shadow[i] { grown[i] = true }
+        }
         let cells = grown.map { $0 ? UInt8(255) : 0 }
         guard let result = HandMask(width: w, height: h, cells: cells) else { return nil }
         // Sehr große Flächen sind eher ein hautfarbener Einband als Hände.

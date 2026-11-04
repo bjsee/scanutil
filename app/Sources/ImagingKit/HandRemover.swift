@@ -75,7 +75,7 @@ public enum HandRemover {
         for i in 0..<(w * h) where paper[i] {
             let r = values[i * 3], g = values[i * 3 + 1], b = values[i * 3 + 2]
             let top = max(r, g, b), saturation = top > 0 ? (top - min(r, g, b)) / top : 0
-            paperLike[i] = top >= 0.78 * median && saturation <= 0.30
+            paperLike[i] = top >= 0.6 * median && saturation <= 0.30
             if paperLike[i] { count += 1 }
         }
         if count < brightness.count / 5 { paperLike = paper }
