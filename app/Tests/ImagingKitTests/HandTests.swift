@@ -129,6 +129,35 @@ struct HandTests {
         #expect(!covered(300, 300))
     }
 
+    @Test func theMaskOfAMarkerReachesFarEnoughToCoverItsShadow() throws {
+        // Der Marker wirft einen Schatten aufs Papier. Bliebe er stehen, sähe man neben der Füllung einen dunklen Saum.
+        var c = bookPage()
+        c.rect(640, 380, 760, 440, yellow)
+        c.rect(640, 388, 690, 432, (240, 240, 240))
+        for k in 0..<3 { c.ellipse(cx: 656 + k * 12, cy: 410, rx: 4, ry: 4, (20, 20, 20)) }
+        let mask = try #require(HandDetector.detect(in: c.image())).mask
+        func covered(_ x: Int, _ y: Int) -> Bool { mask.cells[(y * mask.height / 600) * mask.width + (x * mask.width / 800)] > 127 }
+        #expect(covered(700, 455), "Schatten unter dem Marker, 15 Pixel unter der gelben Kante")
+        #expect(covered(625, 410), "Schatten links vom Marker")
+        #expect(!covered(700, 520), "Weiter weg bleibt das Papier")
+    }
+
+    @Test func fillNextToAMarkerIsNotBrighterThanTheDimPaperAroundIt() throws {
+        // Papier mit Helligkeitsverlauf zum Rand: Die Füllung darf nicht aus den hellsten Stellen allein gerechnet werden.
+        var c = bookPage()
+        for y in 0..<600 { for x in 100..<700 {
+            let v = UInt8(150 + (x - 100) * 90 / 600)    // 150 am linken Rand bis 240 rechts
+            c.set(x, y, (v, v, UInt8(max(0, Int(v) - 8))))
+        } }
+        c.rect(100, 380, 220, 440, yellow)
+        let image = c.image()
+        let detection = try #require(HandDetector.detect(in: image, page: pageQuad))
+        let cleaned = try #require(HandRemover.apply(to: image, mask: detection.mask))
+        let rgb = try #require(RGBBitmap(cleaned, width: 800))
+        let filled = Int(rgb.pixels[(410 * 800 + 160) * 4]), around = 150 + (160 - 100) * 90 / 600
+        #expect(abs(filled - around) < 22, "Füllung \(filled), Papier ringsum \(around)")
+    }
+
     @Test func tinySpecksAreIgnored() {
         var c = bookPage()
         c.rect(300, 580, 306, 586, skin)
