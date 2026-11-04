@@ -7,12 +7,13 @@ public enum AppRoute: Hashable, Sendable {
     case capture
     case series
     case editor(UUID)
+    case export(UUID)
     case log
 
     /// Der Eintrag der Seitenleiste, zu dem die Seite gehört: der Editor ist eine Unterseite der Serien.
     var section: AppRoute {
         switch self {
-        case .editor: .series
+        case .editor, .export: .series
         default: self
         }
     }

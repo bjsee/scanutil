@@ -500,6 +500,7 @@ public final class AppModel {
     /// historischen Vorlagen. Läuft die Serie gerade, endet sie.
     /// - Parameter withScans: Löscht auch die Scans der Serie (in den Papierkorb, wenn die App ihn übergeben hat). Sonst bleiben sie.
     public func deleteDocument(id: UUID, withScans: Bool = false) async {
+        undoableDeletion = nil
         guard let document = savedDocuments.first(where: { $0.id == id }) else { return }
         var seen = Set<UUID>()
         let scanIDs = document.pages.map(\.scanID).filter { seen.insert($0).inserted }
@@ -519,7 +520,26 @@ public final class AppModel {
             await removeScans(scanIDs)
         } else {
             post(.info, "Serie „\(document.title)“ gelöscht (\(document.pages.count) Seite(n)). Die Scans bleiben im Archiv.")
+            undoableDeletion = document
         }
+    }
+
+    /// Die zuletzt gelöschte Serie, solange sich das Löschen noch rückgängig machen lässt: nur wenn die Scans geblieben sind.
+    /// (Mit den Scans im Papierkorb geht es dort zurück, die Seitenliste wird nicht wiederhergestellt.)
+    public var undoableDeletion: ScanDocument?
+
+    /// Legt die zuletzt gelöschte Serie wieder an, mit allen Seiten und Korrekturen. Gibt zurück, ob es geklappt hat.
+    @discardableResult
+    public func undoDeleteDocument() -> Bool {
+        guard let document = undoableDeletion else { return false }
+        undoableDeletion = nil
+        do { try store.saveDocument(document) } catch {
+            post(.error, "Die Serie konnte nicht wiederhergestellt werden: \(error.localizedDescription)")
+            return false
+        }
+        updateSavedDocuments(with: document)
+        post(.info, "Serie „\(document.title)“ wiederhergestellt.")
+        return true
     }
 
     /// Ob gelöschte Scans in den Papierkorb kommen und sich zurücklegen lassen.

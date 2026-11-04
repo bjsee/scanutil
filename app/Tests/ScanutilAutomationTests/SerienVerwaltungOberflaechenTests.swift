@@ -154,6 +154,24 @@ struct SerienVerwaltungOberflaechenTests {
         #expect(s.app.wait { s.app.elements("series-row").isEmpty })
     }
 
+    @Test func deletingASeriesCanBeUndoneFromTheBarAtTheBottom() throws {
+        let s = try launch(); defer { s.close() }
+        recordFirstSeries(s, scans: 1)
+        #expect(s.app.press("series-list-button"))
+        #expect(s.app.wait { s.app.element("series-list-view") != nil })
+        #expect(s.app.press("series-menu"))
+        #expect(s.app.wait { s.app.element("series-delete-button") != nil })
+        #expect(s.app.press("series-delete-button"))
+        #expect(s.app.wait { s.app.element("series-delete-confirm") != nil }, "Die Rückfrage in der Zeile fehlt")
+        #expect(s.app.press("series-delete-confirm"))
+        #expect(s.app.wait(timeout: 10) { s.documentFiles.isEmpty }, "Die Serie wurde nicht gelöscht")
+        #expect(s.app.wait { s.app.element("undo-delete-button") != nil }, "Kein „Rückgängig“ nach dem Löschen")
+        #expect(s.app.press("undo-delete-button"))
+        #expect(s.app.wait(timeout: 10) { s.documentFiles.count == 1 }, "Die Serie kam nicht zurück")
+        #expect(s.app.wait { s.app.elements("series-row").count == 1 })
+        #expect(s.app.wait { s.app.element("undo-delete-button") == nil })
+    }
+
     @Test func deletingAScanAsksFirstAndRemovesItFromTheSeries() throws {
         // Die Tests löschen endgültig (SCANUTIL_NO_TRASH): Die Scans landen nicht im Papierkorb des Entwicklers.
         let s = try launch(); defer { s.close() }

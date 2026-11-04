@@ -63,11 +63,11 @@ struct HintergrundTests {
         #expect(s.app.press("nav-capture"))
         #expect(s.app.wait { s.app.element("series-export-button") != nil })
 
-        // Der Speicherdialog ist modal und öffnet sich gern im Vordergrund.
-        s.app.pressOpeningDialog("series-export-button")
-        #expect(s.app.wait(timeout: 10) { s.app.hasDialog }, "Der Speicherdialog öffnet sich nicht")
-        unchanged(before, after: "Speicherdialog offen", app: s.app)
-        #expect(s.app.confirmDialog())
+        // Das PDF entsteht auf einer eigenen Seite, ohne Dialog.
+        #expect(s.app.press("series-export-button"))
+        #expect(s.app.wait { s.app.element("export-run-button") != nil })
+        unchanged(before, after: "PDF-Seite offen", app: s.app)
+        #expect(s.app.press("export-run-button"))
         #expect(s.app.wait(timeout: 60) { !s.pdfs.isEmpty })
         unchanged(before, after: "Export", app: s.app)
     }

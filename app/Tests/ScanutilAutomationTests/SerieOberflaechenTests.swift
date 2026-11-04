@@ -125,21 +125,22 @@ struct SerieOberflaechenTests {
 
     // MARK: Gespeicherte Dokumente
 
-    @Test func anEndedSeriesCanStillBeExportedThroughTheDocumentMenu() throws {
+    @Test func anEndedSeriesCanStillBeExportedFromTheSeriesPage() throws {
         let s = try launch(); defer { s.close() }
-        #expect(s.app.element("saved-documents-menu") == nil, "Ohne Dokument gibt es nichts zu exportieren")
         startSeries(s)
         scan(s, expecting: 1)
         #expect(s.app.wait { pageCount(s) == "1 Seite" })
         #expect(s.app.press("series-end-button"))
         #expect(s.app.wait { s.app.element("series-start-button") != nil })
-        // Das war die Lücke: Nach dem Beenden war der Export weg, obwohl das Dokument gespeichert ist.
-        #expect(s.app.wait { s.app.element("saved-documents-menu") != nil }, "Nach dem Beenden gibt es keinen Weg zum PDF")
+        // Nach dem Beenden führt der Weg zum PDF über die Seite Serien.
         #expect(s.app.element("series-export-button") == nil)
-
-        _ = s.app.pressFirstMenuItem(of: "saved-documents-menu")
-        #expect(s.app.wait(timeout: 10) { s.app.hasDialog }, "Der Speicherdialog öffnet sich nicht")
-        #expect(s.app.confirmDialog())
+        #expect(s.app.press("series-list-button"))
+        #expect(s.app.wait { s.app.element("series-list-view") != nil })
+        #expect(s.app.press("series-menu"))
+        #expect(s.app.wait { s.app.element("series-pdf-button") != nil }, "Nach dem Beenden gibt es keinen Weg zum PDF")
+        #expect(s.app.press("series-pdf-button"))
+        #expect(s.app.wait { s.app.element("export-run-button") != nil }, "Die Seite „PDF ausgeben“ öffnet sich nicht")
+        #expect(s.app.press("export-run-button"))
         #expect(s.app.wait(timeout: 60) { !s.pdfs.isEmpty }, "Es wurde kein PDF geschrieben")
         let pdf = try #require(s.pdfs.first)
         #expect(s.app.wait(timeout: 30) { PDFDocument(url: pdf)?.pageCount == 1 })
@@ -302,10 +303,12 @@ struct SerieOberflaechenTests {
         #expect(s.app.isEnabled("series-export-button") == false, "Export ohne Seiten ist aktiv")
         scan(s, expecting: 1)
         #expect(s.app.wait { s.app.isEnabled("series-export-button") == true }, "Export bleibt nach einer Seite gesperrt")
-        #expect(s.app.element("export-ocr-toggle") != nil)
+        #expect(s.app.press("series-export-button"))
+        #expect(s.app.wait { s.app.element("export-run-button") != nil && s.app.element("export-ocr-toggle") != nil }, "Seite „PDF ausgeben“ unvollständig")
+        #expect(s.app.isEnabled("export-run-button") == true)
     }
 
-    @Test func exportThroughTheSaveDialogWritesAPDFWithOnePagePerScan() throws {
+    @Test func exportFromTheExportPageWritesAPDFWithOnePagePerScan() throws {
         let s = try launch(); defer { s.close() }
         startSeries(s)
         scan(s, expecting: 1)
@@ -314,9 +317,9 @@ struct SerieOberflaechenTests {
         #expect(s.app.wait { pageCount(s) == "2 Seiten" })
 
         #expect(s.app.wait { s.app.isEnabled("series-export-button") == true })
-        s.app.pressOpeningDialog("series-export-button")
-        #expect(s.app.wait(timeout: 10) { s.app.hasDialog }, "Der Speicherdialog öffnet sich nicht")
-        #expect(s.app.confirmDialog(), "Der Speicherdialog ließ sich nicht bestätigen")
+        #expect(s.app.press("series-export-button"))
+        #expect(s.app.wait { s.app.element("export-run-button") != nil }, "Die Seite „PDF ausgeben“ öffnet sich nicht")
+        #expect(s.app.press("export-run-button"))
 
         #expect(s.app.wait(timeout: 60) { !s.pdfs.isEmpty }, "Es wurde kein PDF geschrieben")
         let pdf = try #require(s.pdfs.first)
@@ -335,11 +338,25 @@ struct SerieOberflaechenTests {
         startSeries(s, book: true)
         scan(s, expecting: 1)
         #expect(s.app.wait { pageCount(s) == "2 Seiten" })
-        s.app.pressOpeningDialog("series-export-button")
-        #expect(s.app.wait(timeout: 10) { s.app.hasDialog }, "Der Speicherdialog öffnet sich nicht")
-        #expect(s.app.confirmDialog())
+        #expect(s.app.press("series-export-button"))
+        #expect(s.app.wait { s.app.element("export-run-button") != nil })
+        #expect(s.app.press("export-run-button"))
         #expect(s.app.wait(timeout: 60) { !s.pdfs.isEmpty }, "Es wurde kein PDF geschrieben")
         let pdf = try #require(s.pdfs.first)
         #expect(s.app.wait(timeout: 30) { PDFDocument(url: pdf)?.pageCount == 2 }, "Seiten im PDF: \(PDFDocument(url: pdf)?.pageCount ?? -1)")
+    }
+
+    @Test func aSecondExportNeverOverwritesTheFirst() throws {
+        let s = try launch(); defer { s.close() }
+        startSeries(s)
+        scan(s, expecting: 1)
+        #expect(s.app.wait { pageCount(s) == "1 Seite" })
+        #expect(s.app.press("series-export-button"))
+        #expect(s.app.wait { s.app.element("export-run-button") != nil })
+        #expect(s.app.press("export-run-button"))
+        #expect(s.app.wait(timeout: 60) { s.pdfs.count == 1 })
+        #expect(s.app.wait { s.app.isEnabled("export-run-button") == true })
+        #expect(s.app.press("export-run-button"))
+        #expect(s.app.wait(timeout: 60) { s.pdfs.count == 2 }, "Das zweite PDF überschrieb das erste: \(s.pdfs.map(\.lastPathComponent))")
     }
 }
