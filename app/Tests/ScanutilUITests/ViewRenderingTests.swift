@@ -57,12 +57,12 @@ struct ViewRenderingTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         let model = AppModel(scanner: MockScanner(previewsEnabled: false), store: ArchiveStore(root: dir))
         await model.connect()
-        let before = try render(SeriesBar(model: model), size: CGSize(width: 900, height: 44), name: "serienleiste-vorher")
+        let before = try render(SeriesBar(model: model, nav: Navigator()), size: CGSize(width: 900, height: 44), name: "serienleiste-vorher")
         #expect(before.width >= 1800)
 
         model.startSeries(title: "Chronik 1524")
         await model.scan()
-        let during = try render(SeriesBar(model: model), size: CGSize(width: 900, height: 44), name: "serienleiste-laeuft")
+        let during = try render(SeriesBar(model: model, nav: Navigator()), size: CGSize(width: 900, height: 44), name: "serienleiste-laeuft")
         #expect(during.width >= 1800)
         #expect(model.series?.pages.count == 1)
         await model.disconnect()

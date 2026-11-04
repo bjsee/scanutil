@@ -60,6 +60,8 @@ struct HintergrundTests {
         #expect(s.app.press("log-button"))
         #expect(s.app.wait { s.app.element("log-view") != nil }, "Das Protokoll öffnet sich im Hintergrund nicht")
         unchanged(before, after: "Protokoll öffnen", app: s.app)
+        #expect(s.app.press("nav-capture"))
+        #expect(s.app.wait { s.app.element("series-export-button") != nil })
 
         // Der Speicherdialog ist modal und öffnet sich gern im Vordergrund.
         s.app.pressOpeningDialog("series-export-button")
@@ -70,7 +72,7 @@ struct HintergrundTests {
         unchanged(before, after: "Export", app: s.app)
     }
 
-    @Test func theSeriesEditorWindowOpensWithoutTakingFocus() throws {
+    @Test func theSeriesEditorPageOpensWithoutTakingFocus() throws {
         let before = Snapshot.now()
         let s = try UISession.launch(mode: "document"); defer { s.close() }
         #expect(s.app.wait { s.app.string("status-text") == "Bereit: Mock-Scanner" })
@@ -82,9 +84,9 @@ struct HintergrundTests {
         #expect(s.app.wait { s.app.element("series-start-button") != nil })
         #expect(s.app.press("series-list-button"))
         #expect(s.app.wait { s.app.element("series-list-view") != nil })
-        _ = s.app.press("series-menu")
-        #expect(s.app.pressMenuItem(titled: "Bearbeiten …"))
-        #expect(s.app.wait(timeout: 15) { s.app.element("editor-grid") != nil }, "Das Editor-Fenster ging nicht auf")
+        #expect(s.app.wait { s.app.element("series-edit-button") != nil })
+        #expect(s.app.press("series-edit-button"))
+        #expect(s.app.wait(timeout: 15) { s.app.element("editor-grid") != nil }, "Die Editor-Seite öffnet sich nicht")
         unchanged(before, after: "Editor öffnen", app: s.app)
         #expect(s.app.wait { s.app.element("editor-page-1") != nil })
         #expect(s.app.press("editor-page-1"))

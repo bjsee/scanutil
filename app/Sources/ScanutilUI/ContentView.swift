@@ -8,15 +8,53 @@ import UniformTypeIdentifiers
 
 public struct ContentView: View {
     @Bindable var model: AppModel
+    @State private var nav = Navigator()
     @State private var keyMonitor = SpaceKeyMonitor()
-    @State private var showLog = false
 
     public init(model: AppModel) {
         self.model = model
     }
 
     public var body: some View {
+        HStack(spacing: 0) {
+            Sidebar(model: model, nav: nav)
+            Divider()
+            page
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(minWidth: 1000, minHeight: 600)
+        // Zurück wie im Browser.
+        .background(Button("Zurück") { nav.back() }.keyboardShortcut("[", modifiers: .command).opacity(0).accessibilityHidden(true))
+        // Die Leertaste löst den Scan aus, aber nur auf der Seite Aufnahme: In der Serienliste soll sie nichts tun.
+        // Als Tastenkürzel der Schaltfläche kommt sie nicht an, weil das Fokussystem eine Taste ohne Modifikator abfängt,
+        // deshalb ein Monitor auf AppKit-Ebene.
+        .onAppear { keyMonitor.start { if nav.route == .capture { Task { await model.scan() } } } }
+        .onDisappear { keyMonitor.stop() }
+        .task {
+            await model.loadArchive()
+            await model.connect()
+        }
+    }
+
+    @ViewBuilder private var page: some View {
+        switch nav.route {
+        case .capture: CaptureView(model: model, nav: nav)
+        case .series: SeriesPage(model: model, nav: nav)
+        case .editor(let id): SeriesEditorView(model: model, documentID: id, nav: nav)
+        case .log: LogPage(model: model)
+        }
+    }
+}
+
+/// Die Seite Aufnahme: Serienleiste, Vorschau, Scans und der Auslöser.
+struct CaptureView: View {
+    @Bindable var model: AppModel
+    let nav: Navigator
+
+    var body: some View {
         VStack(spacing: 0) {
+            SeriesBar(model: model, nav: nav)
+            Divider()
             HSplitView {
                 previewPane
                     .frame(minWidth: 480)
@@ -24,18 +62,7 @@ public struct ContentView: View {
                     .frame(minWidth: 380, idealWidth: 480)
             }
             Divider()
-            SeriesBar(model: model)
-            Divider()
-            statusBar
-        }
-        .frame(minWidth: 900, minHeight: 560)
-        // Die Leertaste löst den Scan aus. Als Tastenkürzel der Schaltfläche kommt sie nicht an,
-        // weil das Fokussystem eine Taste ohne Modifikator abfängt, deshalb ein Monitor auf AppKit-Ebene.
-        .onAppear { keyMonitor.start { Task { await model.scan() } } }
-        .onDisappear { keyMonitor.stop() }
-        .task {
-            await model.loadArchive()
-            await model.connect()
+            captureBar
         }
     }
 
@@ -104,50 +131,21 @@ public struct ContentView: View {
         }
     }
 
-    private var statusBar: some View {
+    private var captureBar: some View {
         HStack(spacing: 12) {
             Button {
                 Task { await model.scan() }
             } label: {
                 Label("Scannen", systemImage: "camera.shutter.button")
             }
+            .buttonStyle(.borderedProminent)
             .disabled(model.status != .ready)
             .help("Leertaste")
             .accessibilityIdentifier("scan-button")
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(statusText).font(.callout).accessibilityIdentifier("status-text")
-                if let message = model.message {
-                    Text(message).font(.caption).foregroundStyle(.red)
-                } else if let format = model.captureFormat {
-                    Text("Aufnahme \(format.description), Schärfe 0 (Archivmodus)" + durationText).font(.caption).foregroundStyle(.secondary)
-                }
+            if let format = model.captureFormat {
+                Text("Aufnahme \(format.description), Schärfe 0 (Archivmodus)" + durationText).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            Button {
-                showLog.toggle()
-                if showLog { model.markLogSeen() }
-            } label: {
-                Label("Meldungen", systemImage: model.unseenIssues > 0 ? "exclamationmark.bubble.fill" : "text.bubble")
-                    .foregroundStyle(model.unseenIssues > 0 ? Color.orange : Color.primary)
-                    .overlay(alignment: .topTrailing) {
-                        if model.unseenIssues > 0 {
-                            Text("\(min(model.unseenIssues, 99))")
-                                .font(.caption2.bold()).foregroundStyle(.white)
-                                .padding(.horizontal, 4).background(Capsule().fill(.red))
-                                .offset(x: 10, y: -8)
-                        }
-                    }
-            }
-            .help("Warnungen und Hinweise dieser Sitzung")
-            .accessibilityLabel("Meldungen")
-            .accessibilityValue("\(model.unseenIssues) neu, \(model.log.count) insgesamt")
-            .accessibilityIdentifier("log-button")
-            .popover(isPresented: $showLog, arrowEdge: .top) { LogView(model: model) }
-            Button("Archiv im Finder zeigen") {
-                NSWorkspace.shared.activateFileViewerSelecting([model.archiveURL])
-            }
-            .buttonStyle(.link)
         }
         .padding(10)
     }
@@ -157,26 +155,16 @@ public struct ContentView: View {
         let seconds = Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18
         return String(format: " · letzter Scan %.1f s", seconds)
     }
-
-    private var statusText: String {
-        switch model.status {
-        case .disconnected: "Nicht verbunden"
-        case .connecting: "Verbinde …"
-        case .ready: model.device.map { "Bereit: \($0.name)" } ?? "Bereit"
-        case .capturing: "Aufnahme läuft"
-        case .failed: model.isSearching ? "Suche Scanner …" : "Nicht verfügbar"
-        }
-    }
 }
 
 /// Protokoll der Sitzung: Warnungen der Analyse, übersprungene Dubletten, Fehler des Scanners, Berichte vom Export.
-struct LogView: View {
+struct LogPage: View {
     @Bindable var model: AppModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Meldungen").font(.headline)
+                Text("Meldungen").font(.title3.bold())
                 Text("\(model.log.count)").font(.callout).foregroundStyle(.secondary)
                 Spacer()
                 Button("Kopieren") {
@@ -189,18 +177,19 @@ struct LogView: View {
                     .disabled(model.log.isEmpty)
                     .accessibilityIdentifier("log-clear-button")
             }
-            .padding(10)
+            .padding(.horizontal, 20).frame(height: 56)
             Divider()
             if model.log.isEmpty {
                 Text("Keine Meldungen.").foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 80)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView { LogList(model: model) }
                     .accessibilityLabel("Meldungen")
                     .accessibilityIdentifier("log-list")
             }
         }
-        .frame(width: 520, height: 360)
+        .onAppear { model.markLogSeen() }
+        .onChange(of: model.log.count) { model.markLogSeen() }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("log-view")
     }
@@ -285,15 +274,27 @@ struct LogRow: View {
 /// Leiste für den Serienmodus: Serie beginnen und beenden, Auto-Auslösung, Fortschritt bis zur Aufnahme.
 struct SeriesBar: View {
     @Bindable var model: AppModel
+    let nav: Navigator
     /// Vor dem Beginn gewählt: jede Aufnahme ist eine Doppelseite.
     @State private var bookMode = false
     /// Beim Export Text erkennen und unsichtbar ins PDF legen.
     @State private var withOCR = false
     /// Der Dialog „neu oder fortsetzen?“ beim Beginnen, und die Liste der Serien.
     @State private var showStartSheet = false
-    @State private var showList = false
 
     var body: some View {
+        VStack(spacing: 0) {
+            bar
+            if showStartSheet {
+                Divider()
+                StartSeriesSheet(model: model, initialBook: bookMode) { showStartSheet = false }
+                    .padding(.horizontal, 10).padding(.vertical, 12)
+            }
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var bar: some View {
         HStack(spacing: 12) {
             if let series = model.series {
                 Label("\(series.title)" + (model.seriesIsBook ? " · Buch" : ""), systemImage: "books.vertical")
@@ -322,7 +323,6 @@ struct SeriesBar: View {
                         .buttonStyle(.link)
                         .accessibilityIdentifier("export-reveal-button")
                 }
-                seriesListButton
                 Toggle("Mit Texterkennung", isOn: $withOCR)
                     .toggleStyle(.switch)
                     .help("Macht das PDF durchsuchbar. Kostet etwa 1,5 Sekunden je Seite.")
@@ -354,7 +354,7 @@ struct SeriesBar: View {
                     Label("Angesehen: \(opened.title) · \(opened.pages.count) Seite\(opened.pages.count == 1 ? "" : "n")", systemImage: "eye")
                         .font(.callout).lineLimit(1)
                         .accessibilityIdentifier("opened-document-label")
-                    Button("Bearbeiten …") { SeriesEditorWindow.show(model: model, documentID: opened.id) }
+                    Button("Bearbeiten …") { nav.go(.editor(opened.id)) }
                         .disabled(opened.pages.isEmpty)
                         .accessibilityIdentifier("edit-opened-button")
                     Button("Hier fortsetzen") { Task { await model.resumeSeries(id: opened.id) } }
@@ -367,30 +367,12 @@ struct SeriesBar: View {
                         .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
                 Spacer()
-                seriesListButton
                 savedDocumentsMenu
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("series-bar")
-        .sheet(isPresented: $showStartSheet) {
-            StartSeriesSheet(model: model, initialBook: bookMode) { showStartSheet = false }
-        }
-    }
-
-    /// Die Liste aller Serien: öffnen, fortsetzen, umbenennen, als PDF ausgeben, löschen.
-    private var seriesListButton: some View {
-        Button { showList.toggle() } label: {
-            Label("Serien (\(model.savedDocuments.count))", systemImage: "list.bullet.rectangle")
-        }
-        .help("Alle Serien: ansehen, fortsetzen, umbenennen, als PDF ausgeben oder löschen")
-        .accessibilityLabel("Serien")
-        .accessibilityValue("\(model.savedDocuments.count)")
-        .accessibilityIdentifier("series-list-button")
-        .popover(isPresented: $showList, arrowEdge: .top) {
-            SeriesListView(model: model) { document in chooseExportTarget(for: document) }
-        }
     }
 
     @ViewBuilder private var phaseIndicator: some View {
@@ -444,16 +426,7 @@ struct SeriesBar: View {
     }
 
     private func chooseExportTarget(for document: ScanDocument) {
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.pdf]
-        panel.nameFieldStringValue = document.title + ".pdf"
-        panel.message = "Das PDF wird aus den Originalen mit den eingestellten Korrekturen erzeugt."
-        // Für die Oberflächentests: der Dialog öffnet im Testordner statt in den Ordnern des Nutzers.
-        if let dir = ProcessInfo.processInfo.environment["SCANUTIL_EXPORT_DIR"] { panel.directoryURL = URL(fileURLWithPath: dir, isDirectory: true) }
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        var options = ExportOptions.archive
-        options.ocr = withOCR
-        Task { await model.exportDocument(document, to: url, options: options) }
+        ExportDialog.run(model: model, document: document, ocr: withOCR)
     }
 
     private func pageCountText(_ count: Int) -> String {
@@ -466,6 +439,7 @@ struct SeriesBar: View {
 /// Der Dialog beim Beginnen, wenn es schon Serien gibt: eine neue beginnen (mit Namen) oder in einer vorhandenen fortsetzen.
 struct StartSeriesSheet: View {
     @Bindable var model: AppModel
+    var started: (() -> Void)?
     let done: () -> Void
 
     private enum Mode: Hashable { case new, resume }
@@ -474,8 +448,9 @@ struct StartSeriesSheet: View {
     @State private var book: Bool
     @State private var resumeID: UUID?
 
-    init(model: AppModel, initialBook: Bool, done: @escaping () -> Void) {
+    init(model: AppModel, initialBook: Bool, started: (() -> Void)? = nil, done: @escaping () -> Void) {
         self.model = model
+        self.started = started
         self.done = done
         _book = State(initialValue: initialBook)
         _resumeID = State(initialValue: model.savedDocuments.first?.id)
@@ -527,8 +502,10 @@ struct StartSeriesSheet: View {
                     .accessibilityIdentifier("series-sheet-confirm")
             }
         }
-        .padding(20)
-        .frame(width: 440)
+        .padding(14)
+        .frame(maxWidth: 520, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.secondary.opacity(0.25)))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("start-series-sheet")
     }
@@ -540,18 +517,24 @@ struct StartSeriesSheet: View {
         case .resume:
             if let id = resumeID { Task { await model.resumeSeries(id: id) } }
         }
+        started?()
         done()
     }
 }
 
-/// Alle Serien als Liste. Eine Serie öffnen heißt ansehen (die Miniaturleiste zeigt ihre Scans), fortsetzen heißt weiter aufnehmen.
-struct SeriesListView: View {
+/// Die Seite Serien: neue beginnen, alle ansehen, fortsetzen, bearbeiten, umbenennen, als PDF ausgeben, löschen. Rückfragen stehen
+/// in der Zeile selbst.
+struct SeriesPage: View {
     @Bindable var model: AppModel
-    let export: (ScanDocument) -> Void
+    let nav: Navigator
 
     @State private var renaming: UUID?
     @State private var renameText = ""
     @State private var deleting: PendingDeletion?
+    @State private var showStart = false
+    @State private var withOCR = false
+    /// Die Serie, deren weitere Aktionen aufgeklappt sind. Kein Menü: Menüs sind Popups und liegen über allem anderen.
+    @State private var expanded: UUID?
 
     /// Eine Serie, die gelöscht werden soll, und ob ihre Scans mit.
     struct PendingDeletion: Identifiable {
@@ -563,103 +546,179 @@ struct SeriesListView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Serien").font(.headline)
+            HStack(spacing: 10) {
+                Text("Serien").font(.title3.bold())
                 Text("\(model.savedDocuments.count)").font(.callout).foregroundStyle(.secondary)
                 Spacer()
+                Toggle("Mit Texterkennung", isOn: $withOCR).toggleStyle(.switch)
+                    .help("Macht das PDF durchsuchbar. Kostet etwa 1,5 Sekunden je Seite.")
+                    .accessibilityIdentifier("export-ocr-toggle")
+                Button("Neue Serie") { showStart.toggle() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.isSeriesActive)
+                    .help(model.isSeriesActive ? "Es läuft schon eine Serie" : "Eine neue Serie beginnen oder eine fortsetzen")
+                    .accessibilityIdentifier("series-new-button")
             }
-            .padding(10)
+            .padding(.horizontal, 20).frame(height: 56)
             Divider()
+            if showStart {
+                StartSeriesSheet(model: model, initialBook: false, started: { nav.go(.capture) }) { showStart = false }
+                    .padding(20)
+                Divider()
+            }
             if model.savedDocuments.isEmpty {
-                Text("Noch keine Serie.").foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 80)
+                Text("Noch keine Serie.").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(model.savedDocuments) { document in
                             row(document)
+                            if expanded == document.id { actions(document) }
+                            if let pending = deleting, pending.document.id == document.id { confirmation(pending) }
                             Divider()
                         }
                     }
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.secondary.opacity(0.2)))
+                    .padding(20)
                 }
             }
         }
-        .frame(width: 560, height: 340)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("series-list-view")
-        .confirmationDialog(
-            "Serie löschen?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), presenting: deleting
-        ) { pending in
-            Button(pending.withScans ? (model.scansAreRecoverable ? "Serie und Scans in den Papierkorb" : "Serie und Scans endgültig löschen") : "Löschen",
-                   role: .destructive) {
+    }
+
+    /// Die Rückfrage vor dem Löschen: ein Streifen unter der Zeile, kein Dialog.
+    private func confirmation(_ pending: PendingDeletion) -> some View {
+        let pages = "\(pending.document.pages.count) Seite\(pending.document.pages.count == 1 ? "" : "n")"
+        let text: String = pending.withScans
+            ? "„\(pending.document.title)“ mit \(pages) wird gelöscht, dazu \(pending.scanCount) Scan\(pending.scanCount == 1 ? "" : "s"): "
+                + (model.scansAreRecoverable ? "Sie kommen in den Papierkorb und lassen sich dort zurücklegen. " : "Sie werden endgültig gelöscht. ")
+                + "Kommt ein Scan auch in einer anderen Serie vor, verschwindet er dort ebenfalls."
+            : "„\(pending.document.title)“ mit \(pages) wird gelöscht. Die Scans bleiben im Archiv."
+        return HStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+            Text(text).font(.callout).fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            Button("Abbrechen") { deleting = nil }.accessibilityIdentifier("series-delete-cancel")
+            Button(pending.withScans ? (model.scansAreRecoverable ? "Serie und Scans in den Papierkorb" : "Serie und Scans endgültig löschen") : "Löschen") {
+                deleting = nil
                 Task { await model.deleteDocument(id: pending.document.id, withScans: pending.withScans) }
             }
+            .tint(.red)
             .accessibilityIdentifier("series-delete-confirm")
-            Button("Abbrechen", role: .cancel) {}
-        } message: { pending in
-            let pages = "\(pending.document.pages.count) Seite\(pending.document.pages.count == 1 ? "" : "n")"
-            if pending.withScans {
-                Text("„\(pending.document.title)“ mit \(pages) wird gelöscht, dazu \(pending.scanCount) Scan\(pending.scanCount == 1 ? "" : "s"): "
-                     + (model.scansAreRecoverable ? "Sie kommen in den Papierkorb und lassen sich dort zurücklegen. " : "Sie werden endgültig gelöscht. ")
-                     + "Kommt ein Scan auch in einer anderen Serie vor, verschwindet er dort ebenfalls.")
-            } else {
-                Text("„\(pending.document.title)“ mit \(pages) wird gelöscht. Die Scans bleiben im Archiv.")
-            }
         }
+        .padding(.horizontal, 16).padding(.vertical, 10)
+        .background(Color.red.opacity(0.08))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("series-delete-strip")
     }
 
     private func row(_ document: ScanDocument) -> some View {
         let isRunning = model.series?.id == document.id, isOpened = model.openedDocument?.id == document.id
-        return HStack(spacing: 8) {
+        let review = model.review(of: document)
+        return HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 if renaming == document.id {
                     TextField("Name", text: $renameText)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit { commitRename(document) }
+                        .onExitCommand { renaming = nil }
                         .accessibilityIdentifier("series-rename-field")
                 } else {
                     Text(document.title).font(.callout.bold()).lineLimit(1)
                 }
-                Text("\(document.pages.count) Seite\(document.pages.count == 1 ? "" : "n") · "
+                Text("\(document.pages.contains { $0.region != .whole } ? "Buch" : "Einzelseiten") · "
+                     + "\(document.pages.count) Seite\(document.pages.count == 1 ? "" : "n") · "
                      + document.createdAt.formatted(.dateTime.day().month().year().hour().minute()))
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             if isRunning { Text("läuft").font(.caption).foregroundStyle(.red) }
             else if isOpened { Text("angesehen").font(.caption).foregroundStyle(.secondary) }
+            let open = review.needingAttention.count
+            if open > 0 {
+                Text("\(open) unsicher").font(.caption).padding(.horizontal, 8).padding(.vertical, 2)
+                    .background(Capsule().fill(Color.orange.opacity(0.2))).foregroundStyle(Color.orange)
+                    .accessibilityIdentifier("series-unsure-badge")
+            } else if !document.pages.isEmpty {
+                Text("alle geprüft").font(.caption).padding(.horizontal, 8).padding(.vertical, 2)
+                    .background(Capsule().fill(Color.green.opacity(0.18))).foregroundStyle(Color.green)
+            }
             if renaming == document.id {
                 Button("OK") { commitRename(document) }.accessibilityIdentifier("series-rename-ok")
             } else {
-                Button("Ansehen") { Task { await model.openDocument(id: document.id) } }
-                    .disabled(model.isSeriesActive || isOpened)
-                    .accessibilityIdentifier("series-open-button")
-                Button("Fortsetzen") { Task { await model.resumeSeries(id: document.id) } }
-                    .disabled(model.isSeriesActive || model.status != .ready)
-                    .accessibilityIdentifier("series-resume-button")
-                Menu {
-                    Button("Umbenennen") { renaming = document.id; renameText = document.title }
-                    Button("Bearbeiten …") { SeriesEditorWindow.show(model: model, documentID: document.id) }
-                        .disabled(document.pages.isEmpty)
-                    Button("Als PDF …") { export(document) }.disabled(document.pages.isEmpty)
-                    Divider()
-                    Button("Nur die Serie löschen …", role: .destructive) { deleting = PendingDeletion(document: document, withScans: false) }
-                    Button("Serie und Scans löschen …", role: .destructive) { deleting = PendingDeletion(document: document, withScans: true) }
-                        .disabled(document.pages.isEmpty)
-                } label: { Image(systemName: "ellipsis.circle") }
-                .menuStyle(.borderlessButton).fixedSize()
-                .accessibilityLabel("Weitere Aktionen")
-                .accessibilityIdentifier("series-menu")
+                Button("Ansehen") {
+                    Task { await model.openDocument(id: document.id); nav.go(.capture) }
+                }
+                .disabled(model.isSeriesActive || isOpened)
+                .accessibilityIdentifier("series-open-button")
+                Button("Fortsetzen") {
+                    Task { await model.resumeSeries(id: document.id); nav.go(.capture) }
+                }
+                .disabled(model.isSeriesActive || model.status != .ready)
+                .accessibilityIdentifier("series-resume-button")
+                Button("Bearbeiten") { nav.go(.editor(document.id)) }
+                    .disabled(document.pages.isEmpty)
+                    .accessibilityIdentifier("series-edit-button")
+                Button { expanded = expanded == document.id ? nil : document.id } label: { Image(systemName: "ellipsis.circle") }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Weitere Aktionen")
+                    .accessibilityValue(expanded == document.id ? "aufgeklappt" : "zu")
+                    .accessibilityIdentifier("series-menu")
             }
         }
-        .padding(.horizontal, 10).padding(.vertical, 6)
+        .padding(.horizontal, 16).padding(.vertical, 10)
         .background(isRunning || isOpened ? Color.accentColor.opacity(0.10) : Color.clear)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(document.title), \(document.pages.count) Seiten")
         .accessibilityIdentifier("series-row")
     }
 
+    /// Die weiteren Aktionen einer Serie als Streifen unter der Zeile.
+    private func actions(_ document: ScanDocument) -> some View {
+        HStack(spacing: 10) {
+            Button("Umbenennen") { renaming = document.id; renameText = document.title; expanded = nil }
+                .accessibilityIdentifier("series-rename-button")
+            Button("Als PDF …") { expanded = nil; ExportDialog.run(model: model, document: document, ocr: withOCR) }
+                .disabled(document.pages.isEmpty)
+                .accessibilityIdentifier("series-pdf-button")
+            Spacer()
+            Button("Nur die Serie löschen …") { deleting = PendingDeletion(document: document, withScans: false); expanded = nil }
+                .foregroundStyle(.red)
+                .accessibilityIdentifier("series-delete-button")
+            Button("Serie und Scans löschen …") { deleting = PendingDeletion(document: document, withScans: true); expanded = nil }
+                .foregroundStyle(.red)
+                .disabled(document.pages.isEmpty)
+                .accessibilityIdentifier("series-delete-scans-button")
+        }
+        .padding(.horizontal, 16).padding(.vertical, 8)
+        .background(Color.secondary.opacity(0.08))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("series-actions")
+    }
+
     private func commitRename(_ document: ScanDocument) {
         model.renameDocument(id: document.id, to: renameText)
         renaming = nil
+    }
+}
+
+/// Der Speicherdialog fürs PDF. (Wird in der nächsten Etappe durch eine Seite ersetzt.)
+@MainActor
+enum ExportDialog {
+    static func run(model: AppModel, document: ScanDocument, ocr: Bool) {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.pdf]
+        panel.nameFieldStringValue = document.title + ".pdf"
+        panel.message = "Das PDF wird aus den Originalen mit den eingestellten Korrekturen erzeugt."
+        // Für die Oberflächentests: der Dialog öffnet im Testordner statt in den Ordnern des Nutzers.
+        if let dir = ProcessInfo.processInfo.environment["SCANUTIL_EXPORT_DIR"] { panel.directoryURL = URL(fileURLWithPath: dir, isDirectory: true) }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        var options = ExportOptions.archive
+        options.ocr = ocr
+        Task { await model.exportDocument(document, to: url, options: options) }
     }
 }
 

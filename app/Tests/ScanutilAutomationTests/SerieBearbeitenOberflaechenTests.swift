@@ -27,16 +27,16 @@ struct SerieBearbeitenOberflaechenTests {
     private func openEditor(_ s: UISession) {
         #expect(s.app.press("series-list-button"))
         #expect(s.app.wait { s.app.element("series-list-view") != nil })
-        _ = s.app.press("series-menu")
-        #expect(s.app.pressMenuItem(titled: "Bearbeiten …"), "Der Menüeintrag „Bearbeiten …“ fehlt")
-        #expect(s.app.wait(timeout: 15) { s.app.element("editor-grid") != nil }, "Das Fenster „Serie bearbeiten“ ging nicht auf")
+        #expect(s.app.wait { s.app.element("series-edit-button") != nil })
+        #expect(s.app.press("series-edit-button"))
+        #expect(s.app.wait(timeout: 15) { s.app.element("editor-grid") != nil }, "Die Seite „Serie bearbeiten“ öffnet sich nicht")
     }
 
     @Test func theEditorShowsEveryPageAndMarksTheUnsureOnes() throws {
         let s = try recordedSeries(scans: 2); defer { s.close() }
-        #expect(s.app.windows.count == 1, "Der Editor darf nicht von selbst aufgehen und dem Hauptfenster den Fokus nehmen")
+        #expect(s.app.windows.count == 1)
         openEditor(s)
-        #expect(s.app.windows.count == 2)
+        #expect(s.app.windows.count == 1, "Der Editor ist eine Seite im Fenster, kein zweites Fenster")
         #expect(s.app.wait { s.app.element("editor-page-1") != nil && s.app.element("editor-page-2") != nil }, "Nicht alle Seiten im Raster")
         for n in 1...2 {
             let state = s.app.string("editor-page-\(n)")
