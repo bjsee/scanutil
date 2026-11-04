@@ -1,4 +1,5 @@
 import ArchiveKit
+import ExportKit
 import CoreGraphics
 import Foundation
 import ImagingKit
@@ -247,4 +248,52 @@ struct SeriesEditingModelTests {
         #expect(await model.pageOriginalWithCrop(documentID: UUID(), pageID: page.id) == nil)
         await model.disconnect()
     }
+
+    @Test func aHalfPagePreviewIsAsSharpAsRequestedNotHalfAsSharp() async throws {
+        // Die Auflösung gilt für die Seite, nicht für den ganzen Scan: eine halbe Seite braucht den doppelt großen Scan.
+        let (model, _, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "Buch", book: true)
+        await model.scan()
+        let id = try #require(model.series?.id), page = try #require(model.series?.pages.first)
+        let full = try #require(await model.pagePreview(documentID: id, pageID: page.id, fullResolution: true))
+        let fullLong = max(full.width, full.height)
+        let target = min(512, fullLong / 2)
+        let small = try #require(await model.pagePreview(documentID: id, pageID: page.id, maxPixelSize: target))
+        let long = max(small.width, small.height)
+        #expect(Double(long) >= Double(AppModel.bucket(target)).clamped(max: Double(fullLong)) * 0.85, "Seite hat nur \(long) px bei \(fullLong) im Original")
+        #expect(long <= fullLong)
+        await model.disconnect()
+    }
+
+    @Test func fullResolutionOriginalViewIsTheWholeScan() async throws {
+        let (model, _, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "Buch", book: true)
+        await model.scan()
+        let id = try #require(model.series?.id), page = try #require(model.series?.pages.first)
+        let whole = try #require(await model.pageOriginalWithCrop(documentID: id, pageID: page.id, fullResolution: true))
+        let small = try #require(await model.pageOriginalWithCrop(documentID: id, pageID: page.id, maxPixelSize: 256))
+        #expect(whole.width >= small.width && max(small.width, small.height) <= 256)
+        #expect(try model.scanPixelWidth(documentID: id, pageID: page.id) == whole.width)
+        await model.disconnect()
+    }
+
+    @Test func aDraggedCropIsStoredAsManualAndUsedForThePdf() async throws {
+        let (model, store, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "Buch", book: true)
+        await model.scan()
+        let id = try #require(model.series?.id), page = try #require(model.series?.pages.first)
+        let quad = Quad(topLeft: .init(x: 0.1, y: 0.1), topRight: .init(x: 0.45, y: 0.12), bottomRight: .init(x: 0.44, y: 0.9), bottomLeft: .init(x: 0.1, y: 0.88))
+        model.updatePage(documentID: id, pageID: page.id) { $0.setCrop(quad) }
+        let saved = try #require(try store.loadDocument(id: id).pages.first)
+        #expect(saved.corrections.crop.quad == quad && saved.corrections.crop.source == .manual && saved.corrections.crop.enabled)
+        #expect(PageGeometry.effectiveCorrections(for: saved).crop.quad == quad)
+        // „Bildhälfte“ stellt die Hälfte wieder her.
+        model.updatePage(documentID: id, pageID: page.id) { $0.setCrop(PageGeometry.half(of: .full, region: .left)) }
+        #expect(try store.loadDocument(id: id).pages.first?.corrections.crop.quad?.topRight.x == 0.5)
+        await model.disconnect()
+    }
+}
+
+private extension Double {
+    func clamped(max limit: Double) -> Double { Swift.min(self, limit) }
 }

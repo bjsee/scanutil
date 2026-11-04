@@ -1,5 +1,6 @@
 import ArchiveKit
 import Foundation
+import ImagingKit
 import Observation
 
 /// Welche Seiten das Raster des Editors zeigt.
@@ -63,4 +64,28 @@ public final class SeriesEditorModel {
         let ordered = Array(ids[start...]) + Array(ids[..<start])
         if let next = ordered.first(where: { review.pages[$0]?.needsAttention == true }) { selectedPageID = next }
     }
+}
+
+/// Eine der vier Ecken des Zuschnittsrahmens.
+public enum QuadCorner: String, CaseIterable, Sendable {
+    case topLeft, topRight, bottomRight, bottomLeft
+
+    var keyPath: WritableKeyPath<Quad, NormalizedPoint> {
+        switch self {
+        case .topLeft: \.topLeft
+        case .topRight: \.topRight
+        case .bottomRight: \.bottomRight
+        case .bottomLeft: \.bottomLeft
+        }
+    }
+
+    /// Der Rahmen mit dieser Ecke an einem neuen Ort. Der Punkt bleibt im Bild (0 bis 1); die anderen Ecken bleiben stehen.
+    public func moved(in quad: Quad, to point: NormalizedPoint) -> Quad {
+        var result = quad
+        result[keyPath: keyPath] = NormalizedPoint(x: min(max(point.x, 0), 1), y: min(max(point.y, 0), 1))
+        return result
+    }
+
+    /// Die Ecke des Rahmens.
+    public func point(of quad: Quad) -> NormalizedPoint { quad[keyPath: keyPath] }
 }

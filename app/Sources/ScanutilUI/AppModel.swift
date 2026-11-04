@@ -793,26 +793,34 @@ public final class AppModel {
         }
     }
 
-    /// Vorschau einer Seite so, wie sie ins PDF käme (Zuschnitt, Drehung, Handentfernung), für das Raster des Editors.
-    /// Gemerkt wird je Seite und Korrekturstand; ein Scan wird dafür nur einmal gelesen. `nil`, wenn das Original fehlt.
-    public func pagePreview(documentID: UUID, pageID: UUID, maxPixelSize: Int = 480) async -> CGImage? {
+    /// Vorschau einer Seite so, wie sie ins PDF käme (Zuschnitt, Drehung, Handentfernung).
+    /// - Parameter maxPixelSize: Die längste Kante der *Seite* (nicht des Scans). Bei einer Doppelseite wird der Scan dafür größer
+    ///   gelesen, sonst bekäme die halbe Seite nur die halbe Auflösung und wäre unscharf.
+    /// - Parameter fullResolution: Das Original in voller Auflösung, für den Zoom.
+    /// Gemerkt wird je Seite, Größe und Korrekturstand. `nil`, wenn das Original fehlt.
+    public func pagePreview(documentID: UUID, pageID: UUID, maxPixelSize: Int = 512, fullResolution: Bool = false) async -> CGImage? {
         guard let page = latestDocument(id: documentID)?.page(id: pageID) else { return nil }
         let corrections = PageGeometry.effectiveCorrections(for: page)
-        let key = "\(pageID.uuidString)/\(maxPixelSize)"
-        if let cached = pagePreviewCache[key], cached.key == corrections.cacheKey { return cached.image }
+        let size = Self.bucket(maxPixelSize)
+        let key = "\(pageID.uuidString)/\(fullResolution ? 0 : size)"
+        if !fullResolution, let cached = pagePreviewCache[key], cached.key == corrections.cacheKey { return cached.image }
         let store = self.store, scanID = page.scanID
         let image: CGImage? = await Task.detached {
-            guard let record = try? store.load(id: scanID), let thumb = store.thumbnail(for: record, maxPixelSize: maxPixelSize) else { return nil }
-            return CorrectionRenderer.render(thumb, corrections: corrections)
+            guard let record = try? store.load(id: scanID) else { return nil }
+            let source: CGImage?
+            if fullResolution { source = Self.loadOriginal(store.originalURL(for: record)) }
+            else { source = store.thumbnail(for: record, maxPixelSize: Self.scanSize(forPage: size, corrections: corrections, record: record)) }
+            return source.flatMap { CorrectionRenderer.render($0, corrections: corrections) }
         }.value
-        if let image { pagePreviewCache[key] = (corrections.cacheKey, image) }
+        if let image, !fullResolution { pagePreviewCache[key] = (corrections.cacheKey, image) }
         return image
     }
 
     /// Das Original des Scans mit dem Zuschnitt, den die App für diese Seite verwendet (grün; orange, wenn die Automatik unsicher war
     /// oder nur die Bildhälfte gilt) und bei einer Doppelseite dem Rahmen der Nachbarseite (gestrichelt). Außerhalb des Rahmens
     /// ist das Bild abgedunkelt. `nil`, wenn das Original fehlt.
-    public func pageOriginalWithCrop(documentID: UUID, pageID: UUID, maxPixelSize: Int = 1600) async -> CGImage? {
+    /// - Parameter maxPixelSize: Die längste Kante des ganzen Scans. `fullResolution` liest stattdessen das ganze Original.
+    public func pageOriginalWithCrop(documentID: UUID, pageID: UUID, maxPixelSize: Int = 2400, fullResolution: Bool = false) async -> CGImage? {
         guard let document = latestDocument(id: documentID), let page = document.page(id: pageID) else { return nil }
         let effective = PageGeometry.effectiveCorrections(for: page)
         var frames: [CropOverlay.Frame] = []
@@ -826,9 +834,50 @@ public final class AppModel {
         }
         let store = self.store, scanID = page.scanID
         return await Task.detached {
-            guard let record = try? store.load(id: scanID), let image = store.thumbnail(for: record, maxPixelSize: maxPixelSize) else { return nil }
-            return CropOverlay.draw(frames, on: image)
+            guard let record = try? store.load(id: scanID) else { return nil }
+            let image = fullResolution ? Self.loadOriginal(store.originalURL(for: record)) : store.thumbnail(for: record, maxPixelSize: maxPixelSize)
+            return image.flatMap { CropOverlay.draw(frames, on: $0) }
         }.value
+    }
+
+    /// Das Original des Scans ohne Rahmen, zum Ziehen des Zuschnitts. `nil`, wenn es fehlt.
+    public func pageOriginal(documentID: UUID, pageID: UUID, maxPixelSize: Int = 2000) async -> CGImage? {
+        guard let page = latestDocument(id: documentID)?.page(id: pageID) else { return nil }
+        let store = self.store, scanID = page.scanID
+        return await Task.detached {
+            guard let record = try? store.load(id: scanID) else { return nil }
+            return store.thumbnail(for: record, maxPixelSize: maxPixelSize)
+        }.value
+    }
+
+    /// Breite des Originals in Pixeln, für die Prozentanzeige des Zooms.
+    public func scanPixelWidth(documentID: UUID, pageID: UUID) -> Int? {
+        guard let page = latestDocument(id: documentID)?.page(id: pageID) else { return nil }
+        return try? store.load(id: page.scanID).original.width
+    }
+
+    nonisolated private static func loadOriginal(_ url: URL) -> CGImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
+    }
+
+    /// Ganze Schritte, damit ein Größenregler nicht für jeden Pixel ein neues Bild erzeugt.
+    nonisolated static func bucket(_ size: Int) -> Int { max(256, ((size + 255) / 256) * 256) }
+
+    /// Wie groß der ganze Scan gelesen werden muss, damit die Seite darin `page` Pixel an der längsten Kante hat.
+    /// Ein Zuschnitt auf die halbe Breite verlangt den doppelten Scan. Nie größer als das Original.
+    nonisolated static func scanSize(forPage page: Int, corrections: Corrections, record: ScanRecord) -> Int {
+        var share = 1.0
+        if corrections.enabled, corrections.crop.enabled, let q = corrections.crop.quad {
+            let xs = [q.topLeft.x, q.topRight.x, q.bottomRight.x, q.bottomLeft.x], ys = [q.topLeft.y, q.topRight.y, q.bottomRight.y, q.bottomLeft.y]
+            let w = (xs.max() ?? 1) - (xs.min() ?? 0), h = (ys.max() ?? 1) - (ys.min() ?? 0)
+            // Die längste Kante der Seite in Pixeln des Scans, bezogen auf dessen längste Kante.
+            let sourceLong = Double(max(record.original.width, record.original.height))
+            let pageLong = max(w * Double(record.original.width), h * Double(record.original.height))
+            share = max(0.05, pageLong / sourceLong)
+        }
+        let needed = Int((Double(page) / share * 1.05).rounded(.up))
+        return min(needed, max(record.original.width, record.original.height))
     }
 
     /// Nimmt den Geprüft-Vermerk von den Seiten eines Scans: Nach „Neu erkennen“ kann das Ergebnis zufällig dem alten gleichen,

@@ -32,7 +32,8 @@ public enum PageGeometry {
         return corrections
     }
 
-    static func half(of quad: Quad, region: PageRegion) -> Quad {
+    /// Die linke oder rechte Hälfte eines Vierecks, geteilt in der Mitte der oberen und unteren Kante.
+    public static func half(of quad: Quad, region: PageRegion) -> Quad {
         func mid(_ a: NormalizedPoint, _ b: NormalizedPoint) -> NormalizedPoint {
             NormalizedPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
         }
