@@ -19,6 +19,15 @@ struct HintergrundTests {
         let now = Snapshot.now()
         #expect(now.frontmost == before.frontmost, "Nach „\(step)“ liegt eine andere App vorn (vorher \(String(describing: before.frontmost)), jetzt \(String(describing: now.frontmost)), die getestete App hat \(app.pid))")
         #expect(!app.isFrontmost, "Nach „\(step)“ ist die getestete App vorn")
+        // Auch ein Fenster der getesteten App darf nicht über den Fenstern anderer Apps liegen, selbst wenn sie nicht aktiv ist.
+        #expect(Self.topWindowOwner() != app.pid, "Nach „\(step)“ liegt ein Fenster der getesteten App über allen anderen")
+    }
+
+    /// Wem das oberste normale Fenster auf dem Bildschirm gehört.
+    private static func topWindowOwner() -> pid_t? {
+        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        return list.first { ($0[kCGWindowLayer as String] as? Int) == 0 && ($0[kCGWindowAlpha as String] as? Double ?? 1) > 0 }
+            .flatMap { $0[kCGWindowOwnerPID as String] as? pid_t }
     }
 
     @Test func theAppRunsAndIsOperatedWithoutTakingFocusOrMovingTheMouse() throws {
@@ -59,6 +68,30 @@ struct HintergrundTests {
         #expect(s.app.confirmDialog())
         #expect(s.app.wait(timeout: 60) { !s.pdfs.isEmpty })
         unchanged(before, after: "Export", app: s.app)
+    }
+
+    @Test func theSeriesEditorWindowOpensWithoutTakingFocus() throws {
+        let before = Snapshot.now()
+        let s = try UISession.launch(mode: "document"); defer { s.close() }
+        #expect(s.app.wait { s.app.string("status-text") == "Bereit: Mock-Scanner" })
+        #expect(s.app.press("series-start-button"))
+        #expect(s.app.wait { s.app.element("series-page-count") != nil })
+        #expect(s.app.press("scan-button"))
+        #expect(s.app.wait { s.originals.count == 1 && s.pages.count == 1 })
+        #expect(s.app.press("series-end-button"))
+        #expect(s.app.wait { s.app.element("series-start-button") != nil })
+        #expect(s.app.press("series-list-button"))
+        #expect(s.app.wait { s.app.element("series-list-view") != nil })
+        _ = s.app.press("series-menu")
+        #expect(s.app.pressMenuItem(titled: "Bearbeiten …"))
+        #expect(s.app.wait(timeout: 15) { s.app.element("editor-grid") != nil }, "Das Editor-Fenster ging nicht auf")
+        unchanged(before, after: "Editor öffnen", app: s.app)
+        #expect(s.app.wait { s.app.element("editor-page-1") != nil })
+        #expect(s.app.press("editor-page-1"))
+        #expect(s.app.wait { s.app.element("editor-crop-edit") != nil })
+        #expect(s.app.press("editor-crop-edit"))
+        #expect(s.app.wait(timeout: 15) { s.app.element("editor-crop-editor") != nil })
+        unchanged(before, after: "Rahmen ziehen", app: s.app)
     }
 
     @Test func theMouseWheelReachesTheAppWithoutTheRealPointer() throws {

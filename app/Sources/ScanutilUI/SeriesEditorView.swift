@@ -1,5 +1,6 @@
 import AppKit
 import ArchiveKit
+import ExportKit
 import ImagingKit
 import SwiftUI
 
@@ -10,6 +11,8 @@ public struct SeriesEditorView: View {
     @State private var editor = SeriesEditorModel()
     /// Höhe der Seitenkarten im Raster, vom Nutzer einstellbar.
     @State private var cardHeight = 170.0
+    /// Was die große Ansicht zeigt. Hier und nicht in der Ansicht, damit die Werkzeuge „Rahmen ziehen“ umschalten können.
+    @State private var previewMode = PagePreview.Mode.original
 
     public init(model: AppModel, documentID: UUID?) { self.model = model; self.documentID = documentID }
 
@@ -124,7 +127,7 @@ public struct SeriesEditorView: View {
                     Button { editor.step(1, in: visible) } label: { Image(systemName: "chevron.right") }
                         .accessibilityLabel("Nächste Seite").accessibilityIdentifier("editor-next")
                 }
-                PagePreview(model: model, documentID: document.id, page: page)
+                PagePreview(model: model, documentID: document.id, page: page, mode: $previewMode)
                 findings(pageReview)
                 Divider()
                 tools(document, page: page)
@@ -163,23 +166,37 @@ public struct SeriesEditorView: View {
 
     private func tools(_ document: ScanDocument, page: DocumentPage) -> some View {
         let c = page.corrections
-        return VStack(alignment: .leading, spacing: 8) {
-            Toggle("Zuschnitt anwenden", isOn: Binding(get: { c.crop.enabled },
-                set: { on in model.updatePage(documentID: document.id, pageID: page.id) { $0.setCropEnabled(on) } }))
-                .disabled(c.crop.quad == nil)
-                .accessibilityIdentifier("editor-crop")
-            if c.handRemoval.hasMask {
-                Toggle("Hände und Daumen entfernen", isOn: Binding(get: { c.handRemoval.enabled },
-                    set: { on in model.updatePage(documentID: document.id, pageID: page.id) { $0.setHandRemovalEnabled(on) } }))
-                    .accessibilityIdentifier("editor-hands")
-            }
+        let change: ((inout Corrections) -> Void) -> Void = { model.updatePage(documentID: document.id, pageID: page.id, $0) }
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Zuschnitt").font(.subheadline.bold())
             HStack {
-                Text("Drehung").frame(width: 60, alignment: .leading)
-                Slider(value: Binding(get: { c.rotation.degrees },
-                    set: { value in model.updatePage(documentID: document.id, pageID: page.id) { $0.setRotation(degrees: value) } }),
+                Button("Rahmen ziehen") { previewMode = .crop }
+                    .help("Zeigt das Original mit vier Ecken, die du mit der Maus ziehst")
+                    .accessibilityIdentifier("editor-crop-edit")
+                Button(page.region == .whole ? "Ganzes Bild" : "Bildhälfte") {
+                    change { $0.setCrop(page.region == .whole ? .full : PageGeometry.half(of: .full, region: page.region)) }
+                }
+                .help("Setzt den Zuschnitt auf das ganze Bild bzw. die linke oder rechte Hälfte")
+                .accessibilityIdentifier("editor-crop-half")
+                Toggle("anwenden", isOn: Binding(get: { c.crop.enabled }, set: { on in change { $0.setCropEnabled(on) } }))
+                    .disabled(c.crop.quad == nil)
+                    .accessibilityIdentifier("editor-crop")
+            }
+            Text("Drehung").font(.subheadline.bold())
+            HStack(spacing: 6) {
+                Button { change { $0.setRotation(degrees: max(-15, c.rotation.degrees - 0.1)) } } label: { Image(systemName: "minus") }
+                    .help("0,1° gegen den Uhrzeigersinn").accessibilityLabel("Weniger drehen").accessibilityIdentifier("editor-rotation-minus")
+                Slider(value: Binding(get: { c.rotation.degrees }, set: { value in change { $0.setRotation(degrees: value) } }),
                        in: -15...15, step: 0.05)
                     .accessibilityIdentifier("editor-rotation")
+                Button { change { $0.setRotation(degrees: min(15, c.rotation.degrees + 0.1)) } } label: { Image(systemName: "plus") }
+                    .help("0,1° im Uhrzeigersinn").accessibilityLabel("Mehr drehen").accessibilityIdentifier("editor-rotation-plus")
                 Text(String(format: "%+.2f°", c.rotation.degrees)).font(.callout.monospacedDigit()).frame(width: 60, alignment: .trailing)
+                Button("0°") { change { $0.setRotation(degrees: 0) } }.accessibilityIdentifier("editor-rotation-zero")
+            }
+            if c.handRemoval.hasMask {
+                Toggle("Hände und Daumen entfernen", isOn: Binding(get: { c.handRemoval.enabled }, set: { on in change { $0.setHandRemovalEnabled(on) } }))
+                    .accessibilityIdentifier("editor-hands")
             }
         }
     }
@@ -212,7 +229,8 @@ struct PageCard: View {
         .padding(4)
         .background(selected ? Color.accentColor.opacity(0.15) : Color.clear)
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(selected ? Color.accentColor : Color.clear, lineWidth: 2))
-        .task(id: page.corrections.cacheKey) { image = await model.pagePreview(documentID: documentID, pageID: page.id) }
+        
+        .task(id: "\(page.corrections.cacheKey)/\(AppModel.bucket(Int(height * 2.5)))") { image = await model.pagePreview(documentID: documentID, pageID: page.id, maxPixelSize: Int(height * 2.5)) }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Seite \(number)")
         .accessibilityValue(state)
@@ -275,7 +293,7 @@ public enum SeriesEditorWindow {
 
     /// Öffnet das Fenster der Serie oder holt das offene nach vorn.
     public static func show(model: AppModel, documentID: UUID) {
-        if let window = windows[documentID], window.isVisible { window.makeKeyAndOrderFront(nil); return }
+        if let window = windows[documentID], window.isVisible { bring(window); return }
         let title = model.latestDocument(id: documentID)?.title ?? "Serie"
         let window = NSWindow(contentViewController: NSHostingController(rootView: SeriesEditorView(model: model, documentID: documentID)))
         window.title = "Serie bearbeiten – \(title)"
@@ -284,7 +302,14 @@ public enum SeriesEditorWindow {
         window.isReleasedWhenClosed = false
         window.center()
         windows[documentID] = window
-        window.makeKeyAndOrderFront(nil)
+        bring(window)
+    }
+
+    /// Zeigt das Fenster. Läuft die App im Hintergrund (Oberflächentests, `SCANUTIL_NO_ACTIVATE`), kommt es hinter alle anderen:
+    /// Es soll dann weder den Fokus noch die Sicht auf die Arbeit des Nutzers nehmen.
+    private static func bring(_ window: NSWindow) {
+        if ProcessInfo.processInfo.environment["SCANUTIL_NO_ACTIVATE"] != nil { window.orderBack(nil) }
+        else { window.makeKeyAndOrderFront(nil) }
     }
 }
 
@@ -292,15 +317,21 @@ public enum SeriesEditorWindow {
 /// fürs PDF. Beide lassen sich zoomen.
 struct PagePreview: View {
     enum Mode: String, CaseIterable, Identifiable {
-        case original = "Original mit Zuschnitt", result = "Ergebnis"
+        case original = "Original mit Zuschnitt", result = "Ergebnis", crop = "Rahmen ziehen"
         var id: String { rawValue }
     }
 
     let model: AppModel
     let documentID: UUID
     let page: DocumentPage
-    @State private var mode = Mode.original
+    @Binding var mode: Mode
     @State private var image: CGImage?
+
+    /// Wie viele Pixel des Originals ein Pixel der gezeigten Ansicht darstellt, für die Prozentanzeige des Zooms.
+    private func pixelScale(of image: CGImage) -> Double {
+        guard mode == .original, let scan = model.scanPixelWidth(documentID: documentID, pageID: page.id) else { return 1 }
+        return Double(scan) / Double(max(image.width, 1))
+    }
 
     var body: some View {
         VStack(spacing: 6) {
@@ -309,10 +340,23 @@ struct PagePreview: View {
             }
             .pickerStyle(.segmented).labelsHidden()
             .accessibilityIdentifier("editor-preview-mode")
+            if mode == .crop {
+                CropEditor(model: model, documentID: documentID, page: page)
+                    .frame(minHeight: 280, maxHeight: .infinity)
+            } else {
             ZStack {
                 Rectangle().fill(.quaternary)
                 if let image {
-                    ZoomableImageView(image: image, identifier: "editor-preview")
+                    ZoomableImageView(
+                        image: image, identifier: "editor-preview", pixelScale: pixelScale(of: image),
+                        fullResolution: {
+                            switch mode {
+                            case .original: await model.pageOriginalWithCrop(documentID: documentID, pageID: page.id, fullResolution: true)
+                            case .result: await model.pagePreview(documentID: documentID, pageID: page.id, fullResolution: true)
+                            case .crop: nil
+                            }
+                        },
+                        fullResolutionKey: "\(page.id)/\(mode.rawValue)/\(page.corrections.cacheKey)")
                         .id("\(page.id)/\(mode.rawValue)")
                 } else {
                     ProgressView()
@@ -320,16 +364,94 @@ struct PagePreview: View {
             }
             .frame(minHeight: 280, maxHeight: .infinity)
             .accessibilityIdentifier("editor-preview")
+            }
             Text(mode == .original
                  ? "Grün: Zuschnitt fürs PDF. Orange: unsicher oder nur die Bildhälfte. Gestrichelt: die andere Seite. Dunkel fällt weg."
-                 : "So kommt die Seite ins PDF.")
+                 : mode == .result ? "So kommt die Seite ins PDF."
+                 : "Ziehe die vier Ecken des Rahmens. Was außerhalb liegt, fällt weg. Die Änderung gilt sofort.")
                 .font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
         }
         .task(id: "\(page.id)/\(mode.rawValue)/\(page.corrections.cacheKey)") {
             switch mode {
             case .original: image = await model.pageOriginalWithCrop(documentID: documentID, pageID: page.id)
-            case .result: image = await model.pagePreview(documentID: documentID, pageID: page.id, maxPixelSize: 1600)
+            case .result: image = await model.pagePreview(documentID: documentID, pageID: page.id, maxPixelSize: 1792)
+            case .crop: break
             }
         }
+    }
+}
+
+/// Der Zuschnittsrahmen zum Ziehen: das Original, darauf das Viereck mit vier Ecken. Beim Loslassen wird der Rahmen als
+/// manueller Zuschnitt gespeichert und gilt sofort.
+struct CropEditor: View {
+    let model: AppModel
+    let documentID: UUID
+    let page: DocumentPage
+    @State private var image: CGImage?
+    /// Der Rahmen während des Ziehens; sonst gilt der gespeicherte.
+    @State private var draft: Quad?
+
+    private var stored: Quad { PageGeometry.effectiveCorrections(for: page).crop.quad ?? .full }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Rectangle().fill(.quaternary)
+                if let image {
+                    let rect = Self.fit(CGSize(width: image.width, height: image.height), in: geometry.size)
+                    let quad = draft ?? stored
+                    Image(decorative: image, scale: 1).resizable().frame(width: rect.width, height: rect.height)
+                        .position(x: rect.midX, y: rect.midY)
+                    Path { path in
+                        path.move(to: Self.point(quad.topLeft, rect)); path.addLine(to: Self.point(quad.topRight, rect))
+                        path.addLine(to: Self.point(quad.bottomRight, rect)); path.addLine(to: Self.point(quad.bottomLeft, rect))
+                        path.closeSubpath()
+                    }
+                    .stroke(Color.green, lineWidth: 2)
+                    .background(Path { path in
+                        path.move(to: Self.point(quad.topLeft, rect)); path.addLine(to: Self.point(quad.topRight, rect))
+                        path.addLine(to: Self.point(quad.bottomRight, rect)); path.addLine(to: Self.point(quad.bottomLeft, rect))
+                        path.closeSubpath()
+                    }.fill(Color.green.opacity(0.12)))
+                    ForEach(QuadCorner.allCases, id: \.self) { corner in
+                        let at = Self.point(corner.point(of: quad), rect)
+                        Circle().fill(Color.green).overlay(Circle().stroke(.white, lineWidth: 2))
+                            .frame(width: 18, height: 18)
+                            .position(at)
+                            .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named("crop-editor"))
+                                .onChanged { value in
+                                    draft = corner.moved(in: draft ?? stored, to: Self.normalized(value.location, rect))
+                                }
+                                .onEnded { value in
+                                    let result = corner.moved(in: draft ?? stored, to: Self.normalized(value.location, rect))
+                                    draft = nil
+                                    model.updatePage(documentID: documentID, pageID: page.id) { $0.setCrop(result) }
+                                })
+                            .accessibilityLabel("Ecke \(corner.rawValue)")
+                            .accessibilityIdentifier("editor-crop-handle-\(corner.rawValue)")
+                    }
+                } else {
+                    ProgressView()
+                }
+            }
+            .coordinateSpace(name: "crop-editor")
+        }
+        .task(id: page.id) { image = await model.pageOriginal(documentID: documentID, pageID: page.id) }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("editor-crop-editor")
+    }
+
+    /// Wo ein Bild der Größe `size` in `container` liegt, ganz sichtbar und zentriert.
+    static func fit(_ size: CGSize, in container: CGSize) -> CGRect {
+        guard size.width > 0, size.height > 0, container.width > 0, container.height > 0 else { return .zero }
+        let scale = min(container.width / size.width, container.height / size.height)
+        let w = size.width * scale, h = size.height * scale
+        return CGRect(x: (container.width - w) / 2, y: (container.height - h) / 2, width: w, height: h)
+    }
+
+    static func point(_ n: NormalizedPoint, _ rect: CGRect) -> CGPoint { CGPoint(x: rect.minX + n.x * rect.width, y: rect.minY + n.y * rect.height) }
+
+    static func normalized(_ p: CGPoint, _ rect: CGRect) -> NormalizedPoint {
+        NormalizedPoint(x: rect.width > 0 ? (p.x - rect.minX) / rect.width : 0, y: rect.height > 0 ? (p.y - rect.minY) / rect.height : 0)
     }
 }

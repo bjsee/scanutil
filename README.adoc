@@ -155,12 +155,15 @@ In der Serienliste (*Serien*, Menü ⋯ → *Bearbeiten …*) oder in der Leiste
 * *Ampel an jeder Seite:* rot = Problem (Rand oder Falz nicht gefunden), orange = prüfen (Rand, Falz, Zuschnitt oder Drehung unsicher, Hände am Rand), grau = Hinweis (von Hand geändert), grüner Haken = geprüft. Rechts steht im Klartext, was auffällt, etwa „Falz unsicher (0,39)“.
 * *Filter* mit Zahlen: Alle, *Nur unsichere*, Zuschnitt und Falz, Drehung, Hände, Von Hand. „Nur unsichere“ zeigt nur Seiten, die auffallen *und* noch nicht abgehakt sind.
 * *Große Ansicht* der gewählten Seite rechts, zoombar: *Original mit Zuschnitt* zeigt den ganzen Scan mit dem Rahmen, den die App für diese Seite verwendet (grün; orange, wenn die Automatik unsicher war oder nur die Bildhälfte gilt; bei einer Doppelseite gestrichelt der Rahmen der anderen Seite; was wegfällt, ist abgedunkelt). *Ergebnis* zeigt die Seite, wie sie ins PDF kommt. Ein Regler in der Filterleiste ändert die Größe der Seiten im Raster, die Trennlinie zwischen Raster und Ansicht lässt sich verschieben.
-* *Werkzeuge* je Seite: Zuschnitt an/aus, Handentfernung an/aus, Drehung als Regler. Jede Änderung wirkt auf die Vorschau, wird sofort gespeichert und gilt als von Hand gemacht.
+* *Zuschnitt ändern:* *Rahmen ziehen* zeigt das Original mit einem Rahmen, dessen vier Ecken man mit der Maus zieht; beim Loslassen gilt der neue Rahmen sofort (manuell, aktiv). *Bildhälfte* bzw. *Ganzes Bild* setzt den Rahmen zurück, *anwenden* schaltet ihn ein oder aus.
+* *Drehung ändern:* Regler, dazu Knöpfe − und + (0,1° je Klick) und *0°*.
+* Handentfernung an/aus. Jede Änderung wirkt auf die Vorschau, wird sofort gespeichert und gilt als von Hand gemacht.
 * *Geprüft* hakt die Seite ab und springt zur nächsten offenen. Das Häkchen merkt sich den Stand der Korrekturen: Ändert man danach etwas, ist die Seite wieder offen. *Neu erkennen* verwirft die Änderungen von Hand am Scan (bei einer Doppelseite an beiden Seiten) und nimmt auch das Häkchen weg.
 * *Die Schwelle* für „unsicher“ liegt bei 0,6 (`PageReviewer.defaultThreshold`). Die Bewertung läuft auch bei älteren Serien ohne gespeicherte Zusammenfassung der Analyse, dann aus Sicherheitswerten von Zuschnitt und Drehung.
 
 Die Zusammenfassung der Analyse (Rand, Falz, Hände, Warnungen) steht seit dieser Fassung im Dokument. Warnungen gehen so beim Neustart nicht mehr verloren. Eine Analyse, die erst nach einem Serienwechsel fertig wird, landet trotzdem in ihrer Serie.
-*Noch nicht:* Zuschnittsrahmen und Falzlinie von Hand ziehen, Handmaske von Hand malen, PDF-Ausgabe aus dem Editor (dafür bleibt die Serienliste), Seiten umordnen oder tauschen.
+*Noch nicht:* Falzlinie von Hand ziehen, Handmaske von Hand malen, PDF-Ausgabe aus dem Editor (dafür bleibt die Serienliste), Seiten umordnen oder tauschen.
+Läuft die App im Hintergrund (Oberflächentests), legt sich das Editor-Fenster hinter alle anderen; `HintergrundTests` prüft nicht nur den Fokus, sondern auch, dass kein Fenster der App über denen anderer Apps liegt.
 Das Fenster ist von Hand erzeugt und keine zweite SwiftUI-Szene: Eine zweite Szene geht beim Start von selbst auf und nahm in den Oberflächentests dem Hauptfenster den Tastaturfokus.
 
 Nach „Serie beenden“ bleibt die Serie angesehen, damit auch die Seiten und Regler einer Doppelseite da bleiben.

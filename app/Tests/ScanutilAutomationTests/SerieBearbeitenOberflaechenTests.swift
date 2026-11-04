@@ -86,4 +86,31 @@ struct SerieBearbeitenOberflaechenTests {
         #expect(s.app.element("editor-preview-mode") != nil)
         #expect(s.app.element("editor-card-size") != nil, "Der Größenregler fehlt")
     }
+
+    @Test func cropAndRotationHaveVisibleControlsThatChangeThePage() throws {
+        let s = try recordedSeries(scans: 1); defer { s.close() }
+        openEditor(s)
+        #expect(s.app.wait { s.app.element("editor-page-1") != nil })
+        #expect(s.app.press("editor-page-1"))
+        #expect(s.app.wait { s.app.element("editor-crop-edit") != nil && s.app.element("editor-rotation-plus") != nil }, "Werkzeuge fehlen")
+
+        // Drehung in Schritten von 0,1°.
+        #expect(s.app.press("editor-rotation-zero"))
+        #expect(s.app.wait(timeout: 10) { s.rotation(ofPage: 0).map { $0.degrees == 0 && $0.source == "manual" } ?? false })
+        #expect(s.app.press("editor-rotation-plus"))
+        #expect(s.app.press("editor-rotation-plus"))
+        #expect(s.app.wait(timeout: 10) { s.rotation(ofPage: 0).map { abs($0.degrees - 0.2) < 0.01 } ?? false }, "Schritte: \(String(describing: s.rotation(ofPage: 0)))")
+
+        // „Rahmen ziehen“ zeigt den Rahmen mit vier Ecken.
+        #expect(s.app.press("editor-crop-edit"))
+        #expect(s.app.wait(timeout: 15) { s.app.element("editor-crop-editor") != nil }, "Kein Rahmen zum Ziehen")
+        for corner in ["topLeft", "topRight", "bottomRight", "bottomLeft"] {
+            #expect(s.app.wait { s.app.element("editor-crop-handle-\(corner)") != nil }, "Ecke \(corner) fehlt")
+        }
+        // „Ganzes Bild“ setzt den Zuschnitt von Hand.
+        #expect(s.app.press("editor-crop-half"))
+        #expect(s.app.wait(timeout: 10) {
+            ((s.pages.first?["corrections"] as? [String: Any])?["crop"] as? [String: Any])?["source"] as? String == "manual"
+        }, "Zuschnitt nicht als manuell gespeichert")
+    }
 }

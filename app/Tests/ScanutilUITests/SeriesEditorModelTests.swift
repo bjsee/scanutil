@@ -81,4 +81,40 @@ struct SeriesEditorModelTests {
         editor.selectNextNeedingAttention(in: doc, review: DocumentReview(doc))
         #expect(editor.selectedPageID == doc.pages[0].id)
     }
+
+    // MARK: Rahmen ziehen
+
+    private let box = Quad(topLeft: .init(x: 0.2, y: 0.2), topRight: .init(x: 0.8, y: 0.2),
+                           bottomRight: .init(x: 0.8, y: 0.8), bottomLeft: .init(x: 0.2, y: 0.8))
+
+    @Test func movingACornerChangesOnlyThatCorner() {
+        for corner in QuadCorner.allCases {
+            let moved = corner.moved(in: box, to: .init(x: 0.5, y: 0.5))
+            #expect(corner.point(of: moved) == NormalizedPoint(x: 0.5, y: 0.5), "\(corner)")
+            for other in QuadCorner.allCases where other != corner { #expect(other.point(of: moved) == other.point(of: box), "\(other) bleibt") }
+        }
+    }
+
+    @Test func aCornerCannotLeaveTheImage() {
+        let moved = QuadCorner.topLeft.moved(in: box, to: .init(x: -0.3, y: 1.7))
+        #expect(moved.topLeft == NormalizedPoint(x: 0, y: 1))
+    }
+
+    @Test func theImageFitsCenteredAndWholeIntoTheView() {
+        let wide = CropEditor.fit(CGSize(width: 2000, height: 1000), in: CGSize(width: 400, height: 400))
+        #expect(wide == CGRect(x: 0, y: 100, width: 400, height: 200))
+        let tall = CropEditor.fit(CGSize(width: 1000, height: 2000), in: CGSize(width: 400, height: 400))
+        #expect(tall == CGRect(x: 100, y: 0, width: 200, height: 400))
+        #expect(CropEditor.fit(.zero, in: CGSize(width: 10, height: 10)) == .zero)
+    }
+
+    @Test func screenAndNormalizedPointsConvertBackAndForth() {
+        let rect = CGRect(x: 100, y: 50, width: 200, height: 400)
+        let n = NormalizedPoint(x: 0.25, y: 0.75)
+        let screen = CropEditor.point(n, rect)
+        #expect(screen == CGPoint(x: 150, y: 350))
+        #expect(CropEditor.normalized(screen, rect) == n)
+        #expect(CropEditor.normalized(CGPoint(x: 100, y: 50), rect) == NormalizedPoint(x: 0, y: 0))
+        #expect(CropEditor.normalized(CGPoint(x: 1, y: 1), .zero) == NormalizedPoint(x: 0, y: 0), "Leeres Rechteck teilt nicht durch null")
+    }
 }
