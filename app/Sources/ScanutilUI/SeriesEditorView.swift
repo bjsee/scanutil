@@ -68,6 +68,10 @@ public struct SeriesEditorView: View {
                     .font(.caption).foregroundStyle(.orange)
                     .accessibilityIdentifier("editor-open-count")
             }
+            Button("PDF ausgeben …") { nav.go(.export(document.id)) }
+                .buttonStyle(.borderedProminent)
+                .disabled(document.pages.isEmpty)
+                .accessibilityIdentifier("editor-export")
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
     }

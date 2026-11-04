@@ -294,6 +294,49 @@ struct SeriesEditingModelTests {
     }
 }
 
+@MainActor
+@Suite("Serie löschen: rückgängig")
+struct DeleteUndoTests {
+    private func makeModel() async -> (AppModel, ArchiveStore, URL) {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("scanutil-undo-\(UUID().uuidString)")
+        let store = ArchiveStore(root: dir)
+        let model = AppModel(scanner: MockScanner(previewsEnabled: false), store: store, thumbnailSize: 64, sound: SilentSound(), defaults: nil)
+        await model.connect()
+        return (model, store, dir)
+    }
+
+    @Test func deletingOnlyTheSeriesCanBeUndoneWithPagesAndCorrections() async throws {
+        let (model, store, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "Chronik")
+        await model.scan()
+        let id = try #require(model.series?.id), page = try #require(model.series?.pages.first)
+        model.updatePage(documentID: id, pageID: page.id) { $0.setRotation(degrees: 2) }
+        model.endSeries()
+        await model.deleteDocument(id: id)
+        #expect(model.savedDocuments.isEmpty && model.undoableDeletion?.title == "Chronik")
+        #expect((try? store.loadDocument(id: id)) == nil)
+
+        #expect(model.undoDeleteDocument())
+        #expect(model.undoableDeletion == nil)
+        #expect(model.savedDocuments.first?.id == id)
+        let back = try store.loadDocument(id: id)
+        #expect(back.pages.count == 1 && back.pages[0].corrections.rotation.degrees == 2)
+        await model.disconnect()
+    }
+
+    @Test func deletingWithScansOffersNoUndoAndANewDeletionReplacesTheOffer() async throws {
+        let (model, _, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "A"); await model.scan(); let a = try #require(model.series?.id); model.endSeries()
+        model.startSeries(title: "B"); await model.scan(); let b = try #require(model.series?.id); model.endSeries()
+        await model.deleteDocument(id: a)
+        #expect(model.undoableDeletion?.id == a)
+        await model.deleteDocument(id: b, withScans: true)
+        #expect(model.undoableDeletion == nil, "Mit den Scans lässt sich die Seitenliste nicht zurückholen")
+        #expect(!model.undoDeleteDocument())
+        await model.disconnect()
+    }
+}
+
 private extension Double {
     func clamped(max limit: Double) -> Double { Swift.min(self, limit) }
 }

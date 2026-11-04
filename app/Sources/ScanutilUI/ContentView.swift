@@ -23,6 +23,7 @@ public struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(minWidth: 1000, minHeight: 600)
+        .overlay(alignment: .bottom) { undoBar }
         // Zurück wie im Browser.
         .background(Button("Zurück") { nav.back() }.keyboardShortcut("[", modifiers: .command).opacity(0).accessibilityHidden(true))
         // Die Leertaste löst den Scan aus, aber nur auf der Seite Aufnahme: In der Serienliste soll sie nichts tun.
@@ -36,11 +37,35 @@ public struct ContentView: View {
         }
     }
 
+    /// Nach dem Löschen einer Serie: ein Hinweis unten mit „Rückgängig“, kein Dialog. Er verschwindet nach einer Weile von selbst.
+    @ViewBuilder private var undoBar: some View {
+        if let deleted = model.undoableDeletion {
+            HStack(spacing: 14) {
+                Text("„\(deleted.title)“ gelöscht. Die Scans bleiben im Archiv.")
+                Button("Rückgängig") { model.undoDeleteDocument() }
+                    .buttonStyle(.link).accessibilityIdentifier("undo-delete-button")
+                Button { model.undoableDeletion = nil } label: { Image(systemName: "xmark") }
+                    .buttonStyle(.plain).accessibilityLabel("Hinweis schließen")
+            }
+            .padding(.horizontal, 16).padding(.vertical, 10)
+            .background(Capsule().fill(Color(nsColor: .darkGray)))
+            .foregroundStyle(.white)
+            .padding(.bottom, 20)
+            .task(id: deleted.id) {
+                try? await Task.sleep(for: .seconds(15))
+                if model.undoableDeletion?.id == deleted.id { model.undoableDeletion = nil }
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("undo-bar")
+        }
+    }
+
     @ViewBuilder private var page: some View {
         switch nav.route {
         case .capture: CaptureView(model: model, nav: nav)
         case .series: SeriesPage(model: model, nav: nav)
         case .editor(let id): SeriesEditorView(model: model, documentID: id, nav: nav)
+        case .export(let id): ExportPage(model: model, documentID: id, nav: nav)
         case .log: LogPage(model: model)
         }
     }
@@ -277,8 +302,6 @@ struct SeriesBar: View {
     let nav: Navigator
     /// Vor dem Beginn gewählt: jede Aufnahme ist eine Doppelseite.
     @State private var bookMode = false
-    /// Beim Export Text erkennen und unsichtbar ins PDF legen.
-    @State private var withOCR = false
     /// Der Dialog „neu oder fortsetzen?“ beim Beginnen, und die Liste der Serien.
     @State private var showStartSheet = false
 
@@ -314,21 +337,8 @@ struct SeriesBar: View {
                     phaseIndicator
                 }
                 Spacer()
-                if let progress = model.exportProgress {
-                    ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1)))
-                        .frame(width: 100)
-                    Text("\(progress.done)/\(progress.total)").font(.caption.monospacedDigit())
-                } else if let url = model.lastExportURL {
-                    Button("PDF zeigen") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-                        .buttonStyle(.link)
-                        .accessibilityIdentifier("export-reveal-button")
-                }
-                Toggle("Mit Texterkennung", isOn: $withOCR)
-                    .toggleStyle(.switch)
-                    .help("Macht das PDF durchsuchbar. Kostet etwa 1,5 Sekunden je Seite.")
-                    .accessibilityIdentifier("export-ocr-toggle")
-                Button("Als PDF exportieren …") { chooseExportTarget(for: series) }
-                    .disabled(series.pages.isEmpty || model.exportProgress != nil)
+                Button("PDF ausgeben …") { nav.go(.export(series.id)) }
+                    .disabled(series.pages.isEmpty)
                     .accessibilityIdentifier("series-export-button")
                 Button("Serie beenden") { model.endSeries() }
                     .accessibilityIdentifier("series-end-button")
@@ -367,7 +377,6 @@ struct SeriesBar: View {
                         .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
                 Spacer()
-                savedDocumentsMenu
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
@@ -392,41 +401,6 @@ struct SeriesBar: View {
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("series-phase")
         }
-    }
-
-    /// Gespeicherte Dokumente exportieren, auch nachdem die Serie beendet oder die App neu gestartet wurde.
-    @ViewBuilder private var savedDocumentsMenu: some View {
-        if let progress = model.exportProgress {
-            ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1))).frame(width: 100)
-            Text("\(progress.done)/\(progress.total)").font(.caption.monospacedDigit())
-        } else if let url = model.lastExportURL {
-            Button("PDF zeigen") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-                .buttonStyle(.link)
-                .accessibilityIdentifier("export-reveal-button")
-        }
-        if !model.savedDocuments.isEmpty {
-            Toggle("Mit Texterkennung", isOn: $withOCR)
-                .toggleStyle(.switch)
-                .help("Macht das PDF durchsuchbar. Kostet etwa 1,5 Sekunden je Seite.")
-                .accessibilityIdentifier("export-ocr-toggle")
-            Menu {
-                ForEach(model.savedDocuments.prefix(20)) { document in
-                    Button("\(document.title) · \(document.pages.count) Seite\(document.pages.count == 1 ? "" : "n")") {
-                        chooseExportTarget(for: document)
-                    }
-                    .disabled(document.pages.isEmpty)
-                }
-            } label: {
-                Label("Dokument als PDF exportieren", systemImage: "square.and.arrow.up")
-            }
-            .disabled(model.exportProgress != nil)
-            .fixedSize()
-            .accessibilityIdentifier("saved-documents-menu")
-        }
-    }
-
-    private func chooseExportTarget(for document: ScanDocument) {
-        ExportDialog.run(model: model, document: document, ocr: withOCR)
     }
 
     private func pageCountText(_ count: Int) -> String {
@@ -532,7 +506,6 @@ struct SeriesPage: View {
     @State private var renameText = ""
     @State private var deleting: PendingDeletion?
     @State private var showStart = false
-    @State private var withOCR = false
     /// Die Serie, deren weitere Aktionen aufgeklappt sind. Kein Menü: Menüs sind Popups und liegen über allem anderen.
     @State private var expanded: UUID?
 
@@ -550,9 +523,6 @@ struct SeriesPage: View {
                 Text("Serien").font(.title3.bold())
                 Text("\(model.savedDocuments.count)").font(.callout).foregroundStyle(.secondary)
                 Spacer()
-                Toggle("Mit Texterkennung", isOn: $withOCR).toggleStyle(.switch)
-                    .help("Macht das PDF durchsuchbar. Kostet etwa 1,5 Sekunden je Seite.")
-                    .accessibilityIdentifier("export-ocr-toggle")
                 Button("Neue Serie") { showStart.toggle() }
                     .buttonStyle(.borderedProminent)
                     .disabled(model.isSeriesActive)
@@ -681,7 +651,7 @@ struct SeriesPage: View {
         HStack(spacing: 10) {
             Button("Umbenennen") { renaming = document.id; renameText = document.title; expanded = nil }
                 .accessibilityIdentifier("series-rename-button")
-            Button("Als PDF …") { expanded = nil; ExportDialog.run(model: model, document: document, ocr: withOCR) }
+            Button("Als PDF …") { expanded = nil; nav.go(.export(document.id)) }
                 .disabled(document.pages.isEmpty)
                 .accessibilityIdentifier("series-pdf-button")
             Spacer()
@@ -702,23 +672,6 @@ struct SeriesPage: View {
     private func commitRename(_ document: ScanDocument) {
         model.renameDocument(id: document.id, to: renameText)
         renaming = nil
-    }
-}
-
-/// Der Speicherdialog fürs PDF. (Wird in der nächsten Etappe durch eine Seite ersetzt.)
-@MainActor
-enum ExportDialog {
-    static func run(model: AppModel, document: ScanDocument, ocr: Bool) {
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.pdf]
-        panel.nameFieldStringValue = document.title + ".pdf"
-        panel.message = "Das PDF wird aus den Originalen mit den eingestellten Korrekturen erzeugt."
-        // Für die Oberflächentests: der Dialog öffnet im Testordner statt in den Ordnern des Nutzers.
-        if let dir = ProcessInfo.processInfo.environment["SCANUTIL_EXPORT_DIR"] { panel.directoryURL = URL(fileURLWithPath: dir, isDirectory: true) }
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        var options = ExportOptions.archive
-        options.ocr = ocr
-        Task { await model.exportDocument(document, to: url, options: options) }
     }
 }
 

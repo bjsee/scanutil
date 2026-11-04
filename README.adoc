@@ -60,6 +60,19 @@ swift test
 Die CZUR-App muss beendet sein.
 Beim ersten Start fragt macOS nach dem Kamerazugriff.
 
+=== Aufbau der Oberfläche
+
+Die App ist *ein Fenster* mit einer Seitenleiste links, die Seiten wechseln wie in einer Web-App. Es gibt keine Zusatzfenster, Popovers, Sheets, Menüs oder Dialoge für den Alltag:
+
+* *Aufnahme:* Serienleiste, Vorschau, Scans, Auslöser. „Serie beginnen“ klappt als Formular unter der Leiste auf.
+* *Serien:* alle Serien, mit „Neue Serie“, *Ansehen*, *Fortsetzen*, *Bearbeiten* und je Zeile ⋯ (Streifen mit *Umbenennen*, *Als PDF …*, *Löschen …*). Rückfragen und Umbenennen stehen in der Zeile. Nach dem Löschen einer Serie (ohne Scans) bleibt unten 15 Sekunden *Rückgängig*.
+* *Serie bearbeiten* und *PDF ausgeben* sind Unterseiten der Serien mit Brotkrumen und „Zurück“. ⌘[ geht wie im Browser zurück.
+* *Meldungen:* das Protokoll als Seite, mit Zähler in der Seitenleiste.
+* Die Leertaste löst nur auf der Seite *Aufnahme* aus.
+* Unten in der Seitenleiste stehen der Scannerstatus und der Link zum Archiv.
+
+Ausnahme: Der Ordner für das PDF wird mit der Ordnerauswahl von macOS geändert („Ändern …“).
+
 === Oberfläche starten
 
 [source,sh]
@@ -107,7 +120,7 @@ Die Ansichten in der Liste sind auf 1600 Pixel verkleinert und würden beim Hine
 
 === Meldungen
 
-Warnungen und Hinweise gehen nicht verloren: Der Knopf „Meldungen“ unten rechts öffnet das Protokoll der Sitzung, ein roter Zähler zeigt die seit dem letzten Öffnen neuen Warnungen und Fehler.
+Warnungen und Hinweise gehen nicht verloren: Die Seite „Meldungen“ (Seitenleiste) zeigt das Protokoll der Sitzung, ein orangefarbener Zähler zeigt die seit dem letzten Öffnen neuen Warnungen und Fehler.
 Es enthält die Warnungen der Analyse (etwa „Die Schräglage ist unsicher“, „Der Falz wurde nicht gefunden“) mit dem Scan, zu dem sie gehören, übersprungene Dubletten, Fehler des Scanners, den Bericht des Exports (auch Seiten, bei denen die Texterkennung scheiterte) und Beginn und Ende einer Serie.
 Ein Klick auf einen Eintrag wählt den Scan aus. „Kopieren“ legt das ganze Protokoll als Text in die Zwischenablage, etwa für eine Fehlermeldung.
 Das Protokoll gilt für die laufende Sitzung und umfasst höchstens 500 Einträge; es wird nicht gespeichert.
@@ -129,13 +142,13 @@ Ist der Falz oder die Schräglage unsicher, wird der Vorschlag nur angezeigt und
 Zuschnitt und Drehung lassen sich je Seite von Hand ändern, „Automatisch neu erkennen“ verwirft das wieder.
 === Mehrere Serien
 
-Jede Serie ist ein Dokument mit Namen. Gibt es schon Serien, fragt ein Dialog beim Beginnen: *neue Serie* (mit eigenem Namen, sonst Datum und Uhrzeit, und der Wahl Einzel- oder Doppelseiten) oder *fortsetzen* (in einer vorhandenen, deren Modus und Seiten erhalten bleiben: neue Aufnahmen kommen ans Ende). Ohne vorhandene Serie geht es wie bisher sofort los.
-Der Knopf „Serien“ öffnet die Liste aller Serien, neueste zuerst:
+Jede Serie ist ein Dokument mit Namen. Gibt es schon Serien, fragt ein Formular beim Beginnen: *neue Serie* (mit eigenem Namen, sonst Datum und Uhrzeit, und der Wahl Einzel- oder Doppelseiten) oder *fortsetzen* (in einer vorhandenen, deren Modus und Seiten erhalten bleiben: neue Aufnahmen kommen ans Ende). Ohne vorhandene Serie geht es wie bisher sofort los.
+Die Seite „Serien“ zeigt alle Serien, neueste zuerst:
 
 * *Ansehen* öffnet eine Serie: Die Miniaturleiste zeigt ihre Scans, Seiten und Korrekturen lassen sich bearbeiten und werden gespeichert. Das geht nur, solange keine Serie läuft. „Hier fortsetzen“ macht aus der angesehenen Serie die laufende, „Schließen“ zeigt wieder die letzten Scans des Archivs.
 * *Fortsetzen* nimmt in einer Serie weiter auf, auch nach einem Neustart und ohne die Scans neu anzulegen.
-* Im Menü je Serie: *Umbenennen*, *Als PDF …* und *Löschen …*.
-* *Löschen* fragt immer zuerst nach. „Nur die Serie löschen“ entfernt die Seitenliste, die Scans (Originale) bleiben im Archiv. „Serie und Scans löschen“ nimmt auch die Scans mit, siehe unten. Ein Scan, der in keiner Serie mehr vorkommt, bleibt im Archiv liegen; eine Funktion, ihn einer Serie wieder zuzuordnen, gibt es noch nicht.
+* Je Serie unter ⋯: *Umbenennen*, *Als PDF …* und *Löschen …*.
+* *Löschen* fragt immer zuerst nach, in der Zeile. „Nur die Serie löschen“ entfernt die Seitenliste, die Scans (Originale) bleiben im Archiv. „Serie und Scans löschen“ nimmt auch die Scans mit, siehe unten. Ein Scan, der in keiner Serie mehr vorkommt, bleibt im Archiv liegen; eine Funktion, ihn einer Serie wieder zuzuordnen, gibt es noch nicht.
 ==== Scans löschen
 
 Die Originale sind sonst unantastbar (schreibgeschützt, mit Prüfsumme), aber ein missglückter Scan darf weg. Zwei Wege, beide mit Rückfrage:
@@ -150,7 +163,7 @@ Die Oberflächentests löschen endgültig (`SCANUTIL_NO_TRASH`), damit ihre Scan
 
 ==== Serie bearbeiten
 
-In der Serienliste (*Serien*, Menü ⋯ → *Bearbeiten …*) oder in der Leiste einer angesehenen Serie öffnet *Bearbeiten …* ein eigenes Fenster mit *allen Seiten der Serie*, so wie sie ins PDF kämen (Zuschnitt, Drehung, Handentfernung). Je Serie gibt es ein Fenster.
+Auf der Seite Serien (*Bearbeiten*) oder in der Leiste einer angesehenen Serie öffnet *Bearbeiten …* die Seite mit *allen Seiten der Serie*, so wie sie ins PDF kämen (Zuschnitt, Drehung, Handentfernung).
 
 * *Ampel an jeder Seite:* rot = Problem (Rand oder Falz nicht gefunden), orange = prüfen (Rand, Falz, Zuschnitt oder Drehung unsicher, Hände am Rand), grau = Hinweis (von Hand geändert), grüner Haken = geprüft. Rechts steht im Klartext, was auffällt, etwa „Falz unsicher (0,39)“.
 * *Filter* mit Zahlen: Alle, *Nur unsichere*, Zuschnitt und Falz, Drehung, Hände, Von Hand. „Nur unsichere“ zeigt nur Seiten, die auffallen *und* noch nicht abgehakt sind.
@@ -163,14 +176,13 @@ In der Serienliste (*Serien*, Menü ⋯ → *Bearbeiten …*) oder in der Leiste
 
 Die Zusammenfassung der Analyse (Rand, Falz, Hände, Warnungen) steht seit dieser Fassung im Dokument. Warnungen gehen so beim Neustart nicht mehr verloren. Eine Analyse, die erst nach einem Serienwechsel fertig wird, landet trotzdem in ihrer Serie.
 *Noch nicht:* Falzlinie von Hand ziehen, Handmaske von Hand malen, PDF-Ausgabe aus dem Editor (dafür bleibt die Serienliste), Seiten umordnen oder tauschen.
-Läuft die App im Hintergrund (Oberflächentests), legt sich das Editor-Fenster hinter alle anderen; `HintergrundTests` prüft nicht nur den Fokus, sondern auch, dass kein Fenster der App über denen anderer Apps liegt.
-Das Fenster ist von Hand erzeugt und keine zweite SwiftUI-Szene: Eine zweite Szene geht beim Start von selbst auf und nahm in den Oberflächentests dem Hauptfenster den Tastaturfokus.
+`HintergrundTests` prüft nicht nur den Fokus, sondern auch, dass kein Fenster der App über denen anderer Apps liegt. Menüs und Dialoge sind Fenster, die über allem erscheinen: Darum gibt es sie im Alltag nicht mehr (Aktionen als Streifen in der Zeile, PDF auf einer Seite), und die Tests bedienen nur Schaltflächen.
 
 Nach „Serie beenden“ bleibt die Serie angesehen, damit auch die Seiten und Regler einer Doppelseite da bleiben.
 Eine neue Serie, die beginnt, während eine andere angesehen wird, beginnt mit leerer Miniaturleiste.
 
-Auch nach „Serie beenden“ und nach einem Neustart bleibt das Dokument gespeichert und lässt sich ausgeben: Ohne laufende Serie steht in der Leiste das Menü „Dokument als PDF exportieren“ mit allen gespeicherten Dokumenten (neueste zuerst, mit Seitenzahl). Das geht auch ohne eingeschalteten Scanner.
-„Als PDF exportieren …“ erzeugt das PDF aus den Originalen mit den Korrekturen der Seiten; die Originale bleiben unberührt.
+Auch nach „Serie beenden“ und nach einem Neustart bleibt das Dokument gespeichert und lässt sich ausgeben: Auf der Seite Serien führt *Als PDF …* zur Seite „PDF ausgeben“. Das geht auch ohne eingeschalteten Scanner.
+Die Seite „PDF ausgeben“ hat Dateiname, Ordner (Standard `Dokumente/Scanutil`), Texterkennung und „Kleine Datei“. Ein vorhandenes PDF wird nie überschrieben, es wird `Name 2.pdf` usw. Sie warnt, wenn noch Seiten unsicher sind. „PDF erzeugen“ macht das PDF aus den Originalen mit den Korrekturen der Seiten; die Originale bleiben unberührt.
 
 Ein gespeichertes Dokument ohne Oberfläche: `scanutil-cli export <Archiv> <ziel.pdf> --document <ID>` (die ID steht als Dateiname in `documents/`).
 Die Doppelseitenerkennung an einem Scan ansehen: `scanutil-cli analyze <scan.png> --book --out ueberlagerung.png --pages <ordner>` gibt die Messwerte aus, zeichnet Rand (blau), Falz (rot) und die beiden Seiten (grün, orange) ein und schreibt die beiden Seiten so, wie der Export sie erzeugt.
@@ -237,8 +249,7 @@ Der Regler wird über „Erhöhen“ und „Verringern“ eingestellt, weil sein
 `document-hands` liefert eine Seite mit Daumen und einem Finger im Bild.
 `document-still` hat eine stehende Vorschau: die Auto-Auslösung sieht Ruhe und löst nach etwa 0,8 Sekunden von selbst aus, die anderen Modi flimmern und lösen nie aus.
 `SCANUTIL_NO_SOUND` macht die App stumm und lässt ihre Einstellungen unberührt (die Tests setzen es).
-`SCANUTIL_EXPORT_DIR` lässt den Speicherdialog des Exports in diesem Ordner öffnen, damit die Tests nicht in Ihre Ordner schreiben.
-Der Speicherdialog wird über die sprachunabhängigen Kennungen seiner Schaltflächen (`OKButton`, `CancelButton`) bedient, nicht über deren Beschriftung.
+`SCANUTIL_EXPORT_DIR` setzt den Ordner für das PDF, damit die Tests nicht in Ihre Ordner schreiben.
 Ein Rechner, auf dem gearbeitet wird, ist während des Laufs trotzdem belastet (Bild- und PDF-Berechnung).
 Nach Änderungen an der App zuerst `scripts/bundle.sh`: die Tests starten das gebaute Bundle, nicht den Quelltext. `scripts/ui-tests.sh` tut das selbst.
 
