@@ -8,13 +8,14 @@ import SwiftUI
 public struct SeriesEditorView: View {
     @Bindable var model: AppModel
     let documentID: UUID?
+    let nav: Navigator
     @State private var editor = SeriesEditorModel()
     /// Höhe der Seitenkarten im Raster, vom Nutzer einstellbar.
     @State private var cardHeight = 170.0
     /// Was die große Ansicht zeigt. Hier und nicht in der Ansicht, damit die Werkzeuge „Rahmen ziehen“ umschalten können.
     @State private var previewMode = PagePreview.Mode.original
 
-    public init(model: AppModel, documentID: UUID?) { self.model = model; self.documentID = documentID }
+    public init(model: AppModel, documentID: UUID?, nav: Navigator) { self.model = model; self.documentID = documentID; self.nav = nav }
 
     public var body: some View {
         Group {
@@ -25,7 +26,6 @@ public struct SeriesEditorView: View {
                                        description: Text("Wähle in der Serienliste „Bearbeiten …“."))
             }
         }
-        .frame(minWidth: 900, minHeight: 560)
         // Ohne `.contain` gäbe die Kennung des Fensters sie allen Elementen darin und überdeckte deren eigene.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("series-editor")
@@ -53,7 +53,12 @@ public struct SeriesEditorView: View {
 
     private func header(_ document: ScanDocument, review: DocumentReview) -> some View {
         HStack {
-            Text(document.title).font(.headline)
+            Button { nav.back(fallback: .series) } label: { Label("Serien", systemImage: "chevron.left") }
+                .buttonStyle(.link)
+                .accessibilityIdentifier("editor-back")
+            Text("›").foregroundStyle(.secondary)
+            Text(document.title).font(.title3.bold())
+            Text("› Bearbeiten").foregroundStyle(.secondary)
             Text("\(document.pages.count) Seiten · \(review.uncertainCount) unsicher · \(review.reviewedCount) geprüft")
                 .font(.callout).foregroundStyle(.secondary)
                 .accessibilityIdentifier("editor-summary")
@@ -282,34 +287,6 @@ struct FindingRow: View {
 
     var body: some View {
         Label(finding.message, systemImage: symbol).foregroundStyle(tint).font(.callout)
-    }
-}
-
-/// Das Fenster „Serie bearbeiten“, je Serie eines. Bewusst von Hand und nicht als zweite SwiftUI-Szene: Eine zweite Szene ginge
-/// beim Start der App von selbst auf (leer) und nähme dem Hauptfenster den Tastaturfokus.
-@MainActor
-public enum SeriesEditorWindow {
-    private static var windows: [UUID: NSWindow] = [:]
-
-    /// Öffnet das Fenster der Serie oder holt das offene nach vorn.
-    public static func show(model: AppModel, documentID: UUID) {
-        if let window = windows[documentID], window.isVisible { bring(window); return }
-        let title = model.latestDocument(id: documentID)?.title ?? "Serie"
-        let window = NSWindow(contentViewController: NSHostingController(rootView: SeriesEditorView(model: model, documentID: documentID)))
-        window.title = "Serie bearbeiten – \(title)"
-        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.setContentSize(NSSize(width: 1100, height: 720))
-        window.isReleasedWhenClosed = false
-        window.center()
-        windows[documentID] = window
-        bring(window)
-    }
-
-    /// Zeigt das Fenster. Läuft die App im Hintergrund (Oberflächentests, `SCANUTIL_NO_ACTIVATE`), kommt es hinter alle anderen:
-    /// Es soll dann weder den Fokus noch die Sicht auf die Arbeit des Nutzers nehmen.
-    private static func bring(_ window: NSWindow) {
-        if ProcessInfo.processInfo.environment["SCANUTIL_NO_ACTIVATE"] != nil { window.orderBack(nil) }
-        else { window.makeKeyAndOrderFront(nil) }
     }
 }
 

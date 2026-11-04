@@ -179,7 +179,7 @@ struct LogTests {
 
     @Test func logViewRendersEntriesAndTheEmptyState() throws {
         let (model, dir) = makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
-        let empty = ImageRenderer(content: LogView(model: model).background(Color(nsColor: .windowBackgroundColor)))
+        let empty = ImageRenderer(content: LogPage(model: model).background(Color(nsColor: .windowBackgroundColor)))
         empty.scale = 2
         #expect(empty.cgImage != nil)
         model.post(.info, "Verbunden mit Mock-Scanner.")
