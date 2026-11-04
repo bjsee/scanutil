@@ -451,12 +451,22 @@ struct StartSeriesSheet: View {
                     .help("Jede Aufnahme wird am Falz in eine linke und eine rechte Seite geteilt")
                     .accessibilityIdentifier("sheet-book-toggle")
             case .resume:
-                Picker("Serie", selection: $resumeID) {
-                    ForEach(model.savedDocuments) { document in
-                        Text("\(document.title) · \(document.pages.count) Seite\(document.pages.count == 1 ? "" : "n")")
-                            .tag(Optional(document.id))
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(model.savedDocuments.prefix(8)) { document in
+                        Button { resumeID = document.id } label: {
+                            HStack {
+                                Image(systemName: resumeID == document.id ? "largecircle.fill.circle" : "circle")
+                                Text("\(document.title) · \(document.pages.count) Seite\(document.pages.count == 1 ? "" : "n")")
+                                Spacer()
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(resumeID == document.id ? .isSelected : [])
+                        .accessibilityIdentifier("resume-option")
                     }
                 }
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("resume-picker")
                 if let chosen = model.savedDocuments.first(where: { $0.id == resumeID }) {
                     Text("Neue Aufnahmen kommen ans Ende von „\(chosen.title)“, als " + (chosen.pages.contains { $0.region != .whole } ? "Doppelseiten." : "Einzelseiten."))
@@ -774,21 +784,36 @@ struct ScanDetailView: View {
         }
     }
 
-    /// Den Scan löschen: mit Rückfrage, die sagt, was alles weggeht und ob es sich zurücklegen lässt.
+    /// Den Scan löschen: mit Rückfrage in der Ansicht selbst, die sagt, was alles weggeht und ob es sich zurücklegen lässt.
     private var deleteButton: some View {
-        HStack {
-            Spacer()
-            Button(role: .destructive) { confirmDelete = true } label: { Label("Scan löschen …", systemImage: "trash") }
-                .accessibilityIdentifier("scan-delete-button")
-        }
-        .confirmationDialog("Diesen Scan löschen?", isPresented: $confirmDelete) {
-            Button(model.scansAreRecoverable ? "In den Papierkorb legen" : "Endgültig löschen", role: .destructive) {
-                Task { await model.deleteScan(id: item.id) }
+        VStack(alignment: .trailing, spacing: 8) {
+            if confirmDelete {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Diesen Scan löschen?").font(.callout.bold())
+                        Text(deleteMessage).font(.caption).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    Button("Abbrechen") { confirmDelete = false }.accessibilityIdentifier("scan-delete-cancel")
+                    Button(model.scansAreRecoverable ? "In den Papierkorb legen" : "Endgültig löschen") {
+                        confirmDelete = false
+                        Task { await model.deleteScan(id: item.id) }
+                    }
+                    .tint(.red)
+                    .accessibilityIdentifier("scan-delete-confirm")
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.red.opacity(0.08)))
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("scan-delete-strip")
             }
-            .accessibilityIdentifier("scan-delete-confirm")
-            Button("Abbrechen", role: .cancel) {}
-        } message: {
-            Text(deleteMessage)
+            HStack {
+                Spacer()
+                Button(role: .destructive) { confirmDelete = true } label: { Label("Scan löschen …", systemImage: "trash") }
+                    .disabled(confirmDelete)
+                    .accessibilityIdentifier("scan-delete-button")
+            }
         }
     }
 

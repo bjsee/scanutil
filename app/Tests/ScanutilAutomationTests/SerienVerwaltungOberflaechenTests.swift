@@ -92,6 +92,7 @@ struct SerienVerwaltungOberflaechenTests {
         #expect(s.app.wait { s.app.isEnabled("scan-button") == true })
         #expect(s.app.press("scan-button"))
         #expect(s.app.wait { s.originals.count == 3 })
+        #expect(s.app.wait { s.app.string("series-page-count") == "1 Seite" }, "Die Seite kam nicht in die Serie")
         #expect(s.app.press("series-end-button"))
         #expect(s.app.wait { s.app.element("series-start-button") != nil })
 
