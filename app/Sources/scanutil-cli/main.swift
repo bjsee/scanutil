@@ -6,6 +6,7 @@ import ImageIO
 import ImagingKit
 import UniformTypeIdentifiers
 import ScannerKit
+import CUVC
 
 // Kleines Werkzeug für den Durchstich: Formate anzeigen, aufnehmen, Archiv prüfen.
 // scanutil-cli formats
@@ -87,6 +88,12 @@ do {
         await session.close()
         print("  Schärfe bei Aufnahme: \(sharpness.map(String.init) ?? "unverändert")")
 
+    case "usb-descriptor":
+        // Gibt die Konfigurationsbeschreibung des Scanners als Hexzeichen aus, zur Untersuchung der UVC-Fähigkeiten.
+        var bytes = [UInt8](repeating: 0, count: 4096)
+        let length = cuvc_config_descriptor(&bytes, Int32(bytes.count))
+        guard length > 0 else { fail("Beschreibung nicht lesbar (Code \(length))") }
+        print(bytes.prefix(Int(length)).map { String(format: "%02x", $0) }.joined())
     case "verify":
         guard args.count >= 2 else { fail("Archivordner fehlt") }
         let store = ArchiveStore(root: URL(fileURLWithPath: args[1], isDirectory: true))
