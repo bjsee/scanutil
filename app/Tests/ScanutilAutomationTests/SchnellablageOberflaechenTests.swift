@@ -112,4 +112,22 @@ struct SchnellablageOberflaechenTests {
         #expect(s.app.elements("series-row").isEmpty, "Eine Schnellablage ist keine Serie")
         #expect(s.app.elements("nav-series-item").isEmpty)
     }
+
+    @Test func theSidebarItemsStandUnderEachOtherEachInOneLine() throws {
+        let s = try launch(); defer { s.close() }
+        let ids = ["nav-capture", "nav-inbox", "series-list-button", "log-button", "nav-settings"]
+        var frames: [(String, CGRect)] = []
+        for id in ids {
+            let frame = try #require(s.app.frame(of: id), "\(id) fehlt")
+            frames.append((id, frame))
+        }
+        for (id, frame) in frames {
+            #expect(frame.height < 60, "\(id) ist \(frame.height) hoch: Der Eintrag bricht um")
+            #expect(frame.width > 150, "\(id) ist nur \(frame.width) breit")
+        }
+        for i in 1..<frames.count where frames[i].0 != "nav-settings" {
+            #expect(frames[i].1.minY > frames[i - 1].1.minY, "\(frames[i].0) steht nicht unter \(frames[i - 1].0)")
+            #expect(abs(frames[i].1.minX - frames[0].1.minX) < 2, "\(frames[i].0) steht nicht links bündig")
+        }
+    }
 }
