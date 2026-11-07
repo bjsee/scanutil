@@ -144,11 +144,11 @@ struct SeriesSoundTests {
         await model.disconnect()
     }
 
-    @Test func noBeepOutsideASeries() async {
+    @Test func aSingleCaptureOutsideASeriesBeepsToo() async {
         let (model, sound, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
         await model.scan()
         #expect(model.scans.count == 1)
-        #expect(sound.plays == 0)
+        #expect(sound.plays == 1, "Auch die Aufnahme per Leertaste ohne Serie piept")
         await model.disconnect()
     }
 

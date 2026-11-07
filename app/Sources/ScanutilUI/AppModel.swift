@@ -171,6 +171,15 @@ public final class AppModel {
     static let soundKey = "captureSoundEnabled"
     /// Aus nach `disconnect()`: ein Versuch, der erst danach scheitert, darf die Suche nicht neu starten.
     private var searchAllowed = true
+    /// Der Scanner liefert nach einem Druck auf seine eigene Taste oder den Fußtaster am Gerät keine Bilder mehr (siehe `scannerStuck`).
+    public private(set) var scannerStuck = false
+    private var lastLossAt: Date?
+    private var healthyTask: Task<Void, Never>?
+    /// Seit dem letzten Verlust ist ein Verbindungsversuch gescheitert: Das Gerät war weg (abgezogen), es hängt nicht nur.
+    private var failedAttemptSinceLoss = false
+    /// Ein zweiter Verlust binnen `window` Sekunden ohne zwischenzeitlich gescheiterten Versuch gilt als „hängt“: ein Gerät,
+    /// das nach dem Neuverbinden nur ein Bild liefert und dann schweigt. Nach `shortSession` Sekunden ohne Verlust ist es gesund.
+    private let stuckThresholds: (shortSession: TimeInterval, window: TimeInterval)
     /// Beobachtet die laufende Sitzung auf Verlust der Verbindung. `sessionGeneration` trennt alte von neuen Sitzungen.
     private var lossTask: Task<Void, Never>?
     private var sessionGeneration = 0
@@ -189,12 +198,14 @@ public final class AppModel {
         recognizer: any TextRecognizer = VisionTextRecognizer(),
         describer: any DescriptionSuggesting = NoDescriber(),
         retryInterval: Duration? = .seconds(2),
+        stuckThresholds: (shortSession: TimeInterval, window: TimeInterval) = (30, 90),
         sound: any CaptureSound = SilentSound(),
         defaults: UserDefaults? = nil,
         scanDisposal: ScanDisposal = .permanent
     ) {
         self.scanDisposal = scanDisposal
         self.retryInterval = retryInterval
+        self.stuckThresholds = stuckThresholds
         self.sound = sound
         self.defaults = defaults
         // Ohne gespeicherte Einstellung ist der Ton an.
@@ -289,12 +300,14 @@ public final class AppModel {
             if Task.isCancelled { await opened.close(); return false }
             session = opened
             startPreview(from: opened)
-            watchConnection(of: opened)
+            watchConnection(of: opened)      // zählt die Sitzungsnummer hoch: erst danach darf der Gesundheitstest sie merken
+            scheduleHealthCheck()
             searchTask?.cancel()
             searchTask = nil
             isSearching = false
             status = .ready
-            post(.info, "Verbunden mit \(device?.name ?? "Scanner"), Aufnahme \(format.description).")
+            // Ein hängender Scanner verbindet sich im Takt der Versuche kurz: Das steht nicht jedes Mal im Protokoll.
+            if !scannerStuck { post(.info, "Verbunden mit \(device?.name ?? "Scanner"), Aufnahme \(format.description).") }
             return true
         } catch {
             // Nach disconnect() ist es vorbei: ein Versuch, der erst jetzt scheitert, ändert weder Status noch Protokoll
@@ -303,9 +316,12 @@ public final class AppModel {
             // Nach einem Verlust ist „Scanner nicht gefunden“ dieselbe Ursache: die Anzeige bleibt beim Verlust,
             // solange die Suche läuft. Ein anderer Fehler (etwa verweigerter Kamerazugriff) ersetzt sie.
             if previous == .failed(Self.connectionLostText), (error as? ScannerError) == .deviceNotFound {
+                failedAttemptSinceLoss = true
                 startSearching()
                 return false
             }
+            scannerStuck = false
+            failedAttemptSinceLoss = true
             let text = error.localizedDescription
             // Derselbe Fehler wie beim letzten Versuch steht schon im Protokoll: nicht alle paar Sekunden erneut.
             if previous != .failed(text) { post(.error, text, asMessage: false) }
@@ -316,8 +332,9 @@ public final class AppModel {
     }
 
     /// Versucht es regelmäßig erneut, bis der Scanner da ist oder `disconnect()` aufgerufen wird.
-    private func startSearching() {
-        guard searchTask == nil, let interval = retryInterval else { return }
+    private func startSearching(slow: Bool = false) {
+        guard searchTask == nil, var interval = retryInterval else { return }
+        if slow { interval = interval * 5 }          // ein hängendes Gerät nicht im Sekundentakt bedrängen
         isSearching = true
         searchTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -330,15 +347,30 @@ public final class AppModel {
 
     static let connectionLostText = "Die Verbindung zum Scanner ging verloren. Ist er noch angeschlossen und eingeschaltet?"
 
+    static let scannerStuckText = "Der Scanner liefert keine Bilder mehr. Das passiert, wenn am Gerät die Taste oder der Fußtaster gedrückt wurde. "
+        + "Bitte das USB-Kabel des Scanners abziehen und wieder einstecken. Aufnehmen geht mit der Leertaste oder der Schaltfläche in der App."
+
+    /// Nach einer Weile ohne Verlust gilt der Scanner wieder als gesund.
+    private func scheduleHealthCheck() {
+        healthyTask?.cancel()
+        let generation = sessionGeneration, wait = stuckThresholds.shortSession
+        healthyTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(wait))
+            guard let self, !Task.isCancelled, self.sessionGeneration == generation, self.session != nil else { return }
+            self.scannerStuck = false
+            self.lastLossAt = nil
+        }
+    }
+
     /// Wartet darauf, dass die Sitzung den Verlust der Verbindung meldet, und reagiert darauf.
     private func watchConnection(of opened: any ScanSession) {
         lossTask?.cancel()
         sessionGeneration += 1
         let generation = sessionGeneration
         lossTask = Task { [weak self] in
-            for await _ in opened.connectionLost {
+            for await reason in opened.connectionLost {
                 guard let self, !Task.isCancelled, self.sessionGeneration == generation else { return }
-                await self.handleConnectionLoss()
+                await self.handleConnectionLoss(stalled: reason == .timeout)
                 return
             }
         }
@@ -346,7 +378,7 @@ public final class AppModel {
 
     /// Der Scanner wurde abgezogen oder ausgeschaltet: Vorschau und Sitzung wegräumen und von vorn suchen,
     /// bis er wieder da ist. Eine laufende Serie und alle Scans bleiben erhalten. Wiederholbar ohne Wirkung.
-    private func handleConnectionLoss() async {
+    private func handleConnectionLoss(stalled: Bool = false) async {
         guard let lost = session else { return }
         session = nil
         sessionGeneration += 1
@@ -354,10 +386,27 @@ public final class AppModel {
         previewTask = nil
         lossTask = nil
         previewImage = nil          // ein eingefrorenes Bild wäre schlimmer als keines
+        healthyTask?.cancel()
         await lost.close()
+        let now = Date()
+        // Zwei Verluste kurz nacheinander, dazwischen kein gescheiterter Verbindungsversuch: Das Gerät war die ganze Zeit da und
+        // liefert trotzdem nichts. Nicht an der Dauer der Sitzung festgemacht, die schwankt, wenn der Rechner ausgelastet ist.
+        let repeated = stalled && !failedAttemptSinceLoss && (lastLossAt.map { now.timeIntervalSince($0) < stuckThresholds.window } ?? false)
+        lastLossAt = now
+        failedAttemptSinceLoss = false
         // Wurde inzwischen beendet (disconnect), ist es vorbei. Sonst wird der Zustand in einem Zug veröffentlicht:
         // erst jetzt ist die alte Sitzung zu, der Status „verloren“ gesetzt und die Suche gestartet.
         guard searchAllowed else { return }
+        if repeated {
+            // Kurze Sitzung, zweiter Verlust kurz danach: Der Scanner hängt, Neuverbinden hilft nicht. Das sagen, statt immer
+            // wieder „Verbindung verloren“ zu melden.
+            let first = !scannerStuck
+            scannerStuck = true
+            status = .failed(Self.scannerStuckText)
+            if first { post(.error, Self.scannerStuckText, asMessage: false) }
+            startSearching(slow: true)
+            return
+        }
         status = .failed(Self.connectionLostText)
         post(.error, Self.connectionLostText, asMessage: false)
         startSearching()
@@ -416,7 +465,8 @@ public final class AppModel {
         do {
             let capture = try await session.capture()
             // Der Ton kommt, sobald das Bild da ist, nicht erst nach dem Speichern: Ab jetzt darf umgeblättert werden.
-            if series != nil, soundEnabled { sound.play() }
+            // Bei jeder Aufnahme, auch einer einzelnen per Leertaste außerhalb einer Serie.
+            if soundEnabled { sound.play() }
             let record = try store.store(capture)
             let store = self.store, size = thumbnailSize
             let thumb = await Task.detached { store.thumbnail(for: record, maxPixelSize: size) }.value
