@@ -142,6 +142,7 @@ private final class LiveSession: NSObject, ScanSession, AVCaptureVideoDataOutput
     private var lastFrame = Date()
     private var observers: [NSObjectProtocol] = []
     private var watchdog: DispatchSourceTimer?
+    private var formatGuard = FrameFormatGuard()
 
     init(device: DeviceInfo, format: ScanFormat, settings: CaptureSettings, onClosed: @escaping @Sendable () -> Void) {
         self.device = device
@@ -213,6 +214,17 @@ private final class LiveSession: NSObject, ScanSession, AVCaptureVideoDataOutput
         guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         // Bilder vor dem Formatwechsel haben noch die Preset-Größe und zählen nicht.
         guard CVPixelBufferGetWidth(buffer) == format.width, CVPixelBufferGetHeight(buffer) == format.height else { return }
+        // Löst der Scanner selbst aus (Taste am Gerät, Fußtaster), liefert er kurz Bilder in anderer Form, die als Bildsalat
+        // ankommen. Die gelten nicht, auch nicht für die Vorschau.
+        let shape = FrameFormat(pixelFormat: CVPixelBufferGetPixelFormatType(buffer), bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
+                                planes: CVPixelBufferGetPlaneCount(buffer), dataSize: CVPixelBufferGetDataSize(buffer))
+        let (accepted, rejectedSoFar) = lock.withLock { () -> (Bool, Int) in
+            let before = formatGuard.rejected
+            let ok = formatGuard.accept(shape)
+            return (ok, formatGuard.rejected - before)
+        }
+        if rejectedSoFar > 0 { Trace.log("session: Bild verworfen (\(shape))") }
+        guard accepted else { return }
 
         let (ready, pending, closed) = lock.withLock { () -> (CheckedContinuation<Void, Error>?, [CheckedContinuation<UncheckedBuffer, Error>], Bool) in
             frameCount += 1
