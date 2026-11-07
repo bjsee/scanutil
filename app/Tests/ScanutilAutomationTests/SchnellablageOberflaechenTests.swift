@@ -130,4 +130,29 @@ struct SchnellablageOberflaechenTests {
             #expect(abs(frames[i].1.minX - frames[0].1.minX) < 2, "\(frames[i].0) steht nicht links bündig")
         }
     }
+
+    @Test func aRunningInboxCanBeDiscardedEvenBeforeTheFirstScan() throws {
+        let s = try launch(); defer { s.close() }
+        #expect(s.app.press("nav-inbox"))
+        #expect(s.app.wait { s.app.element("inbox-start-button") != nil })
+        #expect(s.app.press("inbox-start-button"))
+        #expect(s.app.wait { s.app.element("inbox-discard-button") != nil }, "Keine Möglichkeit, die Schnellablage abzubrechen")
+        #expect(s.app.isEnabled("inbox-finish-button") == false, "Fertig ist ohne Seite gesperrt")
+        #expect(s.app.press("inbox-discard-button"))
+        #expect(s.app.wait { s.app.element("inbox-discard-confirm") != nil }, "Keine Rückfrage")
+        #expect(s.app.press("inbox-discard-confirm"))
+        #expect(s.app.wait { s.app.element("inbox-page") != nil && s.app.element("inbox-start-button") != nil }, "Die Seite Schnellablage kommt nicht zurück")
+        #expect(s.app.wait { s.documentFiles.isEmpty }, "Die abgebrochene Schnellablage bleibt liegen")
+    }
+
+    @Test func discardingARunningInboxWithPagesKeepsTheScans() throws {
+        let s = try launch(); defer { s.close() }
+        record(s, scans: 2)
+        #expect(s.app.press("inbox-discard-button"))
+        #expect(s.app.wait { s.app.element("inbox-discard-confirm") != nil })
+        #expect(s.app.press("inbox-discard-confirm"))
+        #expect(s.app.wait(timeout: 15) { s.documentFiles.isEmpty }, "Die verworfene Schnellablage bleibt liegen")
+        #expect(s.originals.count == 2, "Die Scans bleiben im Archiv")
+        #expect(s.app.wait { s.app.element("inbox-start-button") != nil })
+    }
 }
