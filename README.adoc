@@ -1,8 +1,8 @@
-= scanutil
+= Chronik-Scanner
 :toc:
 :icons: font
 
-Open-Source-Scannersoftware für den CZUR ET24 Pro unter macOS.
+Open-Source-Scannersoftware für den CZUR ET24 Pro unter macOS, früher „scanutil“.
 Entwickelt für die Digitalisierung historischer Vorlagen des Heimatvereins Mulsum 1524 e.V.
 
 *Status:* Phase 2 läuft.
@@ -78,8 +78,8 @@ Ausnahme: Der Ordner für das PDF wird mit der Ordnerauswahl von macOS geändert
 [source,sh]
 ----
 cd app
-scripts/bundle.sh              # baut build/Scanutil.app (lokal signiert)
-open build/Scanutil.app
+scripts/bundle.sh              # baut build/Chronik-Scanner.app (lokal signiert, mit Symbol)
+open build/Chronik-Scanner.app
 ----
 
 Der Scanner darf auch erst nach dem Start der App eingeschaltet werden: Ist er nicht da, sucht die App alle zwei Sekunden weiter und verbindet sich von selbst, sobald er auftaucht.
@@ -93,6 +93,8 @@ Erkannt wird der Verlust auf drei Wegen: die Meldung von macOS (Gerät getrennt)
 
 Die Oberfläche zeigt die Live-Vorschau, die Leertaste oder die Schaltfläche „Scannen“ nimmt in 5696x4272 mit Schärfe 0 auf.
 Originale liegen unter `~/Pictures/Scanutil-Archiv`, über die Umgebungsvariable `SCANUTIL_ARCHIVE` ist der Ort änderbar.
+Der Ordner behält absichtlich den alten Namen, damit vorhandene Archive weiter gefunden werden; ebenso bleiben die internen Namen (Paket, Module, `scanutil-cli`, `SCANUTIL_*`, Bundle-Kennung `de.mulsum1524.scanutil`) bestehen. Die Bundle-Kennung zu ändern hieße, die Kameraerlaubnis erneut zu erteilen.
+Das App-Symbol zeichnet `app/scripts/make-icon.py` (Pillow) nach `app/Resources/AppIcon.icns`.
 Mit `SCANUTIL_MOCK=1` läuft die App ohne Scanner.
 Beenden mit Cmd-Q setzt die Schärfe im Gerät auf den Standardwert zurück.
 
@@ -182,7 +184,7 @@ Nach „Serie beenden“ bleibt die Serie angesehen, damit auch die Seiten und R
 Eine neue Serie, die beginnt, während eine andere angesehen wird, beginnt mit leerer Miniaturleiste.
 
 Auch nach „Serie beenden“ und nach einem Neustart bleibt das Dokument gespeichert und lässt sich ausgeben: Auf der Seite Serien führt *Als PDF …* zur Seite „PDF ausgeben“. Das geht auch ohne eingeschalteten Scanner.
-Die Seite „PDF ausgeben“ hat Dateiname, Ordner (Standard `Dokumente/Scanutil`), Texterkennung und „Kleine Datei“. Ein vorhandenes PDF wird nie überschrieben, es wird `Name 2.pdf` usw. Sie warnt, wenn noch Seiten unsicher sind. „PDF erzeugen“ macht das PDF aus den Originalen mit den Korrekturen der Seiten; die Originale bleiben unberührt.
+Die Seite „PDF ausgeben“ hat Dateiname, Ordner (Standard `Dokumente/Chronik-Scanner`), Texterkennung und „Kleine Datei“. Ein vorhandenes PDF wird nie überschrieben, es wird `Name 2.pdf` usw. Sie warnt, wenn noch Seiten unsicher sind. „PDF erzeugen“ macht das PDF aus den Originalen mit den Korrekturen der Seiten; die Originale bleiben unberührt.
 
 Ein gespeichertes Dokument ohne Oberfläche: `scanutil-cli export <Archiv> <ziel.pdf> --document <ID>` (die ID steht als Dateiname in `documents/`).
 Die Doppelseitenerkennung an einem Scan ansehen: `scanutil-cli analyze <scan.png> --book --out ueberlagerung.png --pages <ordner>` gibt die Messwerte aus, zeichnet Rand (blau), Falz (rot) und die beiden Seiten (grün, orange) ein und schreibt die beiden Seiten so, wie der Export sie erzeugt.

@@ -59,7 +59,7 @@ struct Sidebar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Scanutil").font(.headline).padding(.horizontal, 10).padding(.top, 6).padding(.bottom, 14)
+            Text("Chronik-Scanner").font(.headline).padding(.horizontal, 10).padding(.top, 6).padding(.bottom, 14)
             item("Aufnahme", symbol: "camera.aperture", route: .capture, identifier: "nav-capture")
             HStack(spacing: 2) {
                 item("Serien", symbol: "books.vertical", route: .series, identifier: "series-list-button",

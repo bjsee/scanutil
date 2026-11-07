@@ -74,7 +74,7 @@ struct ScanutilApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Scanutil") {
+        WindowGroup("Chronik-Scanner") {
             ContentView(model: model)
                 .onAppear { delegate.model = model }
         }
