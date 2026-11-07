@@ -63,11 +63,11 @@ struct Sidebar: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Chronik-Scanner").font(.headline).padding(.horizontal, 10).padding(.top, 6).padding(.bottom, 14)
             item("Aufnahme", symbol: "camera.aperture", route: .capture, identifier: "nav-capture")
-            HStack(spacing: 2) {
-                item("Schnellablage", symbol: "tray.and.arrow.down", route: .inbox, identifier: "nav-inbox",
+            item("Schnellablage", symbol: "tray.and.arrow.down", route: .inbox, identifier: "nav-inbox",
                  badge: model.isInboxActive ? "läuft" : (model.openInboxes.isEmpty ? nil : "\(model.openInboxes.count)"),
                  value: model.isInboxActive ? "läuft" : "\(model.openInboxes.count) offen")
-            item("Serien", symbol: "books.vertical", route: .series, identifier: "series-list-button",
+            HStack(spacing: 2) {
+                item("Serien", symbol: "books.vertical", route: .series, identifier: "series-list-button",
                      badge: "\(model.seriesDocuments.count)", value: "\(model.seriesDocuments.count)")
                 Button { seriesExpanded.toggle() } label: {
                     Image(systemName: seriesExpanded ? "chevron.down" : "chevron.right").frame(width: 22, height: 30).contentShape(Rectangle())
