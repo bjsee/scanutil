@@ -724,7 +724,9 @@ public final class AppModel {
     }
 
     /// Speichert ein Dokument und hält die Anzeige aktuell: die laufende Serie, das geöffnete Dokument und die Liste.
-    private func commit(_ document: ScanDocument) {
+    private func commit(_ edited: ScanDocument) {
+        var document = edited
+        document.touch()
         do {
             try store.saveDocument(document)
             if series?.id == document.id { series = document }

@@ -295,6 +295,39 @@ struct SeriesEditingModelTests {
 }
 
 @MainActor
+@Suite("Serie: Name und letzte Bearbeitung")
+struct DocumentModifiedTests {
+    @Test func aDocumentWithoutAModifiedDateFallsBackToItsCreationDate() throws {
+        var document = ScanDocument(title: "Alt")
+        #expect(document.modifiedAt == nil && document.lastModified == document.createdAt)
+        document.touch(Date(timeIntervalSince1970: 1_800_000_000))
+        #expect(document.lastModified == Date(timeIntervalSince1970: 1_800_000_000))
+    }
+
+    @Test func everyEditStampsTheModifiedDateAndItIsSaved() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("scanutil-mod-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = ArchiveStore(root: dir)
+        let model = AppModel(scanner: MockScanner(previewsEnabled: false), store: store, thumbnailSize: 64, sound: SilentSound(), defaults: nil)
+        await model.connect()
+        model.startSeries(title: "Chronik")
+        await model.scan()
+        let id = try #require(model.series?.id)
+        model.endSeries()
+        let before = try #require(model.savedDocuments.first { $0.id == id })
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(model.renameDocument(id: id, to: "Chronik 1524"))
+        let after = try #require(model.savedDocuments.first { $0.id == id })
+        #expect(after.title == "Chronik 1524")
+        #expect(after.lastModified > before.lastModified, "Umbenennen ist eine Bearbeitung")
+        #expect(after.createdAt == before.createdAt, "Angelegt bleibt angelegt")
+        let saved = try store.loadDocument(id: id)
+        #expect(abs(saved.lastModified.timeIntervalSince(after.lastModified)) < 0.002, "Der Zeitpunkt steht auch auf der Platte")
+        await model.disconnect()
+    }
+}
+
+@MainActor
 @Suite("Serie löschen: rückgängig")
 struct DeleteUndoTests {
     private func makeModel() async -> (AppModel, ArchiveStore, URL) {

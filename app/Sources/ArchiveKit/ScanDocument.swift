@@ -66,6 +66,8 @@ public struct ScanDocument: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
     public var title: String
     public let createdAt: Date
+    /// Wann zuletzt etwas am Dokument geändert wurde (Seite, Korrektur, Name). Ältere Dokumente kennen es nicht.
+    public var modifiedAt: Date?
     public var metadata: DocumentMetadata
     public var pages: [DocumentPage]
     /// Hochgezählt bei jeder Änderung.
@@ -80,6 +82,12 @@ public struct ScanDocument: Codable, Equatable, Identifiable, Sendable {
         self.pages = pages
         self.revision = revision
     }
+
+    /// Der Zeitpunkt der letzten Bearbeitung; ohne Angabe der Anlegezeitpunkt.
+    public var lastModified: Date { modifiedAt ?? createdAt }
+
+    /// Vermerkt eine Bearbeitung.
+    public mutating func touch(_ date: Date = Date()) { modifiedAt = date.roundedToMilliseconds }
 
     public func page(id: UUID) -> DocumentPage? { pages.first { $0.id == id } }
 
