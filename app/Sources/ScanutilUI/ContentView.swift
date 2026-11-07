@@ -306,6 +306,8 @@ struct SeriesBar: View {
     @State private var bookMode = false
     /// Der Dialog „neu oder fortsetzen?“ beim Beginnen, und die Liste der Serien.
     @State private var showStartSheet = false
+    /// Die Rückfrage „Schnellablage verwerfen?“ steht in der Leiste.
+    @State private var confirmingDiscard = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -328,11 +330,25 @@ struct SeriesBar: View {
                 Text("Auslösen: fester Fußtaster oder Taste „\(TriggerKey.name(model.triggerKeyCode))“, auch die Schaltfläche unten")
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 Spacer()
-                Button("Fertig") { Task { if let id = await model.finishInbox() { nav.go(.editor(id)) } } }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(inbox.pages.isEmpty)
-                    .help("Beendet die Aufnahme: Dann lassen sich die Dokumente prüfen, benennen und ablegen")
-                    .accessibilityIdentifier("inbox-finish-button")
+                if confirmingDiscard {
+                    Text(inbox.pages.isEmpty ? "Schnellablage abbrechen?" : "Schnellablage mit \(pageCountText(inbox.pages.count)) verwerfen? Die Scans bleiben im Archiv.")
+                        .font(.callout)
+                    Button("Zurück") { confirmingDiscard = false }.accessibilityIdentifier("inbox-discard-cancel")
+                    Button(inbox.pages.isEmpty ? "Abbrechen" : "Verwerfen") {
+                        confirmingDiscard = false
+                        Task { await model.discardInbox(documentID: inbox.id); nav.go(.inbox) }
+                    }
+                    .tint(.red).accessibilityIdentifier("inbox-discard-confirm")
+                } else {
+                    Button("Verwerfen …") { confirmingDiscard = true }
+                        .help("Bricht die Schnellablage ab, ohne etwas abzulegen")
+                        .accessibilityIdentifier("inbox-discard-button")
+                    Button("Fertig") { Task { if let id = await model.finishInbox() { nav.go(.editor(id)) } } }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(inbox.pages.isEmpty)
+                        .help("Beendet die Aufnahme: Dann lassen sich die Dokumente prüfen, benennen und ablegen")
+                        .accessibilityIdentifier("inbox-finish-button")
+                }
             } else if let series = model.series {
                 Label("\(series.title)" + (model.seriesIsBook ? " · Buch" : ""), systemImage: "books.vertical")
                     .font(.callout.bold())

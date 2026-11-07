@@ -220,9 +220,11 @@ Die Erkennung hängt hinter der Schnittstelle `TextRecognizer`; Tesseract für m
 Für einzelne Dokumente (Briefe, Rechnungen, Vereinsunterlagen), die nicht in ein Buch gehören. Die Seite *Schnellablage* in der Seitenleiste startet sie.
 
 . *Aufnehmen:* Dokument unter den Scanner legen, auslösen, nächstes Dokument. Ausgelöst wird *von Hand*: mit dem Fußtaster, der Taste oder der Schaltfläche, nie automatisch. Ein Fußtaster sendet meist eine Taste: Unter *Einstellungen* → *Taste lernen* legt man fest, welche (Standard: Leertaste). Sie gilt auf der Seite Aufnahme.
-. *Fertig:* beendet die Aufnahme und öffnet dieselbe Bearbeitungsseite wie bei einer Serie (Ausrichtung und Zuschnitt sind vorab automatisch korrigiert, Unsicheres ist markiert).
+. *Fertig* (rechts in der Leiste) beendet die Aufnahme und öffnet dieselbe Bearbeitungsseite wie bei einer Serie (Ausrichtung und Zuschnitt sind vorab automatisch korrigiert, Unsicheres ist markiert).
 . *Dokumente:* Jede Aufnahme ist zunächst ein *eigenes Dokument*. Was zusammengehört, fasst man ausdrücklich zusammen (*Mit vorigem zusammenfassen*) und kann es mit *Ab dieser Seite als eigenes Dokument* wieder trennen. Je Dokument gibt es ein Feld für die Beschreibung und darunter den Dateinamen.
 . *Ablegen:* *Dokument ablegen* (oder *n Dokumente ablegen*) schreibt je Dokument ein PDF *mit Texterkennung* in den Ablageordner. Danach ist die Schnellablage erledigt; die Originale bleiben im Archiv.
+
+*Abbrechen:* In der Leiste gibt es neben „Fertig“ *Verwerfen …* (mit Rückfrage, auch ohne Seite möglich): Die Schnellablage endet, ohne etwas abzulegen; die Scans bleiben im Archiv.
 
 *Dateiname:* `JJMM Beschreibung.pdf`, etwa `2611 Tierarztpraxis.pdf`. Jahr und Monat kommen vom Aufnahmedatum der ersten Seite. Ein vorhandenes PDF wird nie überschrieben (`… 2.pdf`), ohne Beschreibung heißt das Dokument `JJMM Dokument.pdf`.
 *Namensvorschlag:* Nach „Fertig“ liest die App den Text der ersten Seite jedes Dokuments. Mit Apple Intelligence auf dem Mac (Framework FoundationModels, der Text verlässt den Rechner nicht) kommt daraus eine Beschreibung von höchstens vier Wörtern; ist sie nicht verfügbar oder ausgeschaltet, nimmt die App die erste Zeile, die nach einem Namen aussieht. Ein selbst eingetragener Name bleibt immer.
