@@ -228,6 +228,8 @@ private final class LiveSession: NSObject, ScanSession, AVCaptureVideoDataOutput
 
         let (ready, pending, closed) = lock.withLock { () -> (CheckedContinuation<Void, Error>?, [CheckedContinuation<UncheckedBuffer, Error>], Bool) in
             frameCount += 1
+            let gap = Date().timeIntervalSince(lastFrame)
+            if gap > 1.5 { Trace.log(String(format: "session: Bild nach %.1f s Pause", gap)) }
             lastFrame = Date()
             let r = readyContinuation
             readyContinuation = nil
@@ -272,7 +274,8 @@ private final class LiveSession: NSObject, ScanSession, AVCaptureVideoDataOutput
             let silent = Date().timeIntervalSince(lock.withLock { lastFrame })
             if silent > Self.stallLimit {
                 Trace.log("session: seit \(Int(silent)) s kein Bild")
-                markLost()
+                // Für die Untersuchung der Gerätetasten: Die Wache nur melden, nicht verbinden (SCANUTIL_NO_WATCHDOG).
+                if ProcessInfo.processInfo.environment["SCANUTIL_NO_WATCHDOG"] == nil { markLost() }
             }
         }
         lock.withLock {

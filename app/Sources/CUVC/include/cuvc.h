@@ -8,4 +8,8 @@
 int cuvc_get_sharpness(int *value, int *min, int *max, int *def);
 int cuvc_set_sharpness(int value);
 
+// Kopiert die Konfigurationsbeschreibung des Geräts (alle Interfaces, Endpunkte, UVC-Beschreibungen) nach `out`.
+// Rückgabe: die Gesamtlänge in Bytes (auch wenn `capacity` kleiner ist), sonst ein negativer Wert (-1: Gerät nicht gefunden).
+int cuvc_config_descriptor(unsigned char *out, int capacity);
+
 #endif

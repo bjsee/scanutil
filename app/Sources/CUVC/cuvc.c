@@ -87,3 +87,37 @@ static int set_body(IOUSBInterfaceInterface300 **interface, uint8_t number, void
 int cuvc_set_sharpness(int value) {
     return with_interface(set_body, &value);
 }
+
+// Liest die Konfigurationsbeschreibung über das Geräte-Objekt. Das öffnet das Gerät nicht und stört den Videostrom nicht.
+int cuvc_config_descriptor(unsigned char *out, int capacity) {
+    io_iterator_t iterator;
+    if (IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOUSBHostDevice"), &iterator) != KERN_SUCCESS) return -1;
+    io_service_t service, found = 0;
+    while ((service = IOIteratorNext(iterator))) {
+        if (number_property(service, CFSTR("idVendor")) == 0x04fc && number_property(service, CFSTR("idProduct")) == 0x6333) {
+            found = service;
+            break;
+        }
+        IOObjectRelease(service);
+    }
+    IOObjectRelease(iterator);
+    if (!found) return -1;
+    IOCFPlugInInterface **plugin = NULL;
+    SInt32 score;
+    IOReturn status = IOCreatePlugInInterfaceForService(found, kIOUSBDeviceUserClientTypeID, kIOCFPlugInInterfaceID, &plugin, &score);
+    IOObjectRelease(found);
+    if (status != kIOReturnSuccess || !plugin) return -2;
+    IOUSBDeviceInterface320 **device = NULL;
+    (*plugin)->QueryInterface(plugin, CFUUIDGetUUIDBytes(kIOUSBDeviceInterfaceID320), (LPVOID *)&device);
+    (*plugin)->Release(plugin);
+    if (!device) return -3;
+    IOUSBConfigurationDescriptorPtr descriptor = NULL;
+    int result = -4;
+    if ((*device)->GetConfigurationDescriptorPtr(device, 0, &descriptor) == kIOReturnSuccess && descriptor) {
+        int length = descriptor->wTotalLength;
+        if (out) for (int i = 0; i < length && i < capacity; i++) out[i] = ((unsigned char *)descriptor)[i];
+        result = length;
+    }
+    (*device)->Release(device);
+    return result;
+}
