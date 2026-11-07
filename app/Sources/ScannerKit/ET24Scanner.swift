@@ -275,7 +275,7 @@ private final class LiveSession: NSObject, ScanSession, AVCaptureVideoDataOutput
             if silent > Self.stallLimit {
                 Trace.log("session: seit \(Int(silent)) s kein Bild")
                 // Für die Untersuchung der Gerätetasten: Die Wache nur melden, nicht verbinden (SCANUTIL_NO_WATCHDOG).
-                if ProcessInfo.processInfo.environment["SCANUTIL_NO_WATCHDOG"] == nil { markLost() }
+                if ProcessInfo.processInfo.environment["SCANUTIL_NO_WATCHDOG"] == nil { markLost(stalled: true) }
             }
         }
         lock.withLock {
@@ -286,7 +286,9 @@ private final class LiveSession: NSObject, ScanSession, AVCaptureVideoDataOutput
     }
 
     /// Das Gerät ist weg. Wartende Aufnahmen scheitern sofort statt nach zehn Sekunden, und der Verlust wird einmal gemeldet.
-    private func markLost() {
+    /// - Parameter stalled: Der Strom ist verstummt, obwohl das Gerät da ist (Wache). Das meldet `.timeout` statt `.deviceNotFound`:
+    ///   So lässt sich ein abgezogenes Gerät von einem unterscheiden, das nach der Gerätetaste hängt.
+    private func markLost(stalled: Bool = false) {
         let (first, pending, starting) = lock.withLock { () -> (Bool, [CheckedContinuation<UncheckedBuffer, Error>], Bool) in
             if lostReported || isClosed { return (false, [], false) }
             lostReported = true
@@ -298,7 +300,7 @@ private final class LiveSession: NSObject, ScanSession, AVCaptureVideoDataOutput
         for waiter in pending { waiter.resume(throwing: ScannerError.deviceNotFound) }
         if starting { failStart(ScannerError.deviceNotFound) }
         stopMonitoring()
-        lostContinuation.yield(.deviceNotFound)
+        lostContinuation.yield(stalled ? .timeout : .deviceNotFound)
         lostContinuation.finish()
     }
 

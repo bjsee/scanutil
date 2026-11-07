@@ -153,6 +153,12 @@ struct SettingsPage: View {
                          : "Apple Intelligence ist auf diesem Mac nicht verfügbar. Der Name kommt dann aus der ersten Textzeile.")
                         .font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("settings-ai-note")
                 }
+                Section("Aufnahme") {
+                    Toggle("Ton nach jeder Aufnahme", isOn: $model.soundEnabled)
+                        .accessibilityIdentifier("settings-sound-toggle")
+                    Text("Ein kurzer Ton, sobald das Bild aufgenommen ist: dann darf das nächste Dokument unter den Scanner. Gilt für jede Aufnahme, auch ohne Serie.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Section("Auslöser") {
                     LabeledContent("Taste für die Aufnahme") {
                         HStack {

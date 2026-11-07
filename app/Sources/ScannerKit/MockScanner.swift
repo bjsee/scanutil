@@ -40,6 +40,7 @@ public final class MockScanner: ScannerPort, @unchecked Sendable {
     fileprivate let captureDelay: Duration
     private let scheduledUnplug: (after: TimeInterval, returnsAfter: TimeInterval)?
     private var unplugScheduled = false
+    private var flapDelay: TimeInterval?
     private var liveSessions: [MockSession] = []
     private let created = ProcessInfo.processInfo.systemUptime
     private var attempts = 0
@@ -95,6 +96,10 @@ public final class MockScanner: ScannerPort, @unchecked Sendable {
     fileprivate func register(_ session: MockSession) { lock.withLock { liveSessions.append(session) } }
     fileprivate func unregister(_ session: MockSession) { lock.withLock { liveSessions.removeAll { $0 === session } } }
 
+    /// Wie ein Scanner nach einem Druck auf die Gerätetaste: Jede neue Sitzung liefert kurz Bilder und meldet dann den Verlust,
+    /// obwohl das Gerät da bleibt. `nil` beendet das (Kabel neu gesteckt).
+    public func setFlapping(after delay: TimeInterval?) { lock.withLock { flapDelay = delay } }
+
     /// Schaltet das Gerät ein oder aus, für Tests, die den Zeitpunkt genau bestimmen müssen.
     public func setSwitchedOn(_ on: Bool) { lock.withLock { switchedOn = on } }
 
@@ -122,6 +127,12 @@ public final class MockScanner: ScannerPort, @unchecked Sendable {
         let session = MockSession(owner: self, device: device, format: format, settings: settings)
         register(session)
         scheduleUnplugOnce()
+        if let delay = lock.withLock({ flapDelay }) {
+            Task {
+                try? await Task.sleep(for: .seconds(delay))
+                session.loseConnection(.timeout)      // verstummt, aber da
+            }
+        }
         return session
     }
 
@@ -214,9 +225,9 @@ private final class MockSession: ScanSession, @unchecked Sendable {
     }
 
     /// Das Gerät ist weg: der Strom endet, eine Aufnahme scheitert, und der Verlust wird einmal gemeldet.
-    func loseConnection() {
+    func loseConnection(_ reason: ScannerError = .deviceNotFound) {
         guard !lock.withLock({ isClosed }), lost.set() else { return }
-        lostContinuation.yield(.deviceNotFound)
+        lostContinuation.yield(reason)
         lostContinuation.finish()
     }
 
