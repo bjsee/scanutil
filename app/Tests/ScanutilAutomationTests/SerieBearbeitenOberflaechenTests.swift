@@ -113,4 +113,49 @@ struct SerieBearbeitenOberflaechenTests {
             ((s.pages.first?["corrections"] as? [String: Any])?["crop"] as? [String: Any])?["source"] as? String == "manual"
         }, "Zuschnitt nicht als manuell gespeichert")
     }
+
+    @Test func theSidebarListsTheSeriesAndSwitchesBetweenThem() throws {
+        let s = try recordedSeries(scans: 1); defer { s.close() }
+        // Eine zweite Serie, damit es etwas zu wechseln gibt.
+        #expect(s.app.press("series-start-button"))
+        #expect(s.app.wait { s.app.element("start-series-sheet") != nil })
+        #expect(s.app.type("Zweite", into: "series-name-field"))
+        #expect(s.app.press("series-sheet-confirm"))
+        #expect(s.app.wait { s.app.element("series-page-count") != nil })
+        #expect(s.app.press("series-end-button"))
+        #expect(s.app.wait { s.app.elements("nav-series-item").count == 2 }, "Serien in der Seitenleiste: \(s.app.elements("nav-series-item").count)")
+        let labels = s.app.labels("nav-series-item")
+        #expect(labels.count == 2)
+
+        // Ein Klick öffnet die Serie zum Bearbeiten, ein zweiter wechselt.
+        let items = s.app.elements("nav-series-item")
+        for item in items {
+            #expect(AXUIElementPerformAction(item, kAXPressAction as CFString) == .success)
+            #expect(s.app.wait { s.app.element("editor-grid") != nil || s.app.element("editor-empty") != nil })
+        }
+        #expect(s.app.wait { s.app.element("editor-title") != nil })
+
+        // Ein- und Ausklappen.
+        #expect(s.app.press("nav-series-toggle"))
+        #expect(s.app.wait { s.app.elements("nav-series-item").isEmpty }, "Die Liste klappt nicht zu")
+        #expect(s.app.press("nav-series-toggle"))
+        #expect(s.app.wait { s.app.elements("nav-series-item").count == 2 })
+    }
+
+    @Test func aSeriesIsRenamedInTheEditorAndTheNameAndDateShowUpInTheSidebar() throws {
+        let s = try recordedSeries(scans: 1); defer { s.close() }
+        openEditor(s)
+        #expect(s.app.wait { s.app.element("editor-rename") != nil })
+        #expect(s.app.press("editor-rename"))
+        #expect(s.app.wait { s.app.element("editor-title-field") != nil })
+        #expect(s.app.type(" Chronik", into: "editor-title-field"))
+        #expect(s.app.press("editor-title-ok"))
+        #expect(s.app.wait(timeout: 10) { s.documentTitles.contains { $0.hasSuffix("Chronik") } }, "Titel auf der Platte: \(s.documentTitles)")
+        // Der Name steht in der Beschreibung des Eintrags, der Zeitpunkt im Wert.
+        func names() -> [String] { s.app.elements("nav-series-item").map { AppDriver.string($0, kAXDescriptionAttribute) ?? AppDriver.string($0, kAXTitleAttribute) ?? "" } }
+        #expect(s.app.wait { names().contains { $0.hasSuffix("Chronik") } }, "Seitenleiste: \(names())")
+        #expect(s.app.labels("nav-series-item").contains { $0.hasPrefix("zuletzt bearbeitet") }, "Zeitpunkt fehlt: \(s.app.labels("nav-series-item"))")
+        #expect(s.app.string("editor-summary")?.contains("zuletzt bearbeitet") == true, "Datum fehlt: \(s.app.string("editor-summary") ?? "-")")
+        #expect(s.document?["modifiedAt"] != nil, "Die letzte Bearbeitung steht nicht im Dokument")
+    }
 }

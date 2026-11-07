@@ -1,4 +1,5 @@
 import AppKit
+import ArchiveKit
 import Observation
 import SwiftUI
 
@@ -53,13 +54,26 @@ public final class Navigator {
 struct Sidebar: View {
     @Bindable var model: AppModel
     let nav: Navigator
+    /// Die Liste der Serien unter „Serien“ ist aufgeklappt.
+    @State private var seriesExpanded = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Scanutil").font(.headline).padding(.horizontal, 10).padding(.top, 6).padding(.bottom, 14)
             item("Aufnahme", symbol: "camera.aperture", route: .capture, identifier: "nav-capture")
-            item("Serien", symbol: "books.vertical", route: .series, identifier: "series-list-button",
-                 badge: "\(model.savedDocuments.count)", value: "\(model.savedDocuments.count)")
+            HStack(spacing: 2) {
+                item("Serien", symbol: "books.vertical", route: .series, identifier: "series-list-button",
+                     badge: "\(model.savedDocuments.count)", value: "\(model.savedDocuments.count)")
+                Button { seriesExpanded.toggle() } label: {
+                    Image(systemName: seriesExpanded ? "chevron.down" : "chevron.right").frame(width: 22, height: 30).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(seriesExpanded ? "Liste der Serien einklappen" : "Liste der Serien ausklappen")
+                .accessibilityLabel("Liste der Serien")
+                .accessibilityValue(seriesExpanded ? "aufgeklappt" : "zugeklappt")
+                .accessibilityIdentifier("nav-series-toggle")
+            }
+            if seriesExpanded { seriesList }
             item("Meldungen", symbol: model.unseenIssues > 0 ? "exclamationmark.bubble.fill" : "text.bubble", route: .log, identifier: "log-button",
                  badge: model.unseenIssues > 0 ? "\(min(model.unseenIssues, 99))" : nil, badgeIsWarning: true,
                  value: "\(model.unseenIssues) neu, \(model.log.count) insgesamt")
@@ -72,6 +86,53 @@ struct Sidebar: View {
         .background(Color(nsColor: .controlBackgroundColor))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("sidebar")
+    }
+
+    /// Die Serien zum schnellen Wechseln: Name und Zeitpunkt der letzten Bearbeitung. Ein Klick öffnet die Serie zum Bearbeiten.
+    private var seriesList: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 1) {
+                if model.savedDocuments.isEmpty {
+                    Text("Noch keine Serie").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.vertical, 4)
+                }
+                ForEach(model.savedDocuments) { document in seriesRow(document) }
+            }
+        }
+        .frame(maxHeight: 300)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.leading, 14)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("nav-series-list")
+    }
+
+    private func seriesRow(_ document: ScanDocument) -> some View {
+        let selected = nav.route == .editor(document.id) || nav.route == .export(document.id)
+        let running = model.series?.id == document.id
+        let modified = Self.dateText(document.lastModified)
+        return Button { nav.go(.editor(document.id)) } label: {
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 5) {
+                    if running { Circle().fill(Color.red).frame(width: 6, height: 6) }
+                    Text(document.title).lineLimit(1).truncationMode(.tail)
+                }
+                Text(modified).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8).padding(.vertical, 5)
+            .contentShape(Rectangle())
+            .background(RoundedRectangle(cornerRadius: 6).fill(selected ? Color.accentColor.opacity(0.15) : Color.clear))
+            .foregroundStyle(selected ? Color.accentColor : Color.primary)
+        }
+        .buttonStyle(.plain)
+        .help("\(document.title) · zuletzt bearbeitet \(modified)")
+        .accessibilityLabel(document.title)
+        .accessibilityValue("zuletzt bearbeitet \(modified)")
+        .accessibilityIdentifier("nav-series-item")
+    }
+
+    /// „07.11.2026, 09:12“: Datum und Uhrzeit der letzten Bearbeitung.
+    static func dateText(_ date: Date) -> String {
+        date.formatted(.dateTime.day(.twoDigits).month(.twoDigits).year().hour().minute())
     }
 
     private func item(_ title: String, symbol: String, route: AppRoute, identifier: String, badge: String? = nil,

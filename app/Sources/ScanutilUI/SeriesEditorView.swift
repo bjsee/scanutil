@@ -10,6 +10,9 @@ public struct SeriesEditorView: View {
     let documentID: UUID?
     let nav: Navigator
     @State private var editor = SeriesEditorModel()
+    /// Der Name der Serie wird gerade geändert.
+    @State private var renaming = false
+    @State private var renameText = ""
     /// Höhe der Seitenkarten im Raster, vom Nutzer einstellbar.
     @State private var cardHeight = 170.0
     /// Was die große Ansicht zeigt. Hier und nicht in der Ansicht, damit die Werkzeuge „Rahmen ziehen“ umschalten können.
@@ -57,10 +60,23 @@ public struct SeriesEditorView: View {
                 .buttonStyle(.link)
                 .accessibilityIdentifier("editor-back")
             Text("›").foregroundStyle(.secondary)
-            Text(document.title).font(.title3.bold())
+            if renaming {
+                TextField("Name der Serie", text: $renameText)
+                    .textFieldStyle(.roundedBorder).frame(width: 260)
+                    .onSubmit { commitRename(document) }
+                    .onExitCommand { renaming = false }
+                    .accessibilityIdentifier("editor-title-field")
+                Button("OK") { commitRename(document) }.accessibilityIdentifier("editor-title-ok")
+            } else {
+                Text(document.title).font(.title3.bold()).lineLimit(1).accessibilityIdentifier("editor-title")
+                Button { renameText = document.title; renaming = true } label: { Image(systemName: "pencil") }
+                    .buttonStyle(.borderless).help("Serie umbenennen")
+                    .accessibilityLabel("Serie umbenennen").accessibilityIdentifier("editor-rename")
+            }
             Text("› Bearbeiten").foregroundStyle(.secondary)
-            Text("\(document.pages.count) Seiten · \(review.uncertainCount) unsicher · \(review.reviewedCount) geprüft")
-                .font(.callout).foregroundStyle(.secondary)
+            Text("\(document.pages.count) Seiten · \(review.uncertainCount) unsicher · \(review.reviewedCount) geprüft · "
+                 + "zuletzt bearbeitet \(Sidebar.dateText(document.lastModified))")
+                .font(.callout).foregroundStyle(.secondary).lineLimit(1)
                 .accessibilityIdentifier("editor-summary")
             Spacer()
             if review.needingAttention.count > 0 {
@@ -74,6 +90,10 @@ public struct SeriesEditorView: View {
                 .accessibilityIdentifier("editor-export")
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
+    private func commitRename(_ document: ScanDocument) {
+        if model.renameDocument(id: document.id, to: renameText) { renaming = false }
     }
 
     private func filterBar(_ document: ScanDocument, review: DocumentReview) -> some View {

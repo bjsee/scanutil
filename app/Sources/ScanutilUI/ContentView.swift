@@ -64,8 +64,8 @@ public struct ContentView: View {
         switch nav.route {
         case .capture: CaptureView(model: model, nav: nav)
         case .series: SeriesPage(model: model, nav: nav)
-        case .editor(let id): SeriesEditorView(model: model, documentID: id, nav: nav)
-        case .export(let id): ExportPage(model: model, documentID: id, nav: nav)
+        case .editor(let id): SeriesEditorView(model: model, documentID: id, nav: nav).id(id)   // anderer Serie, frischer Zustand
+        case .export(let id): ExportPage(model: model, documentID: id, nav: nav).id(id)
         case .log: LogPage(model: model)
         }
     }
@@ -611,7 +611,7 @@ struct SeriesPage: View {
                 }
                 Text("\(document.pages.contains { $0.region != .whole } ? "Buch" : "Einzelseiten") · "
                      + "\(document.pages.count) Seite\(document.pages.count == 1 ? "" : "n") · "
-                     + document.createdAt.formatted(.dateTime.day().month().year().hour().minute()))
+                     + "zuletzt bearbeitet " + Sidebar.dateText(document.lastModified))
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
