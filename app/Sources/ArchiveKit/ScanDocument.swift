@@ -25,9 +25,14 @@ public struct DocumentPage: Codable, Equatable, Identifiable, Sendable {
     /// Die Korrekturen (`Corrections.cacheKey`), die der Nutzer als geprüft markiert hat. Ändert sich danach etwas, stimmt der
     /// Schlüssel nicht mehr überein, und die Seite gilt wieder als ungeprüft.
     public var reviewedKey: String?
+    /// Zu welchem Dokument die Seite in der Schnellablage gehört. Ohne Angabe ist sie ein Dokument für sich;
+    /// Seiten mit derselben Kennung bilden zusammen ein Dokument (siehe `ScanDocument.groups`).
+    public var groupID: UUID?
 
     public init(id: UUID = UUID(), scanID: UUID, region: PageRegion = .whole,
-                corrections: Corrections = .none, label: String? = nil, analysis: PageAnalysis? = nil, reviewedKey: String? = nil) {
+                corrections: Corrections = .none, label: String? = nil, analysis: PageAnalysis? = nil, reviewedKey: String? = nil,
+                groupID: UUID? = nil) {
+        self.groupID = groupID
         self.id = id
         self.scanID = scanID
         self.region = region
@@ -68,20 +73,25 @@ public struct ScanDocument: Codable, Equatable, Identifiable, Sendable {
     public let createdAt: Date
     /// Wann zuletzt etwas am Dokument geändert wurde (Seite, Korrektur, Name). Ältere Dokumente kennen es nicht.
     public var modifiedAt: Date?
+    /// Gesetzt bei einer Schnellablage (lose Dokumente, jede Seite zunächst für sich) statt einer Serie.
+    public var inbox: InboxInfo?
     public var metadata: DocumentMetadata
     public var pages: [DocumentPage]
     /// Hochgezählt bei jeder Änderung.
     public var revision: Int
 
-    public init(id: UUID = UUID(), title: String, createdAt: Date = Date(),
+    public init(id: UUID = UUID(), title: String, createdAt: Date = Date(), inbox: InboxInfo? = nil,
                 metadata: DocumentMetadata = .init(), pages: [DocumentPage] = [], revision: Int = 0) {
         self.id = id
         self.title = title
         self.createdAt = createdAt.roundedToMilliseconds
+        self.inbox = inbox
         self.metadata = metadata
         self.pages = pages
         self.revision = revision
     }
+
+    public var isInbox: Bool { inbox != nil }
 
     /// Der Zeitpunkt der letzten Bearbeitung; ohne Angabe der Anlegezeitpunkt.
     public var lastModified: Date { modifiedAt ?? createdAt }

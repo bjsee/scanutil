@@ -56,7 +56,7 @@ public struct SeriesEditorView: View {
 
     private func header(_ document: ScanDocument, review: DocumentReview) -> some View {
         HStack {
-            Button { nav.back(fallback: .series) } label: { Label("Serien", systemImage: "chevron.left") }
+            Button { nav.back(fallback: document.isInbox ? .inbox : .series) } label: { Label(document.isInbox ? "Schnellablage" : "Serien", systemImage: "chevron.left") }
                 .buttonStyle(.link)
                 .accessibilityIdentifier("editor-back")
             Text("›").foregroundStyle(.secondary)
@@ -84,12 +84,39 @@ public struct SeriesEditorView: View {
                     .font(.caption).foregroundStyle(.orange)
                     .accessibilityIdentifier("editor-open-count")
             }
-            Button("PDF ausgeben …") { nav.go(.export(document.id)) }
-                .buttonStyle(.borderedProminent)
-                .disabled(document.pages.isEmpty)
-                .accessibilityIdentifier("editor-export")
+            if document.isInbox {
+                inboxFileButton(document)
+            } else {
+                Button("PDF ausgeben …") { nav.go(.export(document.id)) }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(document.pages.isEmpty)
+                    .accessibilityIdentifier("editor-export")
+            }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
+    /// „Dokument ablegen“ für die Schnellablage: schreibt alle Dokumente als PDF und geht zurück zur Seite Schnellablage.
+    @ViewBuilder
+    private func inboxFileButton(_ document: ScanDocument) -> some View {
+        if let progress = model.exportProgress {
+            ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1))).frame(width: 120)
+            Text("\(progress.done)/\(progress.total)").font(.caption.monospacedDigit()).accessibilityIdentifier("editor-file-progress")
+        } else {
+            if model.inboxDirectory == nil {
+                Button("Ordner einstellen …") { nav.go(.settings) }.buttonStyle(.link).accessibilityIdentifier("editor-to-settings")
+            }
+            let count = document.groups.count
+            Button(count == 1 ? "Dokument ablegen" : "\(count) Dokumente ablegen") {
+                Task {
+                    let urls = await model.fileInbox(documentID: document.id)
+                    if !urls.isEmpty { nav.go(.inbox) }
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(document.pages.isEmpty || model.inboxDirectory == nil)
+            .accessibilityIdentifier("editor-file-button")
+        }
     }
 
     private func commitRename(_ document: ScanDocument) {
@@ -122,6 +149,48 @@ public struct SeriesEditorView: View {
     // MARK: Raster
 
     private func grid(_ document: ScanDocument, visible: [DocumentPage], review: DocumentReview) -> some View {
+        if document.isInbox { return AnyView(inboxGrid(document, visible: visible, review: review)) }
+        return AnyView(seriesGrid(document, visible: visible, review: review))
+    }
+
+    /// Die Schnellablage: je Dokument eine Gruppe mit Namensfeld, Dateiname und den Seiten.
+    private func inboxGrid(_ document: ScanDocument, visible: [DocumentPage], review: DocumentReview) -> some View {
+        let visibleIDs = Set(visible.map(\.id))
+        return ScrollView {
+            if visible.isEmpty {
+                Text("Keine Seite passt zu diesem Filter.").foregroundStyle(.secondary).padding(40)
+                    .accessibilityIdentifier("editor-empty")
+            }
+            VStack(alignment: .leading, spacing: 18) {
+                ForEach(Array(document.groups.enumerated()), id: \.element.id) { index, group in
+                    let pages = group.pageIDs.compactMap { document.page(id: $0) }.filter { visibleIDs.contains($0.id) }
+                    if !pages.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            InboxGroupHeader(model: model, documentID: document.id, group: group, number: index + 1,
+                                             canMerge: index > 0, firstPageID: group.pageIDs[0])
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: cardHeight * 0.8, maximum: cardHeight * 1.2), spacing: 10)], spacing: 10) {
+                                ForEach(pages) { page in
+                                    let number = (document.pages.firstIndex { $0.id == page.id } ?? 0) + 1
+                                    PageCard(model: model, documentID: document.id, page: page, number: number,
+                                             review: review.pages[page.id], selected: editor.selectedPageID == page.id, height: cardHeight)
+                                        .onTapGesture { editor.selectedPageID = page.id }
+                                }
+                            }
+                        }
+                        .padding(10)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("inbox-group")
+                    }
+                }
+            }
+            .padding(12)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityIdentifier("editor-grid")
+    }
+
+    private func seriesGrid(_ document: ScanDocument, visible: [DocumentPage], review: DocumentReview) -> some View {
         ScrollView {
             if visible.isEmpty {
                 Text("Keine Seite passt zu diesem Filter.").foregroundStyle(.secondary).padding(40)
@@ -160,6 +229,11 @@ public struct SeriesEditorView: View {
                 findings(pageReview)
                 Divider()
                 tools(document, page: page)
+                if document.isInbox, let group = document.group(of: page.id), group.pageIDs.first != page.id {
+                    Button("Ab dieser Seite als eigenes Dokument") { model.splitInboxPage(documentID: document.id, pageID: page.id) }
+                        .help("Trennt diese und die folgenden Seiten vom Dokument ab")
+                        .accessibilityIdentifier("inbox-split-button")
+                }
                 Spacer()
                 HStack {
                     Button(pageReview.isReviewed ? "Geprüft zurücknehmen" : "Geprüft") {
@@ -287,6 +361,43 @@ struct PageCard: View {
         case "hinweis": Image(systemName: "info.circle.fill").foregroundStyle(.secondary)
         default: EmptyView()
         }
+    }
+}
+
+/// Kopf eines Dokuments in der Schnellablage: Nummer, Namensfeld, Dateiname und „mit dem vorigen zusammenfassen“.
+struct InboxGroupHeader: View {
+    let model: AppModel
+    let documentID: UUID
+    let group: PageGroup
+    let number: Int
+    let canMerge: Bool
+    let firstPageID: UUID
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("Dokument \(number)").font(.callout.bold())
+            Text("\(group.pageIDs.count) Seite\(group.pageIDs.count == 1 ? "" : "n")").font(.caption).foregroundStyle(.secondary)
+            TextField("Beschreibung, z. B. Tierarztpraxis", text: $text)
+                .textFieldStyle(.roundedBorder).frame(maxWidth: 300)
+                .focused($focused)
+                .onSubmit { model.renameInboxGroup(documentID: documentID, groupID: group.id, to: text) }
+                .onChange(of: focused) { if !focused { model.renameInboxGroup(documentID: documentID, groupID: group.id, to: text) } }
+                .accessibilityLabel("Beschreibung von Dokument \(number)")
+                .accessibilityIdentifier("inbox-name-field")
+            Text(model.inboxFileStem(documentID: documentID, group: group) + ".pdf")
+                .font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                .accessibilityIdentifier("inbox-file-name")
+            Spacer()
+            if canMerge {
+                Button("Mit vorigem zusammenfassen") { model.mergeInboxPage(documentID: documentID, pageID: firstPageID) }
+                    .help("Macht aus diesem und dem Dokument davor eines")
+                    .accessibilityIdentifier("inbox-merge-button")
+            }
+        }
+        .onAppear { text = model.latestDocument(id: documentID).flatMap { $0.name(of: group) } ?? "" }
+        .onChange(of: model.latestDocument(id: documentID)?.name(of: group)) { text = model.latestDocument(id: documentID)?.name(of: group) ?? "" }
     }
 }
 

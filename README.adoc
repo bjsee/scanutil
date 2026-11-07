@@ -64,6 +64,8 @@ Beim ersten Start fragt macOS nach dem Kamerazugriff.
 
 Die App ist *ein Fenster* mit einer Seitenleiste links, die Seiten wechseln wie in einer Web-App. Es gibt keine Zusatzfenster, Popovers, Sheets, Menüs oder Dialoge für den Alltag:
 
+* *Schnellablage:* lose Dokumente aufnehmen und als PDF ablegen (siehe unten).
+* *Einstellungen:* Ablageordner der Schnellablage, Auslöser-Taste, Namensvorschlag.
 * *Aufnahme:* Serienleiste, Vorschau, Scans, Auslöser. „Serie beginnen“ klappt als Formular unter der Leiste auf.
 * *Serien:* alle Serien, mit „Neue Serie“, *Ansehen*, *Fortsetzen*, *Bearbeiten* und je Zeile ⋯ (Streifen mit *Umbenennen*, *Als PDF …*, *Löschen …*). Rückfragen und Umbenennen stehen in der Zeile. Nach dem Löschen einer Serie (ohne Scans) bleibt unten 15 Sekunden *Rückgängig*.
 * *Serie bearbeiten* und *PDF ausgeben* sind Unterseiten der Serien mit Brotkrumen und „Zurück“. ⌘[ geht wie im Browser zurück.
@@ -209,6 +211,20 @@ Scheitert die Erkennung bei einer Seite, bleibt das PDF erhalten, die Seite steh
 Die Erkennung hängt hinter der Schnittstelle `TextRecognizer`; Tesseract für mehrspaltige Zeitungen und Fraktur wäre eine zweite Umsetzung.
 *Nicht gemessen:* Die Fehlerquote bei historischem Druck, Zeitungen und Fraktur (siehe `docs/spike-apple-vision.adoc`).
 
+=== Dokumenten-Schnellablage
+
+Für einzelne Dokumente (Briefe, Rechnungen, Vereinsunterlagen), die nicht in ein Buch gehören. Die Seite *Schnellablage* in der Seitenleiste startet sie.
+
+. *Aufnehmen:* Dokument unter den Scanner legen, auslösen, nächstes Dokument. Ausgelöst wird *von Hand*: mit dem Fußtaster, der Taste oder der Schaltfläche, nie automatisch. Ein Fußtaster sendet meist eine Taste: Unter *Einstellungen* → *Taste lernen* legt man fest, welche (Standard: Leertaste). Sie gilt auf der Seite Aufnahme.
+. *Fertig:* beendet die Aufnahme und öffnet dieselbe Bearbeitungsseite wie bei einer Serie (Ausrichtung und Zuschnitt sind vorab automatisch korrigiert, Unsicheres ist markiert).
+. *Dokumente:* Jede Aufnahme ist zunächst ein *eigenes Dokument*. Was zusammengehört, fasst man ausdrücklich zusammen (*Mit vorigem zusammenfassen*) und kann es mit *Ab dieser Seite als eigenes Dokument* wieder trennen. Je Dokument gibt es ein Feld für die Beschreibung und darunter den Dateinamen.
+. *Ablegen:* *Dokument ablegen* (oder *n Dokumente ablegen*) schreibt je Dokument ein PDF *mit Texterkennung* in den Ablageordner. Danach ist die Schnellablage erledigt; die Originale bleiben im Archiv.
+
+*Dateiname:* `JJMM Beschreibung.pdf`, etwa `2611 Tierarztpraxis.pdf`. Jahr und Monat kommen vom Aufnahmedatum der ersten Seite. Ein vorhandenes PDF wird nie überschrieben (`… 2.pdf`), ohne Beschreibung heißt das Dokument `JJMM Dokument.pdf`.
+*Namensvorschlag:* Nach „Fertig“ liest die App den Text der ersten Seite jedes Dokuments. Mit Apple Intelligence auf dem Mac (Framework FoundationModels, der Text verlässt den Rechner nicht) kommt daraus eine Beschreibung von höchstens vier Wörtern; ist sie nicht verfügbar oder ausgeschaltet, nimmt die App die erste Zeile, die nach einem Namen aussieht. Ein selbst eingetragener Name bleibt immer.
+*Noch nicht gemessen:* Wie gut der Vorschlag an echten Briefen und Rechnungen ist. Die KI-Anbindung ist nur an dem Rechner geprüft, an dem sie gebaut wurde; die Tests laufen ohne sie.
+Eine noch nicht abgelegte Schnellablage bleibt auf der Seite Schnellablage stehen (*Bearbeiten und ablegen*, *Verwerfen …*) und erscheint nicht unter den Serien.
+
 == Tests
 
 `swift test` im Ordner `app/` führt alle Tests ohne Scanner aus.
@@ -251,7 +267,7 @@ Der Regler wird über „Erhöhen“ und „Verringern“ eingestellt, weil sein
 `document-hands` liefert eine Seite mit Daumen und einem Finger im Bild.
 `document-still` hat eine stehende Vorschau: die Auto-Auslösung sieht Ruhe und löst nach etwa 0,8 Sekunden von selbst aus, die anderen Modi flimmern und lösen nie aus.
 `SCANUTIL_NO_SOUND` macht die App stumm und lässt ihre Einstellungen unberührt (die Tests setzen es).
-`SCANUTIL_EXPORT_DIR` setzt den Ordner für das PDF, damit die Tests nicht in Ihre Ordner schreiben.
+`SCANUTIL_EXPORT_DIR` setzt den Ordner für das PDF, `SCANUTIL_INBOX_DIR` den Ablageordner der Schnellablage, damit die Tests nicht in Ihre Ordner schreiben. Text trägt der Testtreiber über die Bedienungshilfen ein (Wert des Feldes setzen), nicht über Tastenereignisse.
 Ein Rechner, auf dem gearbeitet wird, ist während des Laufs trotzdem belastet (Bild- und PDF-Berechnung).
 Nach Änderungen an der App zuerst `scripts/bundle.sh`: die Tests starten das gebaute Bundle, nicht den Quelltext. `scripts/ui-tests.sh` tut das selbst.
 

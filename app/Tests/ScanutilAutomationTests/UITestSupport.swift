@@ -6,8 +6,11 @@ struct UISession {
     let dir: URL
     /// Ordner, in dem der Speicherdialog des Exports öffnet.
     let exportDir: URL
+    /// Ablageordner der Schnellablage.
+    let inboxDir: URL
 
     func close() {
+        try? FileManager.default.removeItem(at: inboxDir)
         app.terminate()
         try? FileManager.default.removeItem(at: dir)
         try? FileManager.default.removeItem(at: exportDir)
@@ -29,6 +32,12 @@ struct UISession {
     var documentFiles: [URL] { files("documents", ext: "json") }
     var pdfs: [URL] {
         ((try? FileManager.default.contentsOfDirectory(at: exportDir, includingPropertiesForKeys: nil)) ?? []).filter { $0.pathExtension == "pdf" }
+    }
+
+    /// Die PDFs, die die Schnellablage abgelegt hat, nach Namen sortiert.
+    var inboxPDFs: [URL] {
+        (((try? FileManager.default.contentsOfDirectory(at: inboxDir, includingPropertiesForKeys: nil)) ?? []).filter { $0.pathExtension == "pdf" })
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
     /// Das gespeicherte Dokument der Serie als JSON, oder `nil`.
@@ -67,9 +76,10 @@ struct UISession {
         let base = FileManager.default.temporaryDirectory
         let dir = base.appendingPathComponent("scanutil-ui-\(UUID().uuidString)")
         let exportDir = base.appendingPathComponent("scanutil-ui-export-\(UUID().uuidString)")
+        let inboxDir = base.appendingPathComponent("scanutil-ui-inbox-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: exportDir, withIntermediateDirectories: true)
-        let app = try AppDriver(mode: mode, archive: dir, environment: ["SCANUTIL_EXPORT_DIR": exportDir.path])
-        return UISession(app: app, dir: dir, exportDir: exportDir)
+        let app = try AppDriver(mode: mode, archive: dir, environment: ["SCANUTIL_EXPORT_DIR": exportDir.path, "SCANUTIL_INBOX_DIR": inboxDir.path])
+        return UISession(app: app, dir: dir, exportDir: exportDir, inboxDir: inboxDir)
     }
 }
 
