@@ -83,7 +83,7 @@ public final class AppModel {
     public private(set) var device: DeviceInfo?
     public private(set) var previewImage: CGImage?
     public private(set) var scans: [ScanItem] = []
-    public private(set) var message: String?
+    public internal(set) var message: String?
     /// Alle Meldungen dieser Sitzung, neueste zuerst. Anders als `message` bleiben sie stehen.
     public private(set) var log: [LogEntry] = []
     /// Warnungen und Fehler seit dem letzten Öffnen des Protokolls.
@@ -95,10 +95,12 @@ public final class AppModel {
     /// Das Dokument der laufenden Serie, sonst `nil`. Jede Aufnahme der Serie wird als Seite angehängt und sofort gespeichert.
     public private(set) var series: ScanDocument?
     /// Das Dokument, das gerade angesehen wird, wenn keine Serie läuft. Es bestimmt, welche Seiten die Scans der Miniaturleiste haben.
-    public private(set) var openedDocument: ScanDocument?
+    public internal(set) var openedDocument: ScanDocument?
     /// Das Dokument, dessen Seiten angezeigt und bearbeitet werden: die laufende Serie, sonst das geöffnete Dokument.
     public var shownDocument: ScanDocument? { series ?? openedDocument }
     public var isSeriesActive: Bool { series != nil }
+    /// Läuft gerade eine Schnellablage (und keine Serie)?
+    public var isInboxActive: Bool { series?.isInbox == true }
     /// Wie lange das Bild ruhig sein muss, bis ausgelöst wird, für den Fortschrittsbalken.
     public var seriesCalmDuration: TimeInterval { trigger.configuration.calmDuration }
     /// Zustand der Auto-Auslösung für die Anzeige (Ruhe-Fortschritt).
@@ -109,15 +111,35 @@ public final class AppModel {
     public var soundEnabled: Bool {
         didSet { defaults?.set(soundEnabled, forKey: Self.soundKey) }
     }
+    // MARK: Einstellungen der Schnellablage
+
+    static let inboxDirectoryKey = "inboxDirectory", triggerKeyKey = "triggerKeyCode", aiNamingKey = "aiNamingEnabled"
+    /// Wohin die Schnellablage ihre PDFs schreibt. Ohne Ordner lässt sich nichts ablegen.
+    public var inboxDirectory: URL? {
+        didSet { defaults?.set(inboxDirectory?.path, forKey: Self.inboxDirectoryKey) }
+    }
+    /// Die Taste, die eine Aufnahme auslöst (Fußtaster): ein Tastaturcode, standardmäßig die Leertaste (49).
+    public var triggerKeyCode: UInt16 {
+        didSet { defaults?.set(Int(triggerKeyCode), forKey: Self.triggerKeyKey) }
+    }
+    /// Ob der Name der Dokumente von der KI auf dem Mac vorgeschlagen wird (sonst nach einer einfachen Regel).
+    public var aiNamingEnabled: Bool {
+        didSet { defaults?.set(aiNamingEnabled, forKey: Self.aiNamingKey) }
+    }
+    /// Die PDFs, die die Schnellablage zuletzt abgelegt hat, für „Im Finder zeigen“.
+    public internal(set) var filedURLs: [URL] = []
+    /// Ob gerade Namen vorgeschlagen werden.
+    public internal(set) var isSuggestingNames = false
+
     /// Ob die Serie Doppelseiten aufnimmt: jede Aufnahme ergibt eine linke und eine rechte Seite.
     public private(set) var seriesIsBook = false
     /// Verkleinerte Ansicht jeder Buchseite mit ihren Korrekturen, nach Seiten-ID.
     public private(set) var pagePreviews: [UUID: CGImage] = [:]
     /// Alle gespeicherten Dokumente (Serien) des Archivs, neueste zuerst. Auch eine beendete Serie bleibt hier erhalten
     /// und lässt sich exportieren.
-    public private(set) var savedDocuments: [ScanDocument] = []
+    public internal(set) var savedDocuments: [ScanDocument] = []
     /// Fortschritt des laufenden PDF-Exports (fertige Seiten, alle Seiten), sonst `nil`.
-    public private(set) var exportProgress: (done: Int, total: Int)?
+    public internal(set) var exportProgress: (done: Int, total: Int)?
     /// Ort des zuletzt geschriebenen PDFs, für „Im Finder zeigen“.
     public private(set) var lastExportURL: URL?
     public private(set) var lastExportReport: ExportReport?
@@ -131,21 +153,22 @@ public final class AppModel {
     public var selectedItem: ScanItem? { scans.first { $0.id == selectedID } }
 
     private let scanner: any ScannerPort
-    private let store: ArchiveStore
-    private let thumbnailSize: Int
+    let store: ArchiveStore
+    let thumbnailSize: Int
     private let analyze: @Sendable (CGImage) -> AnalysisResult
     private let analyzeBook: @Sendable (CGImage) -> BookAnalysisResult
-    private let recognizer: any TextRecognizer
+    let recognizer: any TextRecognizer
+    let describer: any DescriptionSuggesting
     private var session: (any ScanSession)?
     private var previewTask: Task<Void, Never>?
     private var searchTask: Task<Void, Never>?
     private let retryInterval: Duration?
     private let sound: any CaptureSound
-    private let defaults: UserDefaults?
+    let defaults: UserDefaults?
     /// Wie gelöschte Scans entsorgt werden. Das Modell ist von sich aus endgültig und damit für Tests sicher: Erst die App
     /// übergibt den Papierkorb.
     private let scanDisposal: ScanDisposal
-    private static let soundKey = "captureSoundEnabled"
+    static let soundKey = "captureSoundEnabled"
     /// Aus nach `disconnect()`: ein Versuch, der erst danach scheitert, darf die Suche nicht neu starten.
     private var searchAllowed = true
     /// Beobachtet die laufende Sitzung auf Verlust der Verbindung. `sessionGeneration` trennt alte von neuen Sitzungen.
@@ -164,6 +187,7 @@ public final class AppModel {
         analyze: @escaping @Sendable (CGImage) -> AnalysisResult = AppModel.defaultAnalysis,
         analyzeBook: @escaping @Sendable (CGImage) -> BookAnalysisResult = AppModel.defaultBookAnalysis,
         recognizer: any TextRecognizer = VisionTextRecognizer(),
+        describer: any DescriptionSuggesting = NoDescriber(),
         retryInterval: Duration? = .seconds(2),
         sound: any CaptureSound = SilentSound(),
         defaults: UserDefaults? = nil,
@@ -181,6 +205,10 @@ public final class AppModel {
         self.analyze = analyze
         self.analyzeBook = analyzeBook
         self.recognizer = recognizer
+        self.describer = describer
+        inboxDirectory = defaults?.string(forKey: Self.inboxDirectoryKey).map { URL(fileURLWithPath: $0, isDirectory: true) }
+        triggerKeyCode = UInt16(defaults?.integer(forKey: Self.triggerKeyKey) ?? 0).nonZero ?? 49
+        aiNamingEnabled = defaults?.object(forKey: Self.aiNamingKey) as? Bool ?? true
     }
 
     /// Standardanalyse: Dokument erkennen, Winkel messen, sichere Ergebnisse anwenden.
@@ -415,10 +443,11 @@ public final class AppModel {
 
     /// Beginnt eine Serie: ein neues, sofort gespeichertes Dokument, dem jede Aufnahme als Seite angehängt wird.
     /// Mit `book` ergibt jede Aufnahme zwei Seiten (links und rechts), geteilt am erkannten Falz.
-    public func startSeries(title: String, book: Bool = false) {
+    public func startSeries(title: String, book: Bool = false, inbox: Bool = false) {
         guard status == .ready, series == nil else { return }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let document = ScanDocument(title: trimmed.isEmpty ? Self.defaultSeriesTitle() : trimmed)
+        let document = ScanDocument(title: trimmed.isEmpty ? (inbox ? Self.defaultInboxTitle() : Self.defaultSeriesTitle()) : trimmed,
+                                    inbox: inbox ? InboxInfo() : nil)
         do {
             try store.saveDocument(document)
             // Wurde gerade eine andere Serie angesehen, zeigt die Miniaturleiste deren Scans: die neue Serie beginnt leer.
@@ -431,7 +460,7 @@ public final class AppModel {
             trigger = AutoTrigger()
             seriesPhase = trigger.phase
             message = nil
-            post(.info, "Serie „\(document.title)“ begonnen" + (book ? " (Doppelseiten)." : "."))
+            post(.info, (inbox ? "Schnellablage „" : "Serie „") + document.title + "“ begonnen" + (book ? " (Doppelseiten)." : "."))
         } catch {
             post(.error, "Die Serie konnte nicht begonnen werden: \(error.localizedDescription)")
         }
@@ -444,6 +473,11 @@ public final class AppModel {
         series = nil
         seriesIsBook = false
         seriesPhase = .waitingForMotion
+    }
+
+    /// Der Titel einer neuen Schnellablage.
+    public static func defaultInboxTitle(now: Date = Date()) -> String {
+        "Schnellablage " + now.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
     }
 
     /// Ein Name für eine neue Serie, wenn der Nutzer keinen vergibt: das Datum mit Uhrzeit.
@@ -624,7 +658,8 @@ public final class AppModel {
     /// Meldet der Auto-Auslösung ein Vorschaubild. Löst eine Aufnahme aus, wenn die Seite gewechselt hat und Ruhe herrscht.
     func processSeriesFrame(_ signature: FrameSignature, at time: TimeInterval) async {
         lastSignature = signature
-        guard series != nil, autoTriggerEnabled, status == .ready else { return }
+        // In der Schnellablage löst nur der Nutzer aus (Fußtaster, Taste, Schaltfläche).
+        guard series != nil, !isInboxActive, autoTriggerEnabled, status == .ready else { return }
         let event = trigger.feed(signature, at: time)
         seriesPhase = trigger.phase
         switch event {
@@ -724,7 +759,7 @@ public final class AppModel {
     }
 
     /// Speichert ein Dokument und hält die Anzeige aktuell: die laufende Serie, das geöffnete Dokument und die Liste.
-    private func commit(_ edited: ScanDocument) {
+    func commit(_ edited: ScanDocument) {
         var document = edited
         document.touch()
         do {

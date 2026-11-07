@@ -9,6 +9,8 @@ public enum AppRoute: Hashable, Sendable {
     case series
     case editor(UUID)
     case export(UUID)
+    case inbox
+    case settings
     case log
 
     /// Der Eintrag der Seitenleiste, zu dem die Seite gehört: der Editor ist eine Unterseite der Serien.
@@ -62,8 +64,11 @@ struct Sidebar: View {
             Text("Chronik-Scanner").font(.headline).padding(.horizontal, 10).padding(.top, 6).padding(.bottom, 14)
             item("Aufnahme", symbol: "camera.aperture", route: .capture, identifier: "nav-capture")
             HStack(spacing: 2) {
-                item("Serien", symbol: "books.vertical", route: .series, identifier: "series-list-button",
-                     badge: "\(model.savedDocuments.count)", value: "\(model.savedDocuments.count)")
+                item("Schnellablage", symbol: "tray.and.arrow.down", route: .inbox, identifier: "nav-inbox",
+                 badge: model.isInboxActive ? "läuft" : (model.openInboxes.isEmpty ? nil : "\(model.openInboxes.count)"),
+                 value: model.isInboxActive ? "läuft" : "\(model.openInboxes.count) offen")
+            item("Serien", symbol: "books.vertical", route: .series, identifier: "series-list-button",
+                     badge: "\(model.seriesDocuments.count)", value: "\(model.seriesDocuments.count)")
                 Button { seriesExpanded.toggle() } label: {
                     Image(systemName: seriesExpanded ? "chevron.down" : "chevron.right").frame(width: 22, height: 30).contentShape(Rectangle())
                 }
@@ -78,6 +83,7 @@ struct Sidebar: View {
                  badge: model.unseenIssues > 0 ? "\(min(model.unseenIssues, 99))" : nil, badgeIsWarning: true,
                  value: "\(model.unseenIssues) neu, \(model.log.count) insgesamt")
             Spacer()
+            item("Einstellungen", symbol: "gearshape", route: .settings, identifier: "nav-settings")
             Divider()
             status
         }
@@ -92,10 +98,10 @@ struct Sidebar: View {
     private var seriesList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 1) {
-                if model.savedDocuments.isEmpty {
+                if model.seriesDocuments.isEmpty {
                     Text("Noch keine Serie").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.vertical, 4)
                 }
-                ForEach(model.savedDocuments) { document in seriesRow(document) }
+                ForEach(model.seriesDocuments) { document in seriesRow(document) }
             }
         }
         .frame(maxHeight: 300)

@@ -221,6 +221,13 @@ final class AppDriver {
         guard let field = element(identifier) else { return false }
         _ = AXUIElementSetAttributeValue(field, kAXFocusedAttribute as CFString, kCFBooleanTrue)
         Thread.sleep(forTimeInterval: 0.2)
+        // Erst über die Bedienungshilfen: Der Text wird an den vorhandenen angehängt, ganz ohne Tastenereignisse. Das ist stabiler
+        // (Tastenereignisse mit Zeichen kommen je nach Rechnerzustand nicht an) und fasst die Tastatur des Nutzers nicht an.
+        let before = Self.string(field, kAXValueAttribute) ?? ""
+        if AXUIElementSetAttributeValue(field, kAXValueAttribute as CFString, (before + text) as CFString) == .success {
+            Thread.sleep(forTimeInterval: 0.2)
+            if let now = element(identifier).flatMap({ Self.string($0, kAXValueAttribute) }), now == before + text { return true }
+        }
         let source = CGEventSource(stateID: .hidSystemState)
         for character in text {
             for down in [true, false] {
@@ -245,10 +252,14 @@ final class AppDriver {
     /// Leertaste an genau diesen Prozess, ohne die App nach vorn zu holen: Das Tastenereignis geht über `postToPid` direkt
     /// an die App, auch wenn sie im Hintergrund läuft. Gibt `true` zurück, sobald das Ereignis abgeschickt ist.
     @discardableResult
-    func pressSpace() -> Bool {
+    func pressSpace() -> Bool { pressKey(49) }
+
+    /// Eine beliebige Taste (Tastaturcode), wie ein Fußtaster sie sendet, auf demselben Weg wie `pressSpace`.
+    @discardableResult
+    func pressKey(_ code: CGKeyCode) -> Bool {
         let source = CGEventSource(stateID: .hidSystemState)
         for down in [true, false] {
-            let event = CGEvent(keyboardEventSource: source, virtualKey: 49, keyDown: down)
+            let event = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: down)
             event?.flags = []
             event?.postToPid(pid)
             Thread.sleep(forTimeInterval: 0.05)

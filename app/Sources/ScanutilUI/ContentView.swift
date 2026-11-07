@@ -29,7 +29,7 @@ public struct ContentView: View {
         // Die Leertaste löst den Scan aus, aber nur auf der Seite Aufnahme: In der Serienliste soll sie nichts tun.
         // Als Tastenkürzel der Schaltfläche kommt sie nicht an, weil das Fokussystem eine Taste ohne Modifikator abfängt,
         // deshalb ein Monitor auf AppKit-Ebene.
-        .onAppear { keyMonitor.start { if nav.route == .capture { Task { await model.scan() } } } }
+        .onAppear { keyMonitor.start(keyCode: { model.triggerKeyCode }) { if nav.route == .capture { Task { await model.scan() } } } }
         .onDisappear { keyMonitor.stop() }
         .task {
             await model.loadArchive()
@@ -66,6 +66,8 @@ public struct ContentView: View {
         case .series: SeriesPage(model: model, nav: nav)
         case .editor(let id): SeriesEditorView(model: model, documentID: id, nav: nav).id(id)   // anderer Serie, frischer Zustand
         case .export(let id): ExportPage(model: model, documentID: id, nav: nav).id(id)
+        case .inbox: InboxPage(model: model, nav: nav)
+        case .settings: SettingsPage(model: model)
         case .log: LogPage(model: model)
         }
     }
@@ -319,7 +321,19 @@ struct SeriesBar: View {
 
     private var bar: some View {
         HStack(spacing: 12) {
-            if let series = model.series {
+            if model.isInboxActive, let inbox = model.series {
+                Label(inbox.title, systemImage: "tray.and.arrow.down").font(.callout.bold()).lineLimit(1)
+                Text(pageCountText(inbox.pages.count)).font(.callout.monospacedDigit())
+                    .accessibilityIdentifier("series-page-count")
+                Text("Auslösen: fester Fußtaster oder Taste „\(TriggerKey.name(model.triggerKeyCode))“, auch die Schaltfläche unten")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Spacer()
+                Button("Fertig") { Task { if let id = await model.finishInbox() { nav.go(.editor(id)) } } }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(inbox.pages.isEmpty)
+                    .help("Beendet die Aufnahme: Dann lassen sich die Dokumente prüfen, benennen und ablegen")
+                    .accessibilityIdentifier("inbox-finish-button")
+            } else if let series = model.series {
                 Label("\(series.title)" + (model.seriesIsBook ? " · Buch" : ""), systemImage: "books.vertical")
                     .font(.callout.bold())
                     .lineLimit(1)
@@ -345,7 +359,7 @@ struct SeriesBar: View {
             } else {
                 Button {
                     // Gibt es schon Serien, fragt ein Dialog: neu beginnen oder in einer fortsetzen. Sonst geht es sofort los.
-                    if model.savedDocuments.isEmpty {
+                    if model.seriesDocuments.isEmpty {
                         model.startSeries(title: Self.defaultTitle(), book: bookMode)
                     } else {
                         showStartSheet = true
@@ -427,13 +441,13 @@ struct StartSeriesSheet: View {
         self.started = started
         self.done = done
         _book = State(initialValue: initialBook)
-        _resumeID = State(initialValue: model.savedDocuments.first?.id)
+        _resumeID = State(initialValue: model.seriesDocuments.first?.id)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Serie beginnen").font(.headline)
-            Text("Es gibt schon \(model.savedDocuments.count) Serie\(model.savedDocuments.count == 1 ? "" : "n"). Neu beginnen oder in einer fortsetzen?")
+            Text("Es gibt schon \(model.seriesDocuments.count) Serie\(model.seriesDocuments.count == 1 ? "" : "n"). Neu beginnen oder in einer fortsetzen?")
                 .font(.callout).foregroundStyle(.secondary)
             Picker("", selection: $mode) {
                 Text("Neue Serie").tag(Mode.new)
@@ -452,7 +466,7 @@ struct StartSeriesSheet: View {
                     .accessibilityIdentifier("sheet-book-toggle")
             case .resume:
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(model.savedDocuments.prefix(8)) { document in
+                    ForEach(model.seriesDocuments.prefix(8)) { document in
                         Button { resumeID = document.id } label: {
                             HStack {
                                 Image(systemName: resumeID == document.id ? "largecircle.fill.circle" : "circle")
@@ -468,7 +482,7 @@ struct StartSeriesSheet: View {
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("resume-picker")
-                if let chosen = model.savedDocuments.first(where: { $0.id == resumeID }) {
+                if let chosen = model.seriesDocuments.first(where: { $0.id == resumeID }) {
                     Text("Neue Aufnahmen kommen ans Ende von „\(chosen.title)“, als " + (chosen.pages.contains { $0.region != .whole } ? "Doppelseiten." : "Einzelseiten."))
                         .font(.caption).foregroundStyle(.secondary)
                         .accessibilityIdentifier("resume-note")
@@ -531,7 +545,7 @@ struct SeriesPage: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 Text("Serien").font(.title3.bold())
-                Text("\(model.savedDocuments.count)").font(.callout).foregroundStyle(.secondary)
+                Text("\(model.seriesDocuments.count)").font(.callout).foregroundStyle(.secondary)
                 Spacer()
                 Button("Neue Serie") { showStart.toggle() }
                     .buttonStyle(.borderedProminent)
@@ -546,12 +560,12 @@ struct SeriesPage: View {
                     .padding(20)
                 Divider()
             }
-            if model.savedDocuments.isEmpty {
+            if model.seriesDocuments.isEmpty {
                 Text("Noch keine Serie.").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(model.savedDocuments) { document in
+                        ForEach(model.seriesDocuments) { document in
                             row(document)
                             if expanded == document.id { actions(document) }
                             if let pending = deleting, pending.document.id == document.id { confirmation(pending) }
@@ -953,10 +967,12 @@ struct ScanDetailView: View {
 final class SpaceKeyMonitor {
     private var token: Any?
 
-    func start(_ action: @escaping @MainActor () -> Void) {
+    /// - Parameter keyCode: die Taste, die auslöst (Fußtaster): standardmäßig die Leertaste, in den Einstellungen änderbar.
+    func start(keyCode: @escaping () -> UInt16 = { 49 }, _ action: @escaping @MainActor () -> Void) {
         guard token == nil else { return }
         token = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            let isSpace = event.keyCode == 49 && event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty
+            // F-Tasten und Pfeile tragen von Haus aus die Flags „Funktion“ und „Ziffernblock“: Nur echte Zusatztasten zählen.
+            let isSpace = event.keyCode == keyCode() && event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty
             guard isSpace, !event.isARepeat else { return event }
             if NSApp.keyWindow?.firstResponder is NSTextView { return event }
             action()

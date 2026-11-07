@@ -46,14 +46,19 @@ struct ScanutilApp: App {
         let scanner = Self.makeScanner(ProcessInfo.processInfo.environment["SCANUTIL_MOCK"])
         // Die Oberflächentests laufen stumm und lassen die Einstellungen des Nutzers unberührt.
         let silent = ProcessInfo.processInfo.environment["SCANUTIL_NO_SOUND"] != nil
-        _model = State(initialValue: AppModel(
+        let appModel = AppModel(
             scanner: scanner, store: ArchiveStore(root: URL(fileURLWithPath: path, isDirectory: true)),
             // Das Modell ist von sich aus stumm und speichert nichts: erst die App schaltet Ton und Einstellung ein.
+            // Die KI auf dem Mac schlägt Namen vor; die Oberflächentests laufen ohne sie, damit ihr Ergebnis nicht vom Rechner abhängt.
+            describer: silent ? NoDescriber() : AppleIntelligenceDescriber(),
             sound: silent ? SilentSound() : BeepSound(), defaults: silent ? nil : .standard,
             // Gelöschte Scans kommen in den Papierkorb und lassen sich zurücklegen. Die Oberflächentests löschen endgültig,
             // sonst landeten ihre Scans im Papierkorb des Entwicklers.
             scanDisposal: ProcessInfo.processInfo.environment["SCANUTIL_NO_TRASH"] != nil ? .permanent : .trash
-        ))
+        )
+        // Für die Oberflächentests: der Ablageordner der Schnellablage.
+        if let dir = ProcessInfo.processInfo.environment["SCANUTIL_INBOX_DIR"] { appModel.inboxDirectory = URL(fileURLWithPath: dir, isDirectory: true) }
+        _model = State(initialValue: appModel)
     }
 
     /// `SCANUTIL_MOCK`: nicht gesetzt = echter Scanner, `document` = schiefe Textseite, `document-still` = dieselbe Seite mit
