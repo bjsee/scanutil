@@ -40,8 +40,8 @@ struct ExportTargetTests {
         #expect(ExportTarget.url(directory: dir, title: "Chronik.pdf").lastPathComponent == "Chronik 3.pdf", "Auch mit Endung")
     }
 
-    @Test func theDefaultFolderIsDocumentsScanutilUnlessTheEnvironmentSaysOtherwise() {
-        #expect(ExportTarget.defaultDirectory(environment: [:]).path.hasSuffix("/Documents/Scanutil"))
+    @Test func theDefaultFolderIsDocumentsChronikScannerUnlessTheEnvironmentSaysOtherwise() {
+        #expect(ExportTarget.defaultDirectory(environment: [:]).path.hasSuffix("/Documents/Chronik-Scanner"))
         #expect(ExportTarget.defaultDirectory(environment: ["SCANUTIL_EXPORT_DIR": "/tmp/x"]).path == "/tmp/x")
     }
 }

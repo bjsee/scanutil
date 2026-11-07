@@ -14,7 +14,7 @@ final class AppDriver {
     /// wird nie nach vorn geholt. Der Rechner des Entwicklers bleibt während der Tests benutzbar.
     static func bundleURL(file: String = #filePath) -> URL {
         URL(fileURLWithPath: file).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("build/Scanutil.app")
+            .appendingPathComponent("build/Chronik-Scanner.app")
     }
 
     init(mode: String, archive: URL, environment extra: [String: String] = [:]) throws {

@@ -5,12 +5,12 @@ import SwiftUI
 
 /// Wohin ein PDF geschrieben wird: Ordner, Dateiname, und nie über eine vorhandene Datei.
 public enum ExportTarget {
-    /// Der Standardordner: `Dokumente/Scanutil`. Für die Oberflächentests ersetzt `SCANUTIL_EXPORT_DIR` ihn.
+    /// Der Standardordner: `Dokumente/Chronik-Scanner`. Für die Oberflächentests ersetzt `SCANUTIL_EXPORT_DIR` ihn.
     public static func defaultDirectory(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
         if let dir = environment["SCANUTIL_EXPORT_DIR"] { return URL(fileURLWithPath: dir, isDirectory: true) }
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser
-        return documents.appendingPathComponent("Scanutil", isDirectory: true)
+        return documents.appendingPathComponent("Chronik-Scanner", isDirectory: true)
     }
 
     /// Ein brauchbarer Dateiname aus dem Titel: ohne Pfadtrenner und Doppelpunkt, nie leer, mit Endung `.pdf` (genau einmal).
