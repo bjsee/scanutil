@@ -77,7 +77,7 @@ struct SchnellablageOberflaechenTests {
         let s = try launch(); defer { s.close() }
         #expect(s.app.press("nav-settings"))
         #expect(s.app.wait { s.app.element("settings-page") != nil })
-        #expect(s.app.elements("target-row").count == 2, "Zielordner in den Einstellungen: \(s.app.elements("target-row").count)")
+        #expect(s.app.string("settings-target-count")?.hasPrefix("2") == true, "Zielordner: \(s.app.string("settings-target-count") ?? "-")")
         #expect(s.app.string("settings-trigger-key") == "Leertaste")
         #expect(s.app.press("settings-trigger-learn"))
         #expect(s.app.wait { s.app.string("settings-trigger-key") == "Drücke jetzt die Taste …" })
@@ -208,10 +208,11 @@ struct SchnellablageOberflaechenTests {
         #expect(s.inboxPDFs.isEmpty, "Es darf nicht auch in Privat liegen")
     }
 
-    @Test func theSettingsListTheTargetsAndMoveAndRemoveThem() throws {
+    @Test func theInboxPageListsTheTargetsAndMovesAndRemovesThem() throws {
         let s = try launch(); defer { s.close() }
-        #expect(s.app.press("nav-settings"))
-        #expect(s.app.wait { s.app.elements("target-row").count == 2 })
+        #expect(s.app.press("nav-inbox"))
+        #expect(s.app.wait { s.app.elements("target-row").count == 2 }, "Die Zielordner stehen auf der Seite Schnellablage")
+        #expect(s.app.element("inbox-target-add") != nil, "Ordner lassen sich dort hinzufügen")
         func paths() -> [String] { s.app.elements("target-path").map { AppDriver.string($0, kAXValueAttribute) ?? "" } }
         #expect(paths()[0].contains("scanutil-ui-inbox-") && paths()[1].contains("scanutil-ui-inbox2-"))
         // Erste Zeile: „nach oben“ gesperrt, letzte: „nach unten“ gesperrt.
@@ -228,8 +229,14 @@ struct SchnellablageOberflaechenTests {
         #expect(paths().first?.contains("scanutil-ui-inbox-") == true, "Übrig bleibt Privat: \(paths())")
         // Letztes entfernen: Hinweis, und die Schnellablage warnt.
         #expect(AXUIElementPerformAction(s.app.elements("target-remove")[0], kAXPressAction as CFString) == .success)
-        #expect(s.app.wait { s.app.element("settings-no-target") != nil })
+        #expect(s.app.wait { s.app.element("inbox-no-target") != nil }, "Ohne Ziel steht ein Hinweis da")
+        #expect(s.app.wait { s.app.element("inbox-no-target-hint") != nil })
+    }
+
+    @Test func theInboxPageOffersADropZoneAndAFileChooser() throws {
+        let s = try launch(); defer { s.close() }
         #expect(s.app.press("nav-inbox"))
-        #expect(s.app.wait { s.app.element("inbox-to-settings") != nil }, "Ohne Ziel verweist die Seite auf die Einstellungen")
+        #expect(s.app.wait { s.app.element("inbox-drop-zone") != nil }, "Keine Fläche zum Ablegen von Dateien")
+        #expect(s.app.element("inbox-import-button") != nil, "Kein Weg über die Dateiauswahl")
     }
 }
