@@ -153,6 +153,8 @@ public final class AppModel {
     }
     /// Die PDFs, die die Schnellablage zuletzt abgelegt hat, für „Im Finder zeigen“.
     public internal(set) var filedURLs: [URL] = []
+    /// Ob gerade Dateien in die Schnellablage übernommen werden.
+    public internal(set) var isImporting = false
     /// Ob gerade Namen vorgeschlagen werden.
     public internal(set) var isSuggestingNames = false
 
@@ -802,7 +804,7 @@ public final class AppModel {
     }
 
     /// Hält die Liste der gespeicherten Dokumente aktuell, wenn die laufende Serie gespeichert wird.
-    private func updateSavedDocuments(with document: ScanDocument) {
+    func updateSavedDocuments(with document: ScanDocument) {
         savedDocuments.removeAll { $0.id == document.id }
         savedDocuments.insert(document, at: 0)
         savedDocuments.sort { $0.createdAt > $1.createdAt }

@@ -104,7 +104,7 @@ public struct SeriesEditorView: View {
             Text("\(progress.done)/\(progress.total)").font(.caption.monospacedDigit()).accessibilityIdentifier("editor-file-progress")
         } else {
             if model.inboxTargets.items.isEmpty {
-                Button("Ordner einstellen …") { nav.go(.settings) }.buttonStyle(.link).accessibilityIdentifier("editor-to-settings")
+                Button("Zielordner anlegen …") { nav.go(.inbox) }.buttonStyle(.link).accessibilityIdentifier("editor-to-targets")
             }
             let count = document.groups.count
             Button(count == 1 ? "Dokument ablegen" : "\(count) Dokumente ablegen") {

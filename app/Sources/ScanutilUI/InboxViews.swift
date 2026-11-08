@@ -29,6 +29,7 @@ struct InboxPage: View {
     @Bindable var model: AppModel
     let nav: Navigator
     @State private var discarding: UUID?
+    @State private var dropTargeted = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -38,14 +39,59 @@ struct InboxPage: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     start
+                    dropZone
+                    TargetListEditor(model: model)
                     if !model.openInboxes.isEmpty { openList }
                     if !model.filedURLs.isEmpty { filed }
                 }
                 .padding(20).frame(maxWidth: 760, alignment: .leading)
             }
         }
+        // Dateien lassen sich überall auf der Seite ablegen.
+        .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
+            FileDrop.urls(from: providers) { urls in Task { @MainActor in await importAndShow(urls) } }
+            return true
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("inbox-page")
+    }
+
+    /// Übernimmt Dateien; war keine Aufnahme am Laufen, geht es gleich zum Prüfen und Ablegen.
+    private func importAndShow(_ urls: [URL]) async {
+        let wasRunning = model.isInboxActive
+        if let id = await model.importFiles(urls), !wasRunning { nav.go(.editor(id)) }
+    }
+
+    /// Die Fläche zum Ablegen von Dateien und der Weg über die Dateiauswahl.
+    private var dropZone: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "square.and.arrow.down.on.square").font(.title2).foregroundStyle(dropTargeted ? Color.accentColor : .secondary)
+            Text("PDF-Dateien und Bilder hierher ziehen").font(.callout.bold())
+            Text("Sie werden wie ein Scan behandelt: Text wird erkannt, die Dokumente bekommen einen passenden Namen und lassen sich prüfen und ablegen.")
+                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+            if model.isImporting {
+                ProgressView("Lese Dateien …").accessibilityIdentifier("inbox-import-progress")
+            } else {
+                Button("Dateien wählen …") { chooseFiles() }.accessibilityIdentifier("inbox-import-button")
+            }
+        }
+        .frame(maxWidth: .infinity).padding(18)
+        .background(RoundedRectangle(cornerRadius: 12).fill(dropTargeted ? Color.accentColor.opacity(0.10) : Color.clear))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(dropTargeted ? Color.accentColor : Color.secondary.opacity(0.4),
+                                                                style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("inbox-drop-zone")
+    }
+
+    private func chooseFiles() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.pdf, .image]
+        panel.prompt = "Aufnehmen"
+        guard panel.runModal() == .OK else { return }
+        let urls = panel.urls
+        Task { await importAndShow(urls) }
     }
 
     private var start: some View {
@@ -71,8 +117,8 @@ struct InboxPage: View {
                         .help(model.isSeriesActive ? "Es läuft schon eine Serie" : "Beginnt die Aufnahme")
                         .accessibilityIdentifier("inbox-start-button")
                     if model.inboxTargets.items.isEmpty {
-                        Label("Noch kein Zielordner.", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                        Button("Einstellungen") { nav.go(.settings) }.buttonStyle(.link).accessibilityIdentifier("inbox-to-settings")
+                        Label("Noch kein Zielordner: Füge unten einen hinzu.", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                            .accessibilityIdentifier("inbox-no-target-hint")
                     }
                 }
             }
@@ -138,17 +184,10 @@ struct SettingsPage: View {
             Divider()
             Form {
                 Section("Schnellablage") {
-                    Text("Zielordner").font(.callout.bold())
-                    if model.inboxTargets.items.isEmpty {
-                        Label("Noch kein Zielordner. Ohne Ziel lässt sich nichts ablegen.", systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange).font(.callout).accessibilityIdentifier("settings-no-target")
+                    LabeledContent("Zielordner") {
+                        Text("\(model.inboxTargets.items.count) · auf der Seite Schnellablage")
+                            .foregroundStyle(.secondary).accessibilityIdentifier("settings-target-count")
                     }
-                    ForEach(Array(model.inboxTargets.items.enumerated()), id: \.element.id) { index, target in
-                        TargetRow(model: model, target: target, isFirst: index == 0, isLast: index == model.inboxTargets.items.count - 1)
-                    }
-                    Button("Ordner hinzufügen …") { addTarget() }.accessibilityIdentifier("settings-target-add")
-                    Text("Beim Aufnehmen wählst du per Klick das Ziel; im Editor lässt es sich je Dokument ändern. Die Reihenfolge bestimmst du mit den Pfeilen.")
-                        .font(.caption).foregroundStyle(.secondary)
                     Text("Die PDFs heißen „JJMM Beschreibung.pdf“, etwa „2611 Tierarztpraxis.pdf“, und enthalten durchsuchbaren Text.")
                         .font(.caption).foregroundStyle(.secondary)
                     Toggle("Namen mit KI auf dem Mac vorschlagen", isOn: $model.aiNamingEnabled)
@@ -186,15 +225,6 @@ struct SettingsPage: View {
         .onDisappear { stopLearning() }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("settings-page")
-    }
-
-    private func addTarget() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = true
-        panel.prompt = "Hinzufügen"
-        if panel.runModal() == .OK, let url = panel.url { model.addInboxTarget(path: url.path) }
     }
 
     private func startLearning() {
@@ -281,5 +311,38 @@ struct TargetRow: View {
         .onChange(of: target.label) { label = target.label }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("target-row")
+    }
+}
+
+/// Die Zielordner anlegen und bearbeiten, direkt auf der Seite Schnellablage: hinzufügen, benennen, ordnen, entfernen.
+struct TargetListEditor: View {
+    let model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Zielordner").font(.headline)
+            if model.inboxTargets.items.isEmpty {
+                Label("Noch kein Zielordner. Ohne Ziel lässt sich nichts ablegen.", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange).font(.callout).accessibilityIdentifier("inbox-no-target")
+            }
+            ForEach(Array(model.inboxTargets.items.enumerated()), id: \.element.id) { index, target in
+                TargetRow(model: model, target: target, isFirst: index == 0, isLast: index == model.inboxTargets.items.count - 1)
+                    .padding(8).background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
+            }
+            Button("Ordner hinzufügen …") { add() }.accessibilityIdentifier("inbox-target-add")
+            Text("Beim Aufnehmen wählst du per Klick das Ziel; im Editor lässt es sich je Dokument ändern. Die Reihenfolge bestimmst du mit den Pfeilen, das Entfernen lässt den Ordner selbst unberührt.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("inbox-targets")
+    }
+
+    private func add() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.prompt = "Hinzufügen"
+        if panel.runModal() == .OK, let url = panel.url { model.addInboxTarget(path: url.path) }
     }
 }

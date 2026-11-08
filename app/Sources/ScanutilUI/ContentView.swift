@@ -328,7 +328,7 @@ struct SeriesBar: View {
                 Text(pageCountText(inbox.pages.count)).font(.callout.monospacedDigit())
                     .accessibilityIdentifier("series-page-count")
                 if model.inboxTargets.items.isEmpty {
-                    Button("Zielordner einstellen …") { nav.go(.settings) }.buttonStyle(.link).accessibilityIdentifier("inbox-bar-to-settings")
+                    Button("Zielordner anlegen …") { nav.go(.inbox) }.buttonStyle(.link).accessibilityIdentifier("inbox-bar-to-targets")
                 } else {
                     Text("Ablegen in:").font(.callout)
                     TargetChips(model: model, selected: model.inboxTargets.activeID) { model.selectInboxTarget(id: $0) }
