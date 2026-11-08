@@ -327,8 +327,12 @@ struct SeriesBar: View {
                 Label(inbox.title, systemImage: "tray.and.arrow.down").font(.callout.bold()).lineLimit(1)
                 Text(pageCountText(inbox.pages.count)).font(.callout.monospacedDigit())
                     .accessibilityIdentifier("series-page-count")
-                Text("Auslösen: fester Fußtaster oder Taste „\(TriggerKey.name(model.triggerKeyCode))“, auch die Schaltfläche unten")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if model.inboxTargets.items.isEmpty {
+                    Button("Zielordner einstellen …") { nav.go(.settings) }.buttonStyle(.link).accessibilityIdentifier("inbox-bar-to-settings")
+                } else {
+                    Text("Ablegen in:").font(.callout)
+                    TargetChips(model: model, selected: model.inboxTargets.activeID) { model.selectInboxTarget(id: $0) }
+                }
                 Spacer()
                 if confirmingDiscard {
                     Text(inbox.pages.isEmpty ? "Schnellablage abbrechen?" : "Schnellablage mit \(pageCountText(inbox.pages.count)) verwerfen? Die Scans bleiben im Archiv.")

@@ -77,7 +77,7 @@ struct SchnellablageOberflaechenTests {
         let s = try launch(); defer { s.close() }
         #expect(s.app.press("nav-settings"))
         #expect(s.app.wait { s.app.element("settings-page") != nil })
-        #expect(s.app.string("settings-inbox-directory")?.contains("scanutil-ui-inbox") == true, "Ordner: \(s.app.string("settings-inbox-directory") ?? "-")")
+        #expect(s.app.elements("target-row").count == 2, "Zielordner in den Einstellungen: \(s.app.elements("target-row").count)")
         #expect(s.app.string("settings-trigger-key") == "Leertaste")
         #expect(s.app.press("settings-trigger-learn"))
         #expect(s.app.wait { s.app.string("settings-trigger-key") == "Drücke jetzt die Taste …" })
@@ -154,5 +154,82 @@ struct SchnellablageOberflaechenTests {
         #expect(s.app.wait(timeout: 15) { s.documentFiles.isEmpty }, "Die verworfene Schnellablage bleibt liegen")
         #expect(s.originals.count == 2, "Die Scans bleiben im Archiv")
         #expect(s.app.wait { s.app.element("inbox-start-button") != nil })
+    }
+
+    /// Die Beschriftungen der Ziel-Schaltflächen in Reihenfolge der Ansicht.
+    private func chipNames(_ s: UISession) -> [String] {
+        s.app.elements("target-chip").map { AppDriver.string($0, kAXDescriptionAttribute) ?? AppDriver.string($0, kAXTitleAttribute) ?? "" }
+    }
+
+    @Test func switchingTheTargetByClickSendsEachDocumentToItsFolder() throws {
+        let s = try launch(); defer { s.close() }
+        #expect(s.app.press("nav-inbox"))
+        #expect(s.app.wait { s.app.element("inbox-start-button") != nil })
+        #expect(s.app.wait { s.app.elements("target-chip").count == 2 }, "Ziele auf der Seite Schnellablage")
+        #expect(s.app.press("inbox-start-button"))
+        #expect(s.app.wait { s.app.element("series-page-count") != nil })
+        #expect(s.app.wait { s.app.elements("target-chip").count == 2 }, "Ziele in der Aufnahmeleiste: \(chipNames(s))")
+        #expect(chipNames(s) == ["Privat", "Verein"])
+
+        #expect(s.app.wait { s.app.isEnabled("scan-button") == true })
+        #expect(s.app.press("scan-button"))                                       // Privat
+        #expect(s.app.wait { s.originals.count == 1 })
+        #expect(s.app.wait { s.app.string("series-page-count") == "1 Seite" })
+        let second = try #require(s.app.elements("target-chip").last)
+        #expect(AXUIElementPerformAction(second, kAXPressAction as CFString) == .success)      // auf „Verein“ umschalten
+        #expect(s.app.wait { s.app.elements("target-chip").last.flatMap { AppDriver.string($0, kAXValueAttribute) } == "gewählt" })
+        #expect(s.app.wait { s.app.isEnabled("scan-button") == true })
+        #expect(s.app.press("scan-button"))                                       // Verein
+        #expect(s.app.wait { s.originals.count == 2 })
+        #expect(s.app.wait { s.app.string("series-page-count") == "2 Seiten" })
+
+        #expect(s.app.press("inbox-finish-button"))
+        #expect(s.app.wait(timeout: 60) { s.app.elements("inbox-group").count == 2 })
+        // Im Editor trägt jedes Dokument sein Ziel: das erste Privat, das zweite Verein.
+        #expect(s.app.wait { s.app.elements("target-chip").count == 4 }, "Je Dokument zwei Schaltflächen")
+        let chips = s.app.elements("target-chip")
+        #expect(AppDriver.string(chips[0], kAXValueAttribute) == "gewählt" && AppDriver.string(chips[1], kAXValueAttribute) != "gewählt")
+        #expect(AppDriver.string(chips[3], kAXValueAttribute) == "gewählt" && AppDriver.string(chips[2], kAXValueAttribute) != "gewählt")
+
+        #expect(s.app.press("editor-file-button"))
+        #expect(s.app.wait(timeout: 90) { s.inboxPDFs.count == 1 && s.inboxPDFs2.count == 1 }, "Privat: \(s.inboxPDFs.count), Verein: \(s.inboxPDFs2.count)")
+    }
+
+    @Test func aDocumentsTargetCanBeChangedInTheEditor() throws {
+        let s = try launch(); defer { s.close() }
+        record(s, scans: 1)
+        #expect(s.app.press("inbox-finish-button"))
+        #expect(s.app.wait(timeout: 60) { s.app.elements("inbox-group").count == 1 && s.app.elements("target-chip").count == 2 })
+        let verein = try #require(s.app.elements("target-chip").last)
+        #expect(AXUIElementPerformAction(verein, kAXPressAction as CFString) == .success)
+        #expect(s.app.wait { s.app.elements("target-chip").last.flatMap { AppDriver.string($0, kAXValueAttribute) } == "gewählt" })
+        #expect(s.app.press("editor-file-button"))
+        #expect(s.app.wait(timeout: 90) { s.inboxPDFs2.count == 1 }, "Das PDF kam nicht ins Ziel Verein")
+        #expect(s.inboxPDFs.isEmpty, "Es darf nicht auch in Privat liegen")
+    }
+
+    @Test func theSettingsListTheTargetsAndMoveAndRemoveThem() throws {
+        let s = try launch(); defer { s.close() }
+        #expect(s.app.press("nav-settings"))
+        #expect(s.app.wait { s.app.elements("target-row").count == 2 })
+        func paths() -> [String] { s.app.elements("target-path").map { AppDriver.string($0, kAXValueAttribute) ?? "" } }
+        #expect(paths()[0].contains("scanutil-ui-inbox-") && paths()[1].contains("scanutil-ui-inbox2-"))
+        // Erste Zeile: „nach oben“ gesperrt, letzte: „nach unten“ gesperrt.
+        let ups = s.app.elements("target-up"), downs = s.app.elements("target-down")
+        #expect(AppDriver.isEnabled(ups[0]) == false, "Die erste Zeile lässt sich nicht weiter nach oben schieben")
+        #expect(AppDriver.isEnabled(downs[1]) == false, "Die letzte nicht weiter nach unten")
+        // Zweite Zeile nach oben: Reihenfolge dreht sich.
+        #expect(AXUIElementPerformAction(ups[1], kAXPressAction as CFString) == .success)
+        #expect(s.app.wait { paths()[0].contains("scanutil-ui-inbox2-") && paths()[1].contains("scanutil-ui-inbox-") }, "Reihenfolge: \(paths())")
+        // Erste Zeile entfernen: nur noch eine.
+        let removes = s.app.elements("target-remove")
+        #expect(AXUIElementPerformAction(removes[0], kAXPressAction as CFString) == .success)
+        #expect(s.app.wait { s.app.elements("target-row").count == 1 })
+        #expect(paths().first?.contains("scanutil-ui-inbox-") == true, "Übrig bleibt Privat: \(paths())")
+        // Letztes entfernen: Hinweis, und die Schnellablage warnt.
+        #expect(AXUIElementPerformAction(s.app.elements("target-remove")[0], kAXPressAction as CFString) == .success)
+        #expect(s.app.wait { s.app.element("settings-no-target") != nil })
+        #expect(s.app.press("nav-inbox"))
+        #expect(s.app.wait { s.app.element("inbox-to-settings") != nil }, "Ohne Ziel verweist die Seite auf die Einstellungen")
     }
 }

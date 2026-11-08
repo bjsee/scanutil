@@ -50,6 +50,12 @@ struct InboxPage: View {
 
     private var start: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if !model.inboxTargets.items.isEmpty {
+                HStack(spacing: 8) {
+                    Text("Ablegen in:").font(.callout)
+                    TargetChips(model: model, selected: model.inboxTargets.activeID) { model.selectInboxTarget(id: $0) }
+                }
+            }
             if model.isInboxActive {
                 Label("Eine Schnellablage läuft: \(model.series?.pages.count ?? 0) Seite(n).", systemImage: "circle.fill")
                     .foregroundStyle(.red)
@@ -64,11 +70,9 @@ struct InboxPage: View {
                         .disabled(model.status != .ready || model.isSeriesActive)
                         .help(model.isSeriesActive ? "Es läuft schon eine Serie" : "Beginnt die Aufnahme")
                         .accessibilityIdentifier("inbox-start-button")
-                    if model.inboxDirectory == nil {
-                        Label("Noch kein Ablageordner.", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    if model.inboxTargets.items.isEmpty {
+                        Label("Noch kein Zielordner.", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                         Button("Einstellungen") { nav.go(.settings) }.buttonStyle(.link).accessibilityIdentifier("inbox-to-settings")
-                    } else if let folder = model.inboxDirectory {
-                        Text("Ablage: \(folder.path)").font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     }
                 }
             }
@@ -134,15 +138,17 @@ struct SettingsPage: View {
             Divider()
             Form {
                 Section("Schnellablage") {
-                    LabeledContent("Ablageordner") {
-                        HStack {
-                            Text(model.inboxDirectory?.path ?? "nicht festgelegt")
-                                .foregroundStyle(model.inboxDirectory == nil ? .orange : .primary)
-                                .lineLimit(1).truncationMode(.middle).frame(maxWidth: 360, alignment: .trailing)
-                                .accessibilityIdentifier("settings-inbox-directory")
-                            Button("Ändern …") { chooseDirectory() }.accessibilityIdentifier("settings-inbox-directory-button")
-                        }
+                    Text("Zielordner").font(.callout.bold())
+                    if model.inboxTargets.items.isEmpty {
+                        Label("Noch kein Zielordner. Ohne Ziel lässt sich nichts ablegen.", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange).font(.callout).accessibilityIdentifier("settings-no-target")
                     }
+                    ForEach(Array(model.inboxTargets.items.enumerated()), id: \.element.id) { index, target in
+                        TargetRow(model: model, target: target, isFirst: index == 0, isLast: index == model.inboxTargets.items.count - 1)
+                    }
+                    Button("Ordner hinzufügen …") { addTarget() }.accessibilityIdentifier("settings-target-add")
+                    Text("Beim Aufnehmen wählst du per Klick das Ziel; im Editor lässt es sich je Dokument ändern. Die Reihenfolge bestimmst du mit den Pfeilen.")
+                        .font(.caption).foregroundStyle(.secondary)
                     Text("Die PDFs heißen „JJMM Beschreibung.pdf“, etwa „2611 Tierarztpraxis.pdf“, und enthalten durchsuchbaren Text.")
                         .font(.caption).foregroundStyle(.secondary)
                     Toggle("Namen mit KI auf dem Mac vorschlagen", isOn: $model.aiNamingEnabled)
@@ -182,14 +188,13 @@ struct SettingsPage: View {
         .accessibilityIdentifier("settings-page")
     }
 
-    private func chooseDirectory() {
+    private func addTarget() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
-        panel.directoryURL = model.inboxDirectory
-        panel.prompt = "Wählen"
-        if panel.runModal() == .OK, let url = panel.url { model.inboxDirectory = url }
+        panel.prompt = "Hinzufügen"
+        if panel.runModal() == .OK, let url = panel.url { model.addInboxTarget(path: url.path) }
     }
 
     private func startLearning() {
@@ -206,5 +211,75 @@ struct SettingsPage: View {
         learning = false
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
+    }
+}
+
+/// Die Zielordner als Schaltflächen zum Umschalten per Klick. Der gewählte ist hervorgehoben.
+struct TargetChips: View {
+    let model: AppModel
+    let selected: UUID?
+    let choose: (UUID) -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(model.inboxTargets.items) { target in
+                Button { choose(target.id) } label: {
+                    Text(target.displayName).lineLimit(1)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Capsule().fill(selected == target.id ? Color.accentColor : Color.secondary.opacity(0.15)))
+                        .foregroundStyle(selected == target.id ? Color.white : Color.primary)
+                }
+                .buttonStyle(.plain)
+                .help(target.path)
+                .accessibilityLabel(target.displayName)
+                .accessibilityValue(selected == target.id ? "gewählt" : "")
+                .accessibilityAddTraits(selected == target.id ? .isSelected : [])
+                .accessibilityIdentifier("target-chip")
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("target-chips")
+    }
+}
+
+/// Eine Zeile der Zielordner in den Einstellungen: wählen, Bezeichner, Pfad, Reihenfolge, entfernen.
+struct TargetRow: View {
+    let model: AppModel
+    let target: InboxTarget
+    let isFirst: Bool
+    let isLast: Bool
+    @State private var label = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button { model.selectInboxTarget(id: target.id) } label: {
+                Image(systemName: model.inboxTargets.activeID == target.id ? "largecircle.fill.circle" : "circle")
+            }
+            .buttonStyle(.plain).help("Dieses Ziel für neue Aufnahmen wählen")
+            .accessibilityLabel("Als Ziel wählen").accessibilityIdentifier("target-select")
+            VStack(alignment: .leading, spacing: 2) {
+                TextField("Bezeichner (optional)", text: $label)
+                    .textFieldStyle(.roundedBorder).frame(maxWidth: 240)
+                    .focused($focused)
+                    .onSubmit { model.setInboxTargetLabel(label, id: target.id) }
+                    .onChange(of: focused) { if !focused { model.setInboxTargetLabel(label, id: target.id) } }
+                    .accessibilityLabel("Bezeichner von \(target.path)")
+                    .accessibilityIdentifier("target-label-field")
+                Text(target.path).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    .accessibilityIdentifier("target-path")
+            }
+            Spacer()
+            Button { model.moveInboxTarget(id: target.id, up: true) } label: { Image(systemName: "chevron.up") }
+                .disabled(isFirst).help("Nach oben").accessibilityLabel("Nach oben").accessibilityIdentifier("target-up")
+            Button { model.moveInboxTarget(id: target.id, up: false) } label: { Image(systemName: "chevron.down") }
+                .disabled(isLast).help("Nach unten").accessibilityLabel("Nach unten").accessibilityIdentifier("target-down")
+            Button(role: .destructive) { model.removeInboxTarget(id: target.id) } label: { Image(systemName: "trash") }
+                .help("Aus der Liste entfernen (der Ordner selbst bleibt)").accessibilityLabel("Entfernen").accessibilityIdentifier("target-remove")
+        }
+        .onAppear { label = target.label }
+        .onChange(of: target.label) { label = target.label }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("target-row")
     }
 }
