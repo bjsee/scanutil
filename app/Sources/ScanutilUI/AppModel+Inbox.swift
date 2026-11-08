@@ -105,11 +105,33 @@ extension AppModel {
         commit(document)
     }
 
-    /// Der Dateiname (ohne Endung), unter dem das Dokument abgelegt würde: Jahr und Monat der Aufnahme, dann die Beschreibung.
+    /// Der Dateiname (ohne Endung), unter dem das Dokument abgelegt würde: ein vom Nutzer vorgegebener ganz, sonst Jahr und Monat der
+    /// Aufnahme, dann die Beschreibung.
     public func inboxFileStem(documentID: UUID, group: PageGroup) -> String {
-        let document = latestDocument(id: documentID)
-        let date = group.pageIDs.first.flatMap { document?.page(id: $0)?.scanID }.flatMap { try? store.load(id: $0).capture.capturedAt } ?? Date()
-        return InboxNaming.fileStem(date: date, description: document?.name(of: group))
+        guard let document = latestDocument(id: documentID) else { return InboxNaming.fileStem(date: Date(), description: nil) }
+        return document.fileName(of: group) ?? automaticFileStem(of: group, in: document)
+    }
+
+    /// Der Name aus Jahr und Monat der Aufnahme und der Beschreibung, ohne Rücksicht auf einen vorgegebenen.
+    private func automaticFileStem(of group: PageGroup, in document: ScanDocument) -> String {
+        let date = group.pageIDs.first.flatMap { document.page(id: $0)?.scanID }.flatMap { try? store.load(id: $0).capture.capturedAt } ?? Date()
+        return InboxNaming.fileStem(date: date, description: document.name(of: group))
+    }
+
+    /// Ändert den ganzen Dateinamen eines Dokuments, auch Jahr und Monat. Eine Endung `.pdf` wird abgeschnitten, unzulässige Zeichen
+    /// werden ersetzt. Ist das Ergebnis leer oder gleicht es dem Namen, der ohnehin entstünde, gilt wieder der selbst gebildete
+    /// (er folgt dann späteren Änderungen der Beschreibung).
+    public func renameInboxFile(documentID: UUID, groupID: UUID, to name: String) {
+        guard let document = latestDocument(id: documentID), document.isInbox,
+              let group = document.groups.first(where: { $0.id == groupID }) else { return }
+        var text = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.lowercased().hasSuffix(".pdf") { text = String(text.dropLast(4)) }
+        let cleaned = InboxNaming.cleanedDescription(text)
+        let newName: String? = (cleaned.isEmpty || cleaned == automaticFileStem(of: group, in: document)) ? nil : cleaned
+        guard document.fileName(of: group) != newName else { return }
+        var updated = document
+        updated.setFileName(newName, of: groupID)
+        commit(updated)
     }
 
     /// Legt alle Dokumente der Schnellablage als PDF mit Texterkennung im eingestellten Ordner ab. Ein vorhandenes PDF gleichen

@@ -239,4 +239,23 @@ struct SchnellablageOberflaechenTests {
         #expect(s.app.wait { s.app.element("inbox-drop-zone") != nil }, "Keine Fläche zum Ablegen von Dateien")
         #expect(s.app.element("inbox-import-button") != nil, "Kein Weg über die Dateiauswahl")
     }
+
+    @Test func theWholeFileNameIncludingYearAndMonthIsEditableInTheEditor() throws {
+        let s = try launch(); defer { s.close() }
+        record(s, scans: 1)
+        #expect(s.app.press("inbox-finish-button"))
+        #expect(s.app.wait(timeout: 60) { s.app.element("inbox-name-field") != nil })
+        // Das Feld zeigt den ganzen Namen mit Jahr und Monat vorn.
+        let shown = s.app.string("inbox-name-field") ?? ""
+        #expect(shown.range(of: #"^\d{4} "#, options: .regularExpression) != nil, "Feldinhalt: \(shown)")
+        // Alles ersetzen, auch die Jahr-Monat-Angabe: Wert setzen, mit Eingabe bestätigen.
+        let field = try #require(s.app.element("inbox-name-field"))
+        _ = AXUIElementSetAttributeValue(field, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        #expect(AXUIElementSetAttributeValue(field, kAXValueAttribute as CFString, "2509 Gehalt Silvia" as CFString) == .success)
+        Thread.sleep(forTimeInterval: 0.3)
+        #expect(s.app.pressKey(36))
+        #expect(s.app.wait(timeout: 10) { s.app.string("inbox-name-field") == "2509 Gehalt Silvia" }, "Feld: \(s.app.string("inbox-name-field") ?? "-")")
+        #expect(s.app.press("editor-file-button"))
+        #expect(s.app.wait(timeout: 90) { s.inboxPDFs.map(\.lastPathComponent) == ["2509 Gehalt Silvia.pdf"] }, "PDFs: \(s.inboxPDFs.map(\.lastPathComponent))")
+    }
 }
