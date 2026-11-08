@@ -92,6 +92,19 @@ extension AppModel {
         }.value
     }
 
+    /// Das Ziel eines Dokuments: das eigene, wenn es noch in der Liste steht, sonst das gerade gewählte. `nil` ohne Ziele.
+    public func inboxTarget(for group: PageGroup, in document: ScanDocument) -> InboxTarget? {
+        document.target(of: group).flatMap { inboxTargets.target(id: $0) } ?? inboxTargets.active
+    }
+
+    /// Ändert das Ziel eines Dokuments der Schnellablage.
+    public func setInboxGroupTarget(documentID: UUID, groupID: UUID, targetID: UUID) {
+        guard var document = latestDocument(id: documentID), document.isInbox, inboxTargets.target(id: targetID) != nil else { return }
+        guard document.inbox?.targets[groupID.uuidString] != targetID.uuidString else { return }
+        document.setTarget(targetID, of: groupID)
+        commit(document)
+    }
+
     /// Der Dateiname (ohne Endung), unter dem das Dokument abgelegt würde: Jahr und Monat der Aufnahme, dann die Beschreibung.
     public func inboxFileStem(documentID: UUID, group: PageGroup) -> String {
         let document = latestDocument(id: documentID)
@@ -107,14 +120,18 @@ extension AppModel {
     public func fileInbox(documentID: UUID) async -> [URL] {
         guard exportProgress == nil else { return [] }
         guard let document = latestDocument(id: documentID), document.isInbox else { return [] }
-        guard let directory = inboxDirectory else {
-            post(.error, "Es ist noch kein Ordner für die Schnellablage eingestellt (Einstellungen).")
+        // Jedes Dokument geht in sein Ziel, ersatzweise ins gewählte. Fehlt eines davon, wird vorher nichts geschrieben.
+        let plan = document.groups.map { ($0, inboxTarget(for: $0, in: document)) }
+        guard !plan.isEmpty, !plan.contains(where: { $0.1 == nil }) else {
+            post(.error, "Es ist noch kein Zielordner für die Schnellablage eingestellt (Einstellungen), oder ein Dokument hat keinen.")
             return []
         }
         guard !document.pages.isEmpty else { post(.warning, "Die Schnellablage hat noch keine Seiten."); return [] }
-        do { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true) } catch {
-            post(.error, "Der Ordner „\(directory.path)“ ist nicht beschreibbar: \(error.localizedDescription)")
-            return []
+        for case let (_, target?) in plan {
+            do { try FileManager.default.createDirectory(at: target.url, withIntermediateDirectories: true) } catch {
+                post(.error, "Der Ordner „\(target.path)“ ist nicht beschreibbar: \(error.localizedDescription)")
+                return []
+            }
         }
         exportProgress = (0, document.pages.count)
         message = nil
@@ -124,7 +141,8 @@ extension AppModel {
         var written: [URL] = []
         var done = 0
         let total = document.pages.count
-        for group in document.groups {
+        for (group, target) in plan {
+            guard let directory = target?.url else { continue }
             let pages = group.pageIDs.compactMap { document.page(id: $0) }
             var part = ScanDocument(title: document.title, pages: pages)
             part.revision = 0

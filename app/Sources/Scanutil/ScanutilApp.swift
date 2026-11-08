@@ -56,8 +56,13 @@ struct ScanutilApp: App {
             // sonst landeten ihre Scans im Papierkorb des Entwicklers.
             scanDisposal: ProcessInfo.processInfo.environment["SCANUTIL_NO_TRASH"] != nil ? .permanent : .trash
         )
-        // Für die Oberflächentests: der Ablageordner der Schnellablage.
-        if let dir = ProcessInfo.processInfo.environment["SCANUTIL_INBOX_DIR"] { appModel.inboxDirectory = URL(fileURLWithPath: dir, isDirectory: true) }
+        // Für die Oberflächentests: die Zielordner der Schnellablage, `Bezeichner=Pfad` getrennt durch `|`, oder nur ein Pfad.
+        if let list = ProcessInfo.processInfo.environment["SCANUTIL_INBOX_DIRS"] ?? ProcessInfo.processInfo.environment["SCANUTIL_INBOX_DIR"] {
+            for entry in list.split(separator: "|") {
+                let parts = entry.split(separator: "=", maxSplits: 1).map(String.init)
+                if parts.count == 2 { appModel.addInboxTarget(path: parts[1], label: parts[0]) } else { appModel.addInboxTarget(path: String(entry)) }
+            }
+        }
         _model = State(initialValue: appModel)
     }
 

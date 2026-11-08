@@ -114,10 +114,35 @@ public final class AppModel {
     // MARK: Einstellungen der Schnellablage
 
     static let inboxDirectoryKey = "inboxDirectory", triggerKeyKey = "triggerKeyCode", aiNamingKey = "aiNamingEnabled"
-    /// Wohin die Schnellablage ihre PDFs schreibt. Ohne Ordner lässt sich nichts ablegen.
-    public var inboxDirectory: URL? {
-        didSet { defaults?.set(inboxDirectory?.path, forKey: Self.inboxDirectoryKey) }
+    static let inboxTargetsKey = "inboxTargets"
+    /// Die Zielordner der Schnellablage, in der Reihenfolge des Nutzers, und welcher gewählt ist. Ohne Ziel lässt sich nichts ablegen.
+    public private(set) var inboxTargets = InboxTargets() {
+        didSet {
+            guard inboxTargets != oldValue, let defaults else { return }
+            defaults.set(try? JSONEncoder().encode(inboxTargets), forKey: Self.inboxTargetsKey)
+        }
     }
+
+    /// Der Ordner des gewählten Ziels. Das Setzen fügt den Ordner der Liste hinzu (falls er fehlt) und wählt ihn; `nil` entfernt
+    /// das gewählte Ziel. Für Aufrufer, die nur einen einzigen Ordner kennen.
+    public var inboxDirectory: URL? {
+        get { inboxTargets.active?.url }
+        set {
+            if let newValue { inboxTargets.select(id: inboxTargets.add(path: newValue.path).id) }
+            else if let id = inboxTargets.activeID { inboxTargets.remove(id: id) }
+        }
+    }
+
+    /// Fügt einen Zielordner hinten an und wählt ihn, wenn es der erste ist.
+    @discardableResult
+    public func addInboxTarget(path: String, label: String = "") -> InboxTarget { inboxTargets.add(path: path, label: label) }
+    public func removeInboxTarget(id: UUID) { inboxTargets.remove(id: id) }
+    /// Schiebt ein Ziel in der Liste hoch (`up`) oder runter.
+    public func moveInboxTarget(id: UUID, up: Bool) { inboxTargets.move(id: id, by: up ? -1 : 1) }
+    public func setInboxTargetLabel(_ label: String, id: UUID) { inboxTargets.setLabel(label, for: id) }
+    /// Wählt das Ziel, in das neue Aufnahmen gehen.
+    public func selectInboxTarget(id: UUID) { inboxTargets.select(id: id) }
+
     /// Die Taste, die eine Aufnahme auslöst (Fußtaster): ein Tastaturcode, standardmäßig die Leertaste (49).
     public var triggerKeyCode: UInt16 {
         didSet { defaults?.set(Int(triggerKeyCode), forKey: Self.triggerKeyKey) }
@@ -217,9 +242,14 @@ public final class AppModel {
         self.analyzeBook = analyzeBook
         self.recognizer = recognizer
         self.describer = describer
-        inboxDirectory = defaults?.string(forKey: Self.inboxDirectoryKey).map { URL(fileURLWithPath: $0, isDirectory: true) }
         triggerKeyCode = UInt16(defaults?.integer(forKey: Self.triggerKeyKey) ?? 0).nonZero ?? 49
         aiNamingEnabled = defaults?.object(forKey: Self.aiNamingKey) as? Bool ?? true
+        // Die Zielordner: gespeicherte Liste, sonst der einzelne Ordner einer früheren Fassung als erstes Ziel.
+        if let data = defaults?.data(forKey: Self.inboxTargetsKey), let saved = try? JSONDecoder().decode(InboxTargets.self, from: data) {
+            inboxTargets = saved
+        } else if let old = defaults?.string(forKey: Self.inboxDirectoryKey), !old.isEmpty {
+            inboxTargets.add(path: old)
+        }
     }
 
     /// Standardanalyse: Dokument erkennen, Winkel messen, sichere Ergebnisse anwenden.
@@ -784,7 +814,10 @@ public final class AppModel {
             document.append(DocumentPage(scanID: scanID, region: .left))
             document.append(DocumentPage(scanID: scanID, region: .right))
         } else {
-            document.append(DocumentPage(scanID: scanID))
+            let page = DocumentPage(scanID: scanID)
+            document.append(page)
+            // Jede Aufnahme der Schnellablage geht in das Ziel, das gerade gewählt ist; im Editor lässt es sich je Dokument ändern.
+            if document.isInbox { document.setTarget(inboxTargets.activeID, of: page.id) }
         }
         commit(document)
     }

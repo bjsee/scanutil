@@ -103,7 +103,7 @@ public struct SeriesEditorView: View {
             ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1))).frame(width: 120)
             Text("\(progress.done)/\(progress.total)").font(.caption.monospacedDigit()).accessibilityIdentifier("editor-file-progress")
         } else {
-            if model.inboxDirectory == nil {
+            if model.inboxTargets.items.isEmpty {
                 Button("Ordner einstellen …") { nav.go(.settings) }.buttonStyle(.link).accessibilityIdentifier("editor-to-settings")
             }
             let count = document.groups.count
@@ -114,7 +114,7 @@ public struct SeriesEditorView: View {
                 }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(document.pages.isEmpty || model.inboxDirectory == nil)
+            .disabled(document.pages.isEmpty || model.inboxTargets.items.isEmpty)
             .accessibilityIdentifier("editor-file-button")
         }
     }
@@ -386,6 +386,11 @@ struct InboxGroupHeader: View {
                 .onChange(of: focused) { if !focused { model.renameInboxGroup(documentID: documentID, groupID: group.id, to: text) } }
                 .accessibilityLabel("Beschreibung von Dokument \(number)")
                 .accessibilityIdentifier("inbox-name-field")
+            if !model.inboxTargets.items.isEmpty {
+                TargetChips(model: model, selected: model.latestDocument(id: documentID).flatMap { model.inboxTarget(for: group, in: $0)?.id }) {
+                    model.setInboxGroupTarget(documentID: documentID, groupID: group.id, targetID: $0)
+                }
+            }
             Text(model.inboxFileStem(documentID: documentID, group: group) + ".pdf")
                 .font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                 .accessibilityIdentifier("inbox-file-name")

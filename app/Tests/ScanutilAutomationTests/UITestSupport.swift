@@ -6,11 +6,13 @@ struct UISession {
     let dir: URL
     /// Ordner, in dem der Speicherdialog des Exports öffnet.
     let exportDir: URL
-    /// Ablageordner der Schnellablage.
+    /// Die Zielordner der Schnellablage: „Privat“ (zuerst, gewählt) und „Verein“.
     let inboxDir: URL
+    let inboxDir2: URL
 
     func close() {
         try? FileManager.default.removeItem(at: inboxDir)
+        try? FileManager.default.removeItem(at: inboxDir2)
         app.terminate()
         try? FileManager.default.removeItem(at: dir)
         try? FileManager.default.removeItem(at: exportDir)
@@ -34,9 +36,13 @@ struct UISession {
         ((try? FileManager.default.contentsOfDirectory(at: exportDir, includingPropertiesForKeys: nil)) ?? []).filter { $0.pathExtension == "pdf" }
     }
 
-    /// Die PDFs, die die Schnellablage abgelegt hat, nach Namen sortiert.
-    var inboxPDFs: [URL] {
-        (((try? FileManager.default.contentsOfDirectory(at: inboxDir, includingPropertiesForKeys: nil)) ?? []).filter { $0.pathExtension == "pdf" })
+    /// Die PDFs, die die Schnellablage im ersten Ziel (Privat) abgelegt hat, nach Namen sortiert.
+    var inboxPDFs: [URL] { pdfs(in: inboxDir) }
+    /// Die PDFs im zweiten Ziel (Verein).
+    var inboxPDFs2: [URL] { pdfs(in: inboxDir2) }
+
+    private func pdfs(in directory: URL) -> [URL] {
+        (((try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []).filter { $0.pathExtension == "pdf" })
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
@@ -77,9 +83,10 @@ struct UISession {
         let dir = base.appendingPathComponent("scanutil-ui-\(UUID().uuidString)")
         let exportDir = base.appendingPathComponent("scanutil-ui-export-\(UUID().uuidString)")
         let inboxDir = base.appendingPathComponent("scanutil-ui-inbox-\(UUID().uuidString)")
+        let inboxDir2 = base.appendingPathComponent("scanutil-ui-inbox2-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: exportDir, withIntermediateDirectories: true)
-        let app = try AppDriver(mode: mode, archive: dir, environment: ["SCANUTIL_EXPORT_DIR": exportDir.path, "SCANUTIL_INBOX_DIR": inboxDir.path])
-        return UISession(app: app, dir: dir, exportDir: exportDir, inboxDir: inboxDir)
+        let app = try AppDriver(mode: mode, archive: dir, environment: ["SCANUTIL_EXPORT_DIR": exportDir.path, "SCANUTIL_INBOX_DIRS": "Privat=\(inboxDir.path)|Verein=\(inboxDir2.path)"])
+        return UISession(app: app, dir: dir, exportDir: exportDir, inboxDir: inboxDir, inboxDir2: inboxDir2)
     }
 }
 

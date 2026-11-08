@@ -330,8 +330,13 @@ final class AppDriver {
 
     func isEnabled(_ identifier: String) -> Bool? {
         guard let el = element(identifier) else { return nil }
+        return Self.isEnabled(el)
+    }
+
+    /// Ob das Element bedienbar ist; `nil`, wenn es die Angabe nicht macht.
+    static func isEnabled(_ element: AXUIElement) -> Bool? {
         var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(el, kAXEnabledAttribute as CFString, &value) == .success else { return nil }
+        guard AXUIElementCopyAttributeValue(element, kAXEnabledAttribute as CFString, &value) == .success else { return nil }
         return (value as? NSNumber)?.boolValue
     }
 
