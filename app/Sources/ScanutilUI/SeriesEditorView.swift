@@ -375,25 +375,29 @@ struct InboxGroupHeader: View {
     @State private var text = ""
     @FocusState private var focused: Bool
 
+    /// Der Dateiname, wie er jetzt gilt (ohne Endung).
+    private var stem: String { model.inboxFileStem(documentID: documentID, group: group) }
+
     var body: some View {
         HStack(spacing: 10) {
             Text("Dokument \(number)").font(.callout.bold())
             Text("\(group.pageIDs.count) Seite\(group.pageIDs.count == 1 ? "" : "n")").font(.caption).foregroundStyle(.secondary)
-            TextField("Beschreibung, z. B. Tierarztpraxis", text: $text)
-                .textFieldStyle(.roundedBorder).frame(maxWidth: 300)
-                .focused($focused)
-                .onSubmit { model.renameInboxGroup(documentID: documentID, groupID: group.id, to: text) }
-                .onChange(of: focused) { if !focused { model.renameInboxGroup(documentID: documentID, groupID: group.id, to: text) } }
-                .accessibilityLabel("Beschreibung von Dokument \(number)")
-                .accessibilityIdentifier("inbox-name-field")
+            // Der ganze Dateiname, auch Jahr und Monat.
+            HStack(spacing: 2) {
+                TextField("Dateiname, z. B. 2611 Tierarztpraxis", text: $text)
+                    .textFieldStyle(.roundedBorder).frame(minWidth: 260, maxWidth: 360)
+                    .focused($focused)
+                    .onSubmit { commit() }
+                    .onChange(of: focused) { if !focused { commit() } }
+                    .accessibilityLabel("Dateiname von Dokument \(number)")
+                    .accessibilityIdentifier("inbox-name-field")
+                Text(".pdf").font(.callout).foregroundStyle(.secondary).accessibilityIdentifier("inbox-file-suffix")
+            }
             if !model.inboxTargets.items.isEmpty {
                 TargetChips(model: model, selected: model.latestDocument(id: documentID).flatMap { model.inboxTarget(for: group, in: $0)?.id }) {
                     model.setInboxGroupTarget(documentID: documentID, groupID: group.id, targetID: $0)
                 }
             }
-            Text(model.inboxFileStem(documentID: documentID, group: group) + ".pdf")
-                .font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                .accessibilityIdentifier("inbox-file-name")
             Spacer()
             if canMerge {
                 Button("Mit vorigem zusammenfassen") { model.mergeInboxPage(documentID: documentID, pageID: firstPageID) }
@@ -401,8 +405,14 @@ struct InboxGroupHeader: View {
                     .accessibilityIdentifier("inbox-merge-button")
             }
         }
-        .onAppear { text = model.latestDocument(id: documentID).flatMap { $0.name(of: group) } ?? "" }
-        .onChange(of: model.latestDocument(id: documentID)?.name(of: group)) { text = model.latestDocument(id: documentID)?.name(of: group) ?? "" }
+        .onAppear { text = stem }
+        // Ein Vorschlag, der nachträglich eintrifft, erscheint im Feld, solange man nicht gerade tippt.
+        .onChange(of: stem) { if !focused { text = stem } }
+    }
+
+    private func commit() {
+        model.renameInboxFile(documentID: documentID, groupID: group.id, to: text)
+        text = stem            // zeigt, was daraus geworden ist (bereinigt, ohne „.pdf“)
     }
 }
 

@@ -136,3 +136,28 @@ struct InboxTargetsGroupTests {
         #expect(doc.inbox == nil)
     }
 }
+
+@Suite("Schnellablage: eigener Dateiname")
+struct InboxFileNameTests {
+    @Test func aFileNameBelongsToADocumentAndSurvivesSavingAndOldFilesLoad() throws {
+        var doc = ScanDocument(title: "Ablage", inbox: InboxInfo())
+        doc.append(DocumentPage(scanID: UUID()))
+        doc.setFileName("  2609 Gehalt Silvia ", of: doc.groups[0].id)
+        #expect(doc.fileName(of: doc.groups[0]) == "2609 Gehalt Silvia")
+        let back = try JSONDecoder().decode(ScanDocument.self, from: JSONEncoder().encode(doc))
+        #expect(back.fileName(of: back.groups[0]) == "2609 Gehalt Silvia")
+        doc.setFileName("  ", of: doc.groups[0].id)
+        #expect(doc.fileName(of: doc.groups[0]) == nil)
+        let old = try JSONDecoder().decode(InboxInfo.self, from: Data(#"{"names":{"a":"x"},"targets":{}}"#.utf8))
+        #expect(old.fileNames.isEmpty)
+    }
+
+    @Test func mergingDropsTheFileNameOfTheMergedDocument() {
+        var doc = ScanDocument(title: "Ablage", inbox: InboxInfo())
+        doc.append(DocumentPage(scanID: UUID())); doc.append(DocumentPage(scanID: UUID()))
+        doc.setFileName("vorne", of: doc.groups[0].id); doc.setFileName("hinten", of: doc.groups[1].id)
+        let id1 = doc.pages[1].id
+        _ = doc.mergeWithPrevious(pageID: id1)
+        #expect(doc.groups.count == 1 && doc.fileName(of: doc.groups[0]) == "vorne" && doc.inbox?.fileNames.count == 1)
+    }
+}

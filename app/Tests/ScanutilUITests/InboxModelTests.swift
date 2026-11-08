@@ -213,4 +213,67 @@ struct InboxModelTests {
         #expect(model.seriesDocuments.count == 1)
         await model.disconnect()
     }
+
+    // MARK: Ganzer Dateiname
+
+    @Test func theWholeFileNameIncludingYearAndMonthCanBeChanged() async throws {
+        let (model, a, o) = await makeModel(); defer { clean(a, o) }
+        model.startInbox(); await model.scan()
+        let id = try #require(await model.finishInbox())
+        let group = try #require(model.latestDocument(id: id)?.groups.first)
+        let automatic = "\(InboxNaming.prefix(for: Date())) Tierarztpraxis Dr. Meier"
+        #expect(model.inboxFileStem(documentID: id, group: group) == automatic)
+
+        model.renameInboxFile(documentID: id, groupID: group.id, to: "2609 Gehalt Silvia")
+        #expect(model.inboxFileStem(documentID: id, group: group) == "2609 Gehalt Silvia", "Auch Jahr und Monat sind änderbar")
+        let saved = try ArchiveStore(root: a).loadDocument(id: id)
+        #expect(saved.fileName(of: saved.groups[0]) == "2609 Gehalt Silvia", "Und auf der Platte")
+        let urls = await model.fileInbox(documentID: id)
+        #expect(urls.first?.lastPathComponent == "2609 Gehalt Silvia.pdf")
+        await model.disconnect()
+    }
+
+    @Test func theFileNameIsCleanedAndAPdfEndingIsDropped() async throws {
+        let (model, a, o) = await makeModel(); defer { clean(a, o) }
+        model.startInbox(); await model.scan()
+        let id = try #require(await model.finishInbox())
+        let group = try #require(model.latestDocument(id: id)?.groups.first)
+        model.renameInboxFile(documentID: id, groupID: group.id, to: "  2611 Rechnung: Tierarzt / Dr. Meier.PDF ")
+        #expect(model.inboxFileStem(documentID: id, group: group) == "2611 Rechnung Tierarzt Dr. Meier")
+        await model.disconnect()
+    }
+
+    @Test func clearingTheNameOrTypingTheAutomaticOneGoesBackToTheAutomaticName() async throws {
+        let (model, a, o) = await makeModel(); defer { clean(a, o) }
+        model.startInbox(); await model.scan()
+        let id = try #require(await model.finishInbox())
+        let group = try #require(model.latestDocument(id: id)?.groups.first)
+        let automatic = model.inboxFileStem(documentID: id, group: group)
+        model.renameInboxFile(documentID: id, groupID: group.id, to: "2609 Eigener Name")
+        model.renameInboxFile(documentID: id, groupID: group.id, to: "   ")
+        #expect(model.inboxFileStem(documentID: id, group: group) == automatic, "Leer nimmt den eigenen Namen zurück")
+        model.renameInboxFile(documentID: id, groupID: group.id, to: "2609 Eigener Name")
+        model.renameInboxFile(documentID: id, groupID: group.id, to: automatic)
+        #expect(model.latestDocument(id: id)?.fileName(of: group) == nil, "Der gleiche Name ist kein eigener")
+        // Danach folgt der Name wieder der Beschreibung.
+        model.renameInboxGroup(documentID: id, groupID: group.id, to: "Stadtwerke")
+        #expect(model.inboxFileStem(documentID: id, group: group) == "\(InboxNaming.prefix(for: Date())) Stadtwerke")
+        await model.disconnect()
+    }
+
+    @Test func anOwnNameBeatsLaterSuggestionsAndMergingKeepsTheFrontOne() async throws {
+        let (model, a, o) = await makeModel(); defer { clean(a, o) }
+        model.startInbox(); await model.scan(); await model.scan()
+        let id = try #require(model.series?.id)
+        let first = try #require(model.latestDocument(id: id)?.groups[0]), second = try #require(model.latestDocument(id: id)?.groups[1])
+        model.renameInboxFile(documentID: id, groupID: first.id, to: "2609 Vorne")
+        model.renameInboxFile(documentID: id, groupID: second.id, to: "2609 Hinten")
+        _ = await model.finishInbox()          // schlägt Beschreibungen vor, ändert aber die eigenen Namen nicht
+        #expect(model.inboxFileStem(documentID: id, group: first) == "2609 Vorne")
+        model.mergeInboxPage(documentID: id, pageID: try #require(model.latestDocument(id: id)?.pages[1].id))
+        let merged = try #require(model.latestDocument(id: id)?.groups.first)
+        #expect(model.latestDocument(id: id)?.groups.count == 1 && model.inboxFileStem(documentID: id, group: merged) == "2609 Vorne")
+        #expect(model.latestDocument(id: id)?.inbox?.fileNames.count == 1, "Der eigene Name des hinteren fällt weg")
+        await model.disconnect()
+    }
 }

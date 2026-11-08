@@ -6,10 +6,14 @@ public struct InboxInfo: Codable, Equatable, Sendable {
     public var names: [String: String]
     /// Zielordner je Gruppe (Kennung des Ziels aus den Einstellungen). Ohne Eintrag gilt beim Ablegen das gerade gewählte Ziel.
     public var targets: [String: String]
+    /// Vom Nutzer vollständig vorgegebene Dateinamen (ohne Endung) je Gruppe, etwa „2609 Gehalt Silvia“. Sie gehen vor: Sonst
+    /// entsteht der Name aus Jahr und Monat der Aufnahme und der Beschreibung.
+    public var fileNames: [String: String]
 
-    public init(names: [String: String] = [:], targets: [String: String] = [:]) {
+    public init(names: [String: String] = [:], targets: [String: String] = [:], fileNames: [String: String] = [:]) {
         self.names = names
         self.targets = targets
+        self.fileNames = fileNames
     }
 
     // Ältere Dateien kennen `targets` nicht.
@@ -17,6 +21,7 @@ public struct InboxInfo: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         names = try c.decodeIfPresent([String: String].self, forKey: .names) ?? [:]
         targets = try c.decodeIfPresent([String: String].self, forKey: .targets) ?? [:]
+        fileNames = try c.decodeIfPresent([String: String].self, forKey: .fileNames) ?? [:]
     }
 }
 
@@ -54,6 +59,17 @@ extension ScanDocument {
     /// Die Beschreibung des Dokuments, falls eine vergeben ist.
     public func name(of group: PageGroup) -> String? { inbox?.names[group.id.uuidString] }
 
+    /// Der vom Nutzer vorgegebene vollständige Dateiname (ohne Endung), falls es einen gibt.
+    public func fileName(of group: PageGroup) -> String? { inbox?.fileNames[group.id.uuidString] }
+
+    /// Gibt dem Dokument einen vollständigen Dateinamen. Leer oder `nil` nimmt ihn zurück: Dann gilt wieder Jahr, Monat und Beschreibung.
+    public mutating func setFileName(_ name: String?, of groupID: UUID) {
+        guard inbox != nil else { return }
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        inbox?.fileNames[groupID.uuidString] = trimmed.isEmpty ? nil : trimmed
+        revision += 1
+    }
+
     /// Das Ziel des Dokuments (Kennung), falls eines gesetzt ist.
     public func target(of group: PageGroup) -> UUID? { inbox?.targets[group.id.uuidString].flatMap(UUID.init(uuidString:)) }
 
@@ -82,6 +98,7 @@ extension ScanDocument {
         for i in pages.indices where moving.pageIDs.contains(pages[i].id) { pages[i].groupID = target }
         inbox?.names[moving.id.uuidString] = nil
         inbox?.targets[moving.id.uuidString] = nil      // das vordere Dokument bestimmt das Ziel
+        inbox?.fileNames[moving.id.uuidString] = nil
         revision += 1
         return true
     }
