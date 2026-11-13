@@ -114,6 +114,12 @@ public struct SeriesEditorView: View {
                     .help("Schaltet das Aufhellen für \(withoutTone) Seite\(withoutTone == 1 ? "" : "n") ein, bei denen es noch aus ist")
                     .accessibilityIdentifier("editor-tone-all")
             }
+            let curvature = model.pagesNeedingCurvature(documentID: document.id)
+            if curvature > 0 {
+                Button("Wölbung ausgleichen: alle Seiten") { Task { await model.equalizeCurvatureForAllPages(documentID: document.id) } }
+                    .help("Misst die Wölbung der Seiten (die Zeilen laufen oben anders als unten) und gleicht sie bei \(curvature) Seite\(curvature == 1 ? "" : "n") aus")
+                    .accessibilityIdentifier("editor-dewarp-all")
+            }
             if document.isInbox {
                 inboxFileButton(document)
             } else {
@@ -339,6 +345,11 @@ public struct SeriesEditorView: View {
             Toggle("Papier aufhellen", isOn: Binding(get: { c.tone.enabled }, set: { on in change { $0.setToneEnabled(on) } }))
                 .help("Macht das Papier hell und gleichmäßig und die Schrift kräftiger")
                 .accessibilityIdentifier("editor-tone")
+            if let field = c.dewarp.field {
+                Toggle("Wölbung ausgleichen", isOn: Binding(get: { c.dewarp.enabled }, set: { on in change { $0.setDewarpEnabled(on) } }))
+                    .help(String(format: "Die Zeilen laufen auf dieser Seite unterschiedlich (Spanne %.1f°). Das Ausgleichen schiebt die Spalten der Seite senkrecht, sodass alle Zeilen auf demselben Winkel laufen.", field.spread))
+                    .accessibilityIdentifier("editor-dewarp")
+            }
             if c.handRemoval.hasMask {
                 Toggle("Hände und Daumen entfernen", isOn: Binding(get: { c.handRemoval.enabled }, set: { on in change { $0.setHandRemovalEnabled(on) } }))
                     .accessibilityIdentifier("editor-hands")

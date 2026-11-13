@@ -127,17 +127,21 @@ public struct Corrections: Codable, Equatable, Sendable {
     public var rotation: RotationCorrection
     /// Hände und Daumen entfernen. Wird zuerst angewendet, vor Zuschnitt und Drehung.
     public var handRemoval: HandRemovalCorrection
+    /// Wölbung ausgleichen. Wird nach dem Zuschnitt und vor der Drehung angewendet.
+    public var dewarp: DewarpCorrection
     /// Papier aufhellen und Kontrast anheben. Wird zuletzt angewendet, nach Zuschnitt und Drehung.
     public var tone: ToneCorrection
     /// Hochgezählt bei jeder Änderung.
     public var revision: Int
 
     public init(enabled: Bool = true, crop: CropCorrection = .init(), rotation: RotationCorrection = .init(),
-                handRemoval: HandRemovalCorrection = .init(), tone: ToneCorrection = .init(), revision: Int = 0) {
+                handRemoval: HandRemovalCorrection = .init(), dewarp: DewarpCorrection = .init(), tone: ToneCorrection = .init(),
+                revision: Int = 0) {
         self.enabled = enabled
         self.crop = crop
         self.rotation = rotation
         self.handRemoval = handRemoval
+        self.dewarp = dewarp
         self.tone = tone
         self.revision = revision
     }
@@ -150,6 +154,7 @@ public struct Corrections: Codable, Equatable, Sendable {
         crop = try c.decode(CropCorrection.self, forKey: .crop)
         rotation = try c.decode(RotationCorrection.self, forKey: .rotation)
         handRemoval = try c.decodeIfPresent(HandRemovalCorrection.self, forKey: .handRemoval) ?? .init()
+        dewarp = try c.decodeIfPresent(DewarpCorrection.self, forKey: .dewarp) ?? .init()
         tone = try c.decodeIfPresent(ToneCorrection.self, forKey: .tone) ?? .init()
         revision = try c.decode(Int.self, forKey: .revision)
     }
@@ -177,6 +182,13 @@ public struct Corrections: Codable, Equatable, Sendable {
     public mutating func setHandRemovalEnabled(_ on: Bool) {
         handRemoval.enabled = on
         handRemoval.source = .manual
+        revision += 1
+    }
+
+    /// Schaltet das Ausgleichen der Wölbung ein oder aus. Ab dann gilt es als manuell.
+    public mutating func setDewarpEnabled(_ on: Bool) {
+        dewarp.enabled = on
+        dewarp.source = .manual
         revision += 1
     }
 

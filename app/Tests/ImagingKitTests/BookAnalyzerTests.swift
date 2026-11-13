@@ -142,4 +142,12 @@ struct BookAnalyzerTests {
         #expect(unsure.left.crop.enabled == false)
         #expect(unsure.left.needsReview)   // Vorschlag liegt vor, wurde aber nicht angewendet
     }
+
+    @Test func everyPageCarriesAMeasurementAttemptSoItStaysQuietAfterwards() throws {
+        let pages = BookAnalyzer.corrections(from: BookAnalyzer.analyze(spread()))
+        #expect(pages.left.dewarp.wasMeasured && pages.right.dewarp.wasMeasured, "Eine Messung wurde versucht, mit oder ohne Ergebnis")
+        // Der Zuschnitt auf das erkannte Viereck fächert die waagerechten Zeilen dieser künstlichen Seite um etwa 1° auf (das Viereck ist
+        // nie ganz rechtwinklig zu den Zeilen). Die Messung sieht das, und das Ausgleichen stellt die Zeilen wieder gerade.
+        #expect(pages.left.dewarp.hasField && pages.left.dewarp.enabled, "Aufgefächert und deshalb ausgeglichen")
+    }
 }

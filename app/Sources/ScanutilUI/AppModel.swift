@@ -1087,6 +1087,62 @@ public final class AppModel {
         return changed
     }
 
+    /// Seiten einer Serie, bei denen „Wölbung ausgleichen: alle Seiten“ etwas tut: Die Wölbung ist noch nicht gemessen, oder sie ist
+    /// gemessen, lohnt sich und ist aus.
+    public func pagesNeedingCurvature(documentID: UUID) -> Int {
+        guard let document = latestDocument(id: documentID), document.effectiveProfile == .book else { return 0 }
+        return document.pages.filter { page in
+            let d = page.corrections.dewarp
+            guard let field = d.field else { return !d.wasMeasured }
+            return field.isWorthEqualizing && !d.enabled
+        }.count
+    }
+
+    /// Misst bei allen Seiten ohne Messung die Wölbung (am vorhandenen Zuschnitt, ohne andere Korrekturen anzufassen) und schaltet
+    /// den Ausgleich überall ein, wo er sich lohnt. Gibt die Zahl der Seiten zurück, bei denen sich etwas geändert hat.
+    @discardableResult
+    public func equalizeCurvatureForAllPages(documentID: UUID) async -> Int {
+        guard let start = latestDocument(id: documentID) else { return 0 }
+        let store = self.store
+        var measured: [UUID: DewarpEstimate?] = [:]
+        for page in start.pages where !page.corrections.dewarp.wasMeasured {
+            var corrections = PageGeometry.effectiveCorrections(for: page)
+            corrections.rotation.enabled = false; corrections.tone.enabled = false; corrections.dewarp.enabled = false
+            let scanID = page.scanID, scale = Self.curvatureMeasuringSize
+            let estimate: DewarpEstimate? = await Task.detached {
+                guard let record = try? store.load(id: scanID),
+                      let image = store.thumbnail(for: record, maxPixelSize: scale),
+                      let flat = CorrectionRenderer.render(image, corrections: corrections) else { return nil }
+                return DewarpEstimator.estimate(flat)
+            }.value
+            measured[page.id] = .some(estimate)
+        }
+        guard var document = latestDocument(id: documentID) else { return 0 }
+        var changed = 0
+        for index in document.pages.indices {
+            let pageID = document.pages[index].id
+            let current = document.pages[index].corrections.dewarp
+            var target = current
+            if !current.wasMeasured, let result = measured[pageID] {
+                target = result.map { DewarpCorrection(enabled: $0.worthApplying, source: .automatic, confidence: $0.reliableShare, field: $0.field) }
+                    ?? .notMeasurable
+            }
+            if let field = target.field, field.isWorthEqualizing { target.enabled = true }
+            guard target != current else { continue }
+            _ = document.updateCorrections(pageID: pageID) { $0.dewarp = target; $0.revision += 1 }
+            if let scanIndex = scans.firstIndex(where: { $0.id == document.pages[index].scanID }), document.pages[index].region == .whole {
+                scans[scanIndex].corrections.dewarp = target
+                try? store.saveCorrections(scans[scanIndex].corrections, for: scans[scanIndex].id)
+            }
+            changed += 1
+        }
+        if changed > 0 { commit(document) }
+        return changed
+    }
+
+    /// Längste Kante des Scans, auf dem die Wölbung gemessen wird. Wie bei der Analyse einer Doppelseite.
+    nonisolated static let curvatureMeasuringSize = 2400
+
     /// Das Profil der Serie, zu der ein Scan gehört; ohne Serie gilt Dokument.
     func profile(forScan id: UUID) -> ScanProfile {
         ([series, openedDocument].compactMap { $0 } + savedDocuments).first { $0.pages.contains { $0.scanID == id } }?.effectiveProfile ?? .document

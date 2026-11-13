@@ -32,6 +32,17 @@ public enum CorrectionRenderer {
             ci = corrected.transformed(by: CGAffineTransform(translationX: -corrected.extent.minX, y: -corrected.extent.minY))
         }
 
+        // Wölbung: auf der zugeschnittenen Seite, vor der Drehung. Die Zeilen werden auf den Winkel der Drehung gebracht,
+        // die Drehung stellt sie dann waagerecht.
+        if corrections.dewarp.enabled, let field = corrections.dewarp.field {
+            let extent = ci.extent.integral
+            if extent.width >= 8, extent.height >= 8, let flat = context.createCGImage(ci, from: extent),
+               let straightened = DewarpRenderer.apply(to: flat, field: field,
+                                                       reference: corrections.rotation.enabled ? corrections.rotation.degrees : field.mean) {
+                ci = CIImage(cgImage: straightened)
+            }
+        }
+
         if corrections.rotation.enabled, abs(corrections.rotation.degrees) > 0.001 {
             let size = ci.extent.size
             let center = CGPoint(x: size.width / 2, y: size.height / 2)
