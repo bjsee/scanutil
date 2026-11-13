@@ -328,6 +328,9 @@ struct SeriesManagementTests {
         let model = makeModel(archive: archive)
         await model.connect()
         let id = try await record(model, title: "Lücke", scans: 2)
+        // Die Analysen müssen durch sein: Eine, die nach dem Überschreiben unten noch fertig wird, schriebe das Dokument zurück.
+        for _ in 0..<400 where !model.analyzing.isEmpty { try await Task.sleep(for: .milliseconds(25)) }
+        #expect(model.analyzing.isEmpty)
         // Ein Dokument verweist auf einen Scan, den es nicht gibt (etwa von Hand aus dem Archiv genommen).
         var doc = try #require(model.savedDocuments.first { $0.id == id })
         doc.append(DocumentPage(scanID: UUID()))
