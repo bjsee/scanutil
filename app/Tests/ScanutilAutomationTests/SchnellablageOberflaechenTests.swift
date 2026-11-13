@@ -55,6 +55,22 @@ struct SchnellablageOberflaechenTests {
         #expect(s.originals.count == 2, "Die Originale bleiben im Archiv")
     }
 
+    @Test func aDocumentCanBeDeletedDirectlyAndTheUndoLineBringsItBack() throws {
+        let s = try launch(); defer { s.close() }
+        record(s, scans: 2)
+        #expect(s.app.press("inbox-finish-button"))
+        #expect(s.app.wait(timeout: 60) { s.app.elements("inbox-group").count == 2 }, "Zwei Dokumente")
+        #expect(s.app.elements("inbox-delete-document").count == 2, "Jedes Dokument hat einen Löschknopf")
+
+        #expect(s.app.press("inbox-delete-document"))
+        #expect(s.app.wait { s.app.elements("inbox-group").count == 1 }, "Das Dokument sollte verschwunden sein")
+        #expect(s.app.wait { s.app.element("editor-undo-remove") != nil }, "Es gibt die Zeile mit „Rückgängig“")
+        #expect(s.originals.count == 2, "Die Scans bleiben im Archiv")
+
+        #expect(s.app.press("editor-undo-remove"))
+        #expect(s.app.wait { s.app.elements("inbox-group").count == 2 }, "Rückgängig holt das Dokument zurück")
+    }
+
     @Test func mergingTwoPagesGivesOnePdfWithTwoPagesNamedAfterTheTypedDescription() throws {
         let s = try launch(); defer { s.close() }
         record(s, scans: 2)

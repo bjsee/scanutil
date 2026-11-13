@@ -931,6 +931,14 @@ public final class AppModel {
         var count = 0
         for id in pageIDs where document.removePage(id: id) != nil { count += 1 }
         guard count > 0 else { return 0 }
+        // Namen, Ziele und Dateinamen entfernter Dokumente der Schnellablage gehören nicht mehr dazu (Rückgängig stellt den ganzen Stand her).
+        if var inbox = document.inbox {
+            let alive = Set(document.groups.map { $0.id.uuidString })
+            inbox.names = inbox.names.filter { alive.contains($0.key) }
+            inbox.targets = inbox.targets.filter { alive.contains($0.key) }
+            inbox.fileNames = inbox.fileNames.filter { alive.contains($0.key) }
+            document.inbox = inbox
+        }
         undoablePageRemoval = before
         commit(document)
         return count
