@@ -203,7 +203,13 @@ public struct SeriesEditorView: View {
                     if !pages.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             InboxGroupHeader(model: model, documentID: document.id, group: group, number: index + 1,
-                                             canMerge: index > 0, firstPageID: group.pageIDs[0])
+                                             canMerge: index > 0, firstPageID: group.pageIDs[0]) {
+                                // Auswahl: die erste Seite des nächsten Dokuments, sonst die des vorigen.
+                                let neighbours = document.groups.indices.contains(index + 1) ? document.groups[index + 1]
+                                    : (index > 0 ? document.groups[index - 1] : nil)
+                                model.removePages(documentID: document.id, pageIDs: group.pageIDs)
+                                editor.selectedPageID = neighbours?.pageIDs.first
+                            }
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: cardHeight * 0.8, maximum: cardHeight * 1.2), spacing: 10)], spacing: 10) {
                                 ForEach(pages) { page in
                                     let number = (document.pages.firstIndex { $0.id == page.id } ?? 0) + 1
@@ -425,6 +431,8 @@ struct InboxGroupHeader: View {
     let number: Int
     let canMerge: Bool
     let firstPageID: UUID
+    /// Löscht das ganze Dokument (alle seine Seiten). Der Aufrufer stellt danach die Auswahl um.
+    let onDelete: () -> Void
     @State private var text = ""
     @FocusState private var focused: Bool
 
@@ -457,6 +465,9 @@ struct InboxGroupHeader: View {
                     .help("Macht aus diesem und dem Dokument davor eines")
                     .accessibilityIdentifier("inbox-merge-button")
             }
+            Button(role: .destructive) { onDelete() } label: { Label("Dokument löschen", systemImage: "trash") }
+                .help("Nimmt dieses Dokument mit allen Seiten aus der Schnellablage. Die Scans bleiben im Archiv; „Rückgängig“ holt es zurück")
+                .accessibilityIdentifier("inbox-delete-document")
         }
         .onAppear { text = stem }
         // Ein Vorschlag, der nachträglich eintrifft, erscheint im Feld, solange man nicht gerade tippt.
