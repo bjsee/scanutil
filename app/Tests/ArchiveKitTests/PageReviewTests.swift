@@ -26,6 +26,35 @@ struct PageReviewTests {
         #expect(review.findings.isEmpty && review.severity == nil && !review.isUncertain && !review.needsAttention)
     }
 
+    // MARK: Wölbung
+
+    private func fanning() -> WarpField {
+        var angles: [Float] = []
+        for r in 0..<7 { for _ in 0..<3 { angles.append(Float(-0.4 * Double(r))) } }
+        return WarpField(columns: 3, rows: 7, angles: angles)!
+    }
+
+    @Test func anEqualizedCurvatureIsANoteAndNotAnUncertainty() throws {
+        var page = sureBookPage()
+        page.corrections.dewarp = DewarpCorrection(enabled: true, source: .automatic, confidence: 1, field: fanning())
+        let review = PageReviewer.review(page)
+        let finding = try #require(review.findings.first { $0.message.contains("Wölbung") })
+        #expect(finding.severity == .note && finding.kind == .rotation)
+        #expect(finding.message.contains("2,4°"), "Spanne in Grad mit Komma: \(finding.message)")
+        #expect(!review.needsAttention)
+    }
+
+    @Test func aMeasuredButSwitchedOffCurvatureIsMentionedAndAManualOneIsListed() throws {
+        var page = sureBookPage()
+        page.corrections.dewarp = DewarpCorrection(enabled: false, source: .automatic, confidence: 1, field: fanning())
+        #expect(PageReviewer.review(page).findings.contains { $0.message.contains("nicht ausgeglichen") })
+        page.corrections.setDewarpEnabled(false)
+        let review = PageReviewer.review(page)
+        #expect(!review.findings.contains { $0.message.contains("nicht ausgeglichen") }, "Von Hand ausgeschaltet ist keine Meldung wert")
+        #expect(review.findings.contains { $0.kind == .manual && $0.message.contains("Wölbung") })
+        #expect(!PageReviewer.review(sureBookPage()).findings.contains { $0.message.contains("Wölbung") }, "Ohne Messung kein Hinweis")
+    }
+
     // MARK: Falz und Rand
 
     @Test func aShakyGutterIsAFindingToCheck() {

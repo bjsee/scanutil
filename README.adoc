@@ -122,6 +122,19 @@ Die Randerkennung (Vision) folgt dem Buch als Ganzem, und dazu gehört der Rand 
 * Gemessen an denselben sechs Scans: grüner Anteil im linken Randstreifen danach 0 bis 0,9 %; Text, Zeilenanfänge und Seitenzahlen bleiben vollständig.
 * *Nicht getan:* die Seitengrößen im PDF angleichen. Sie schwanken bei uns um 8 % (421 bis 456 pt Breite), bei der Scanner-Software um 6 % (462 bis 492 pt), das ist kein nennenswerter Unterschied.
 
+=== Wölbung ausgleichen
+
+Eine aufgeschlagene Buchseite liegt nicht flach, und auch der Zuschnitt auf das erkannte Viereck ist nie ganz rechtwinklig zu den Zeilen: Die Zeilen laufen oben anders als unten. An den linken Seiten der Serie „sagenbuch neu“ (13. November 2026) stieg der Zeilenwinkel von etwa 0° oben auf −1,0° bis −3,1° unten, in einer Ecke zusätzlich von links nach rechts; die rechten Seiten lagen gleichmäßig bei +0,5° bis +1,4°. Eine einzige Drehung kann das nicht beheben.
+
+*Ausgleichen der Wölbung* ist eine Korrektur je Seite, wie Zuschnitt und Drehung, nicht zerstörend (`DewarpCorrection`, `Dewarp.swift`):
+
+* *Messung (`DewarpEstimator`):* Auf der zugeschnittenen Seite liegt ein Raster aus 3 Spalten × 7 Zeilen überlappender Fenster. In jedem Fenster wird der Zeilenwinkel wie bei der Drehung über das Projektionsprofil gemessen (±6°, Schritte von 0,025°). Fenster mit zu wenig Schrift oder ohne klare Zeilenstruktur (Spitzenverhältnis unter 1,3) zählen nicht; Lücken werden aus den Nachbarn gefüllt, das Raster einmal geglättet. Unter 50 % verlässlicher Fenster gibt es kein Ergebnis. Gespeichert wird nur das Raster (21 Zahlen).
+* *Ausgleichen (`DewarpRenderer`):* Jede Spalte der Seite wird senkrecht verschoben, um S(x, y) = ∫ (tan θ − tan θ~ref~) dx, vom Seitenmittelpunkt aus. Die Zeilen laufen danach überall auf dem Winkel der Drehung, die anschließende Drehung stellt sie waagerecht. Wer die Drehung von Hand ändert, ändert damit auch das Ziel des Ausgleichs. Die Verschiebung ist senkrecht und bilinear gerechnet; die Seite wird nicht horizontal verzerrt.
+* *Automatisch an* ist es bei Buchseiten, wenn mindestens 70 % der Fenster verlässlich sind, der Unterschied zwischen den Zellen mindestens 0,6° beträgt und keine Zelle mehr als 6° vom Mittel abweicht (darüber ist es eher eine Fehlmessung durch Bild oder Handschrift als eine Wölbung). Ebene Seiten, Bildseiten und leere Seiten bleiben unberührt.
+* *Messung an 26 Originalen:* Bei 83b92d66 lagen die Zellen vorher links zwischen 0° und −1,2°, rechts zwischen +0,4° und +1,4°, danach alle bei 0° ±0,3°. Bei 65ccb2ff (links, am stärksten gewölbt) sank die Streuung von −3,1° … −0,4° auf höchstens ±0,6° in den Ecken. Der Aufwand beträgt etwa 0,06 s je Doppelseite bei der Analyse.
+* *Im Editor:* Je Seite der Schalter „Wölbung ausgleichen“ (nur wenn gemessen wurde) und in der Kopfzeile „Wölbung ausgleichen: alle Seiten“. Der Knopf misst bei bestehenden Serien, die noch keine Messung haben, die Wölbung am vorhandenen Zuschnitt, ohne andere Korrekturen anzufassen, und schaltet überall ein, wo es sich lohnt. Seiten, die sich nicht messen lassen, gelten danach als gemessen und bleiben still. Die Seitenbewertung nennt „Wölbung ausgeglichen (Zeilen liefen um 2,4° auseinander)“ als Hinweis.
+* *Grenzen:* Gemessen wird nur der Zeilenwinkel. Eine Stauchung der Schrift zum Falz hin (Wölbung von der Seite gesehen) gleicht es nicht aus, ebenso keine gekrümmten Zeilen mit mehr als einem Wendepunkt über die Seitenbreite. Am Rand oben und unten wiederholt sich die letzte Bildzeile, wo die Verschiebung über das Bild hinausreicht (bei 2,4° Spanne etwa 1 % der Seitenhöhe).
+
 === Papier aufhellen
 
 Die Aufnahmen sind flau: grauer Papierton, Schatten zum Falz, Schrift nicht kräftig. Im Vergleich mit der Software des Scanners (7. November 2026, am selben Buch) war das der auffälligste Unterschied. *Papier aufhellen* ist eine Korrektur je Seite, wie Zuschnitt und Drehung, nicht zerstörend (das Original bleibt):

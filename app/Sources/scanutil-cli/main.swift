@@ -128,13 +128,20 @@ do {
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { fail("Bild nicht lesbar") }
         let analysis = BookAnalyzer.analyze(image)
         if let outDir = option("--out", in: args) {
-            let pair = BookAnalyzer.corrections(from: analysis)
+            var pair = BookAnalyzer.corrections(from: analysis)
+            if args.contains("--ohne-entzerrung") { pair.left.dewarp.enabled = false; pair.right.dewarp.enabled = false }
+            if args.contains("--ohne-drehung") { pair.left.rotation.enabled = false; pair.right.rotation.enabled = false; pair.left.tone.enabled = false; pair.right.tone.enabled = false }
             for (name, corr) in [("links", pair.left), ("rechts", pair.right)] {
                 if let img = CorrectionRenderer.render(image, corrections: corr),
                    let d = CGImageDestinationCreateWithURL(URL(fileURLWithPath: outDir + "/seite-\(name).png") as CFURL, UTType.png.identifier as CFString, 1, nil) {
                     CGImageDestinationAddImage(d, img, nil); CGImageDestinationFinalize(d)
                 }
             }
+        }
+        for (name, d) in [("links", analysis.leftDewarp), ("rechts", analysis.rightDewarp)] {
+            guard let d else { print("Wölbung \(name): nicht messbar"); continue }
+            print(String(format: "Wölbung %@: verlässlich %.0f %%, Spanne %.2f°, größte Abweichung %.2f°, wird angewendet: %@", name, d.reliableShare * 100,
+                         d.field.spread, d.field.largestDeviation, d.worthApplying ? "ja" : "nein"))
         }
         for (name, quad) in [("links", analysis.leftQuad), ("rechts", analysis.rightQuad)] {
             var c = Corrections(crop: CropCorrection(quad: quad, enabled: true)); c.enabled = true

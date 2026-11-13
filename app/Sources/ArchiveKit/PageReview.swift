@@ -102,6 +102,16 @@ public enum PageReviewer {
                 }
             }
 
+            // Wölbung: nur ein Hinweis, damit man sieht, wo die Seite verformt wurde.
+            if let field = c.dewarp.field {
+                let span = String(format: "%.1f", field.spread).replacingOccurrences(of: ".", with: ",")
+                if c.dewarp.enabled {
+                    add(.rotation, .note, "Wölbung ausgeglichen (Zeilen liefen um \(span)° auseinander).")
+                } else if c.dewarp.source == .automatic, field.isWorthEqualizing {
+                    add(.rotation, .note, "Wölbung gemessen (\(span)°), aber nicht ausgeglichen.")
+                }
+            }
+
             // Hände und Marker.
             if c.handRemoval.hasMask {
                 let share = page.analysis?.handCoverage.map { " (\(Int(($0 * 100).rounded())) % des Bildes)" } ?? ""
@@ -120,6 +130,7 @@ public enum PageReviewer {
         if c.crop.source == .manual { manual.append("Zuschnitt") }
         if c.rotation.source == .manual { manual.append("Drehung") }
         if c.handRemoval.source == .manual && c.handRemoval.hasMask { manual.append("Hände") }
+        if c.dewarp.source == .manual && c.dewarp.hasField { manual.append("Wölbung") }
         if !manual.isEmpty { add(.manual, .note, "Von Hand geändert: " + manual.joined(separator: ", ") + ".") }
 
         return PageReview(findings: findings, isReviewed: page.isReviewed)

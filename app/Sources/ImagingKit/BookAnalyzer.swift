@@ -9,6 +9,9 @@ public struct BookAnalysis: Equatable, Sendable {
     public let gutter: Gutter?
     public let leftSkew: SkewEstimate?
     public let rightSkew: SkewEstimate?
+    /// Verlauf der Zeilen über die Höhe und Breite jeder Seite (Wölbung), falls messbar.
+    public let leftDewarp: DewarpEstimate?
+    public let rightDewarp: DewarpEstimate?
     /// Zuschnitt der linken und der rechten Seite. Ohne erkannten Rand oder Falz sind es die Hälften des ganzen Bildes.
     public let leftQuad: Quad
     public let rightQuad: Quad
@@ -61,14 +64,14 @@ public enum BookAnalyzer {
         let (left, right) = gutter.map { split(outerQuad, at: $0) }
             ?? (SpreadHalves.half(of: outerQuad, left: true), SpreadHalves.half(of: outerQuad, left: false))
 
-        let leftSkew = skew(of: working, quad: left)
-        let rightSkew = skew(of: working, quad: right)
+        let leftPage = skewMeasure(of: working, quad: left), rightPage = skewMeasure(of: working, quad: right)
+        let leftSkew = leftPage.skew, rightSkew = rightPage.skew
         if leftSkew == nil || rightSkew == nil { warnings.append("Die Schräglage einer Seite konnte nicht gemessen werden.") }
         else if let l = leftSkew, let r = rightSkew, min(l.confidence, r.confidence) < Corrections.defaultConfidenceThreshold {
             warnings.append("Die Schräglage einer Seite ist unsicher.")
         }
         return BookAnalysis(outer: outer, gutter: gutter, leftSkew: leftSkew, rightSkew: rightSkew,
-                            leftQuad: left, rightQuad: right, warnings: warnings, hands: hands)
+                            leftDewarp: leftPage.dewarp, rightDewarp: rightPage.dewarp, leftQuad: left, rightQuad: right, warnings: warnings, hands: hands)
     }
 
     /// Aus der Analyse werden Korrekturen je Seite. Sichere Ergebnisse sind aktiv, unsichere nur vorgeschlagen.
@@ -80,9 +83,11 @@ public enum BookAnalyzer {
         // und ein unsicherer Zuschnitt war an echten Büchern richtig, die Bildhälfte mit Tuch dagegen nie: Eine flache Schattenlinie
         // (leere Seite, kaum Falz) drückt die Sicherheit, ohne dass die Lage falsch wäre. Die Warnung „Falz unsicher“ bleibt.
         let cropConfident = analysis.gutter != nil
-        func make(quad: Quad, skew: SkewEstimate?) -> Corrections {
+        func make(quad: Quad, skew: SkewEstimate?, dewarp: DewarpEstimate?) -> Corrections {
             var result = Corrections()
             result.tone = ToneCorrection(enabled: true, source: .automatic)
+            result.dewarp = dewarp.map { DewarpCorrection(enabled: $0.worthApplying, source: .automatic, confidence: $0.reliableShare, field: $0.field) }
+                ?? .notMeasurable
             result.crop = CropCorrection(quad: quad, enabled: cropConfident, source: .automatic, confidence: cropConfidence)
             if let s = skew {
                 result.rotation = RotationCorrection(degrees: s.degrees, enabled: s.confidence >= threshold, source: .automatic, confidence: s.confidence)
@@ -94,7 +99,8 @@ public enum BookAnalyzer {
             }
             return result
         }
-        return (make(quad: analysis.leftQuad, skew: analysis.leftSkew), make(quad: analysis.rightQuad, skew: analysis.rightSkew))
+        return (make(quad: analysis.leftQuad, skew: analysis.leftSkew, dewarp: analysis.leftDewarp),
+                make(quad: analysis.rightQuad, skew: analysis.rightSkew, dewarp: analysis.rightDewarp))
     }
 
     /// Teilt das Viereck an der Falzgeraden. Die Schnittpunkte liegen auf der oberen und der unteren Kante.
@@ -125,12 +131,12 @@ public enum BookAnalyzer {
         return (xs.min()!, xs.max()!, ys.min()!, ys.max()!)
     }
 
-    /// Schräglage einer Seite, gemessen auf der ausgeschnittenen und entzerrten Seite.
-    private static func skew(of image: CGImage, quad: Quad) -> SkewEstimate? {
+    /// Schräglage und Wölbung einer Seite, gemessen auf der ausgeschnittenen und entzerrten Seite.
+    private static func skewMeasure(of image: CGImage, quad: Quad) -> (skew: SkewEstimate?, dewarp: DewarpEstimate?) {
         var crop = Corrections(crop: CropCorrection(quad: quad, enabled: true))
         crop.enabled = true
-        guard let page = CorrectionRenderer.render(image, corrections: crop) else { return nil }
-        return SkewEstimator.estimateAveraged(page)
+        guard let page = CorrectionRenderer.render(image, corrections: crop) else { return (nil, nil) }
+        return (SkewEstimator.estimateAveraged(page), DewarpEstimator.estimate(page))
     }
 
     private static func downscaled(_ image: CGImage, maxDimension: Double) -> CGImage {
