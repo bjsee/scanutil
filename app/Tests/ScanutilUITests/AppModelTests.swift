@@ -159,7 +159,8 @@ struct AppModelTests {
         await model.scan()
         #expect(await eventually { model.scans.first?.corrections.rotation.degrees == 1.5 })
         let id = try #require(model.scans.first?.id)
-        #expect(try ArchiveStore(root: dir).corrections(for: id) == AppModelTests.confident.corrections)
+        // Gespeichert wird, was das Profil daraus macht (Dokument: aufhellen), nicht das rohe Ergebnis der Analyse.
+        #expect(try ArchiveStore(root: dir).corrections(for: id) == ScanProfile.document.adjusted(AppModelTests.confident.corrections))
         #expect(model.selectedID == id)
         #expect(await eventually { model.analyzing.isEmpty })
         await model.disconnect()
