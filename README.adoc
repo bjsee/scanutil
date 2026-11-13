@@ -112,6 +112,15 @@ Ansehen: `scanutil-cli analyze <scan.png> --hands --out ueberlagerung.png --clea
 
 *Schatten und Text neben dem Marker:* Der Marker wirft einen Schatten aufs Papier; er wird mit entfernt, aber nur dort, wo wirklich Schatten liegt (glattes, etwas dunkleres, ungefärbtes Papier). Schrift dicht neben dem Marker, etwa Zeilenanfänge an der Papierkante, bleibt unberührt. Eine pauschale Verbreiterung um den Marker hatte an einem echten Buch (7. und 13. November 2026) die ersten Buchstaben von Zeilen weggefüllt. `scanutil-cli hands <scan.png> --out überlagerung.png [--cleaned bereinigt.png]` zeigt die Maske und das Ergebnis an einem Scan.
 
+=== Zuschnitt an der Papierkante
+
+Die Randerkennung (Vision) folgt dem Buch als Ganzem, und dazu gehört der Rand des Einbands: Am linken Rand der Seiten blieb ein grüner Streifen stehen (an einem echten Buch gemessen: 3,5 bis 25 % der Pixel im linken Randstreifen waren grün). `EdgeRefiner` rückt die vier Außenkanten der Doppelseite nach innen, bis dort Papier liegt (hell, kaum gefärbt):
+
+* Je Kante wird an etwa 28 Stellen entlang der Kante geprüft, wie weit man nach innen muss, bis mindestens 75 % der Stellen Papier sind. Stellen unter einem Marker oder einem Daumen zählen nicht mit.
+* Höchstens 5 % der Seitenbreite bzw. -höhe; müsste die Kante weiter, bleibt sie, wo sie ist (dann stimmt wohl etwas anderes nicht). Verschiebungen von ein, zwei Pixeln (Antialiasing) unterbleiben.
+* Gemessen an denselben sechs Scans: grüner Anteil im linken Randstreifen danach 0 bis 0,9 %; Text, Zeilenanfänge und Seitenzahlen bleiben vollständig.
+* *Nicht getan:* die Seitengrößen im PDF angleichen. Sie schwanken bei uns um 8 % (421 bis 456 pt Breite), bei der Scanner-Software um 6 % (462 bis 492 pt), das ist kein nennenswerter Unterschied.
+
 === Papier aufhellen
 
 Die Aufnahmen sind flau: grauer Papierton, Schatten zum Falz, Schrift nicht kräftig. Im Vergleich mit der Software des Scanners (7. November 2026, am selben Buch) war das der auffälligste Unterschied. *Papier aufhellen* ist eine Korrektur je Seite, wie Zuschnitt und Drehung, nicht zerstörend (das Original bleibt):

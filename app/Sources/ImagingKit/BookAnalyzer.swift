@@ -39,7 +39,8 @@ public enum BookAnalyzer {
             outer = nil
         }
         if outer == nil, warnings.isEmpty { warnings.append("Der Rand der Doppelseite wurde nicht erkannt.") }
-        let outerQuad = outer?.quad ?? .full
+        // Die Außenkanten rücken nach innen, bis dort Papier liegt: ohne Einbandstreifen, Tuch und Schatten am Rand.
+        let outerQuad = outer.map { EdgeRefiner.refine($0.quad, in: working) } ?? .full
         // Zweiter Durchgang mit bekanntem Seitenrand: findet auch Daumen und Marker, die den Bildrand nicht berühren.
         if let page = outer?.quad, let more = HandDetector.detect(in: downscaled(original, maxDimension: workingSize), page: page) {
             hands = HandDetector.union(hands, more)
