@@ -19,6 +19,8 @@ public struct SeriesEditorView: View {
     @State private var previewMode = PagePreview.Mode.original
     /// Was die letzte Aktion auf markierte Seiten bewirkt hat („Papier aufhellen bei 5 von 8 Seiten geändert“).
     @State private var batchNote: String?
+    /// Der Winkel im Feld der Leiste für markierte Seiten.
+    @State private var batchRotationText = "0"
 
     public init(model: AppModel, documentID: UUID?, nav: Navigator) { self.model = model; self.documentID = documentID; self.nav = nav }
 
@@ -311,6 +313,18 @@ public struct SeriesEditorView: View {
                     .accessibilityIdentifier("editor-batch-crop")
                 }
                 HStack(spacing: 6) {
+                    Text("Drehung").font(.callout)
+                    TextField("0", text: $batchRotationText)
+                        .textFieldStyle(.roundedBorder).frame(width: 56).multilineTextAlignment(.trailing)
+                        .onSubmit { setRotation(document, ids) }
+                        .help("Winkel in Grad, im Uhrzeigersinn, bis ±15° (Komma oder Punkt)")
+                        .accessibilityLabel("Winkel für die markierten Seiten")
+                        .accessibilityIdentifier("editor-batch-rotation-field")
+                    Text("°").font(.callout)
+                    batchButton("Setzen", id: "editor-batch-rotation-set") { setRotation(document, ids) }
+                    batchButton("0°", id: "editor-batch-rotation-zero") { batchRotationText = "0"; setRotation(document, ids) }
+                }
+                HStack(spacing: 6) {
                     Text("Papier aufhellen").font(.callout)
                     batchButton("An", id: "editor-batch-tone-on") { setTone(true, document, ids) }
                     batchButton("Aus", id: "editor-batch-tone-off") { setTone(false, document, ids) }
@@ -333,6 +347,16 @@ public struct SeriesEditorView: View {
 
     private func batchButton(_ title: String, id: String, action: @escaping () -> Void) -> some View {
         Button(title, action: action).accessibilityIdentifier(id)
+    }
+
+    private func setRotation(_ document: ScanDocument, _ ids: [UUID]) {
+        guard let angle = AngleInput.parse(batchRotationText) else {
+            batchNote = "„\(batchRotationText)“ ist kein Winkel. Beispiel: 0 oder -0,5."
+            return
+        }
+        let n = model.setRotation(degrees: angle, documentID: document.id, pageIDs: ids)
+        batchRotationText = String(format: "%g", angle).replacingOccurrences(of: ".", with: ",")
+        batchNote = "Drehung bei \(n) von \(ids.count) Seiten auf \(AngleInput.text(angle)) gesetzt."
     }
 
     private func setTone(_ on: Bool, _ document: ScanDocument, _ ids: [UUID]) {

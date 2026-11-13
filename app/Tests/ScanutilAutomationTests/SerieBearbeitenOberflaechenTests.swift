@@ -92,6 +92,23 @@ struct SerieBearbeitenOberflaechenTests {
         #expect(s.app.wait(timeout: 10) { toneEnabled(0) == true && toneEnabled(2) == true }, "An ist nicht gespeichert")
         #expect(toneEnabled(1) == before2)
 
+        // Drehung: alle markierten auf 0°, dann auf einen eingetippten Winkel. Seite 2 bleibt.
+        let rotation2 = s.rotation(ofPage: 1)?.degrees
+        #expect(s.app.press("editor-batch-rotation-zero"))
+        #expect(s.app.wait(timeout: 10) {
+            s.rotation(ofPage: 0).map { abs($0.degrees) < 0.001 && $0.source == "manual" } == true
+                && s.rotation(ofPage: 2).map { abs($0.degrees) < 0.001 && $0.source == "manual" } == true
+        }, "0° ist nicht gespeichert")
+        #expect(s.rotation(ofPage: 1)?.degrees == rotation2, "Die nicht markierte Seite behält ihren Winkel")
+        // Das Feld enthält nach „0°“ die „0“, getippt wird angehängt: aus „0“ und „,5“ wird „0,5“.
+        #expect(s.app.type(",5", into: "editor-batch-rotation-field"))
+        #expect(s.app.press("editor-batch-rotation-set"))
+        #expect(s.app.wait(timeout: 10) {
+            s.rotation(ofPage: 0).map { abs($0.degrees - 0.5) < 0.001 } == true && s.rotation(ofPage: 2).map { abs($0.degrees - 0.5) < 0.001 } == true
+        }, "Der eingetippte Winkel ist nicht gespeichert")
+        #expect(s.app.wait { s.app.string("editor-batch-note")?.contains("+0,50") == true },
+                "Rückmeldung: \(s.app.string("editor-batch-note") ?? "keine")")
+
         // Die Markierung lässt sich aufheben; „Alle markieren“ markiert alle sichtbaren Seiten.
         #expect(s.app.press("editor-mark-none"))
         #expect(s.app.wait { s.app.element("editor-mark-strip") == nil }, "Die Leiste sollte verschwinden")

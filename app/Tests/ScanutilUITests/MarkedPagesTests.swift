@@ -160,4 +160,44 @@ struct MarkedPagesTests {
                 "Seiten ohne Hände bleiben unberührt")
         await model.disconnect()
     }
+
+    // MARK: Drehung für alle markierten
+
+    @Test func anAngleFieldAcceptsCommaPointAndDegreeSignAndLimitsTheValue() {
+        #expect(AngleInput.parse("0") == 0)
+        #expect(AngleInput.parse("-1,5") == -1.5)
+        #expect(AngleInput.parse("+0.25") == 0.25)
+        #expect(AngleInput.parse(" 2,5° ") == 2.5)
+        #expect(AngleInput.parse("40") == 15, "Auf ±15° begrenzt wie der Regler")
+        #expect(AngleInput.parse("-40") == -15)
+        #expect(AngleInput.parse("") == nil && AngleInput.parse("abc") == nil && AngleInput.parse("1,2,3") == nil && AngleInput.parse("°") == nil)
+        #expect(AngleInput.text(-0.5) == "-0,50°" && AngleInput.text(0) == "+0,00°")
+    }
+
+    @Test func theRotationOfSeveralPagesIsSetToTheSameAngleAndTheOthersKeepTheirs() async throws {
+        let (model, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        let doc = try await bookSeries(model)
+        let ids = doc.pages.map(\.id)
+        // Jede Seite hat einen anderen automatischen Winkel.
+        for (i, id) in ids.enumerated() {
+            model.updatePage(documentID: doc.id, pageID: id) {
+                $0.rotation = RotationCorrection(degrees: Double(i) + 0.5, enabled: true, source: .automatic, confidence: 1)
+            }
+        }
+        let n = model.setRotation(degrees: 0, documentID: doc.id, pageIDs: [ids[0], ids[1], ids[3]])
+        #expect(n == 3)
+        let after = try #require(model.latestDocument(id: doc.id))
+        #expect(after.pages.map { $0.corrections.rotation.degrees } == [0, 0, 2.5, 0])
+        #expect(after.pages[0].corrections.rotation.source == .manual && after.pages[0].corrections.rotation.enabled)
+        #expect(after.pages[2].corrections.rotation.source == .automatic, "Die nicht markierte Seite bleibt")
+        let saved = try ArchiveStore(root: dir).loadDocument(id: doc.id)
+        #expect(saved.pages.map { $0.corrections.rotation.degrees } == [0, 0, 2.5, 0], "Gespeichert")
+
+        // Dasselbe nochmal: nichts zu ändern. Ein anderer Winkel ändert wieder alle.
+        #expect(model.setRotation(degrees: 0, documentID: doc.id, pageIDs: [ids[0], ids[1], ids[3]]) == 0)
+        #expect(model.setRotation(degrees: -0.5, documentID: doc.id, pageIDs: [ids[0], ids[1]]) == 2)
+        #expect(model.setRotation(degrees: 99, documentID: doc.id, pageIDs: [ids[0]]) == 1, "Wird auf 15° begrenzt")
+        #expect(model.latestDocument(id: doc.id)?.pages[0].corrections.rotation.degrees == 15)
+        await model.disconnect()
+    }
 }

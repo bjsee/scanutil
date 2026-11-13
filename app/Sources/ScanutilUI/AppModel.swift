@@ -934,6 +934,17 @@ public final class AppModel {
         return changed.count
     }
 
+    /// Setzt die Drehung mehrerer Seiten auf denselben Winkel (Grad, im Uhrzeigersinn). Ab dann gilt sie als von Hand gesetzt.
+    /// Seiten, die schon so stehen, bleiben unberührt. Gibt zurück, bei wie vielen Seiten sich etwas geändert hat.
+    @discardableResult
+    public func setRotation(degrees: Double, documentID: UUID, pageIDs: [UUID]) -> Int {
+        let angle = AngleInput.clamped(degrees)
+        return updatePages(documentID: documentID, pageIDs: pageIDs) { _, c in
+            if c.rotation.enabled, c.rotation.source == .manual, abs(c.rotation.degrees - angle) < 1e-9 { return }
+            c.setRotation(degrees: angle)
+        }
+    }
+
     /// Markiert Seiten als geprüft oder nimmt die Markierung zurück. „Geprüft“ gilt für den jetzigen Zustand der Korrekturen:
     /// Ändert sich danach etwas, gilt die Seite wieder als ungeprüft.
     public func setReviewed(_ reviewed: Bool, documentID: UUID, pageIDs: [UUID]) {
