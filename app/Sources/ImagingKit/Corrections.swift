@@ -90,6 +90,18 @@ public struct HandRemovalCorrection: Codable, Equatable, Sendable {
     public var hasMask: Bool { mask != nil }
 }
 
+/// Macht das Papier hell und gleichmäßig und die Schrift kräftiger: Schatten und Helligkeitsverlauf (zum Falz hin, am Rand) werden
+/// herausgerechnet, das Papier wird nahezu weiß, der Ton des Papiers bleibt erhalten. Wirkt auf die Seite nach Zuschnitt und Drehung.
+public struct ToneCorrection: Codable, Equatable, Sendable {
+    public var enabled: Bool
+    public var source: CorrectionSource
+
+    public init(enabled: Bool = false, source: CorrectionSource = .automatic) {
+        self.enabled = enabled
+        self.source = source
+    }
+}
+
 /// Alle Korrekturen zu einem Original. Das Original bleibt unverändert, daraus entsteht jederzeit reproduzierbar das korrigierte Bild.
 public struct Corrections: Codable, Equatable, Sendable {
     /// Ab dieser Sicherheit wird eine automatische Erkennung angewendet, darunter nur vorgeschlagen und zur Prüfung markiert.
@@ -102,15 +114,18 @@ public struct Corrections: Codable, Equatable, Sendable {
     public var rotation: RotationCorrection
     /// Hände und Daumen entfernen. Wird zuerst angewendet, vor Zuschnitt und Drehung.
     public var handRemoval: HandRemovalCorrection
+    /// Papier aufhellen und Kontrast anheben. Wird zuletzt angewendet, nach Zuschnitt und Drehung.
+    public var tone: ToneCorrection
     /// Hochgezählt bei jeder Änderung.
     public var revision: Int
 
     public init(enabled: Bool = true, crop: CropCorrection = .init(), rotation: RotationCorrection = .init(),
-                handRemoval: HandRemovalCorrection = .init(), revision: Int = 0) {
+                handRemoval: HandRemovalCorrection = .init(), tone: ToneCorrection = .init(), revision: Int = 0) {
         self.enabled = enabled
         self.crop = crop
         self.rotation = rotation
         self.handRemoval = handRemoval
+        self.tone = tone
         self.revision = revision
     }
 
@@ -122,6 +137,7 @@ public struct Corrections: Codable, Equatable, Sendable {
         crop = try c.decode(CropCorrection.self, forKey: .crop)
         rotation = try c.decode(RotationCorrection.self, forKey: .rotation)
         handRemoval = try c.decodeIfPresent(HandRemovalCorrection.self, forKey: .handRemoval) ?? .init()
+        tone = try c.decodeIfPresent(ToneCorrection.self, forKey: .tone) ?? .init()
         revision = try c.decode(Int.self, forKey: .revision)
     }
 
@@ -148,6 +164,13 @@ public struct Corrections: Codable, Equatable, Sendable {
     public mutating func setHandRemovalEnabled(_ on: Bool) {
         handRemoval.enabled = on
         handRemoval.source = .manual
+        revision += 1
+    }
+
+    /// Schaltet das Aufhellen ein oder aus. Ab dann gilt es als manuell.
+    public mutating func setToneEnabled(_ on: Bool) {
+        tone.enabled = on
+        tone.source = .manual
         revision += 1
     }
 

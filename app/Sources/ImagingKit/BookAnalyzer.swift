@@ -81,6 +81,7 @@ public enum BookAnalyzer {
         let cropConfident = analysis.gutter != nil
         func make(quad: Quad, skew: SkewEstimate?) -> Corrections {
             var result = Corrections()
+            result.tone = ToneCorrection(enabled: true, source: .automatic)
             result.crop = CropCorrection(quad: quad, enabled: cropConfident, source: .automatic, confidence: cropConfidence)
             if let s = skew {
                 result.rotation = RotationCorrection(degrees: s.degrees, enabled: s.confidence >= threshold, source: .automatic, confidence: s.confidence)

@@ -1038,6 +1038,25 @@ public final class AppModel {
         return min(needed, max(record.original.width, record.original.height))
     }
 
+    /// Schaltet das Aufhellen für alle Seiten einer Serie ein oder aus (für Serien von früher, die es noch nicht kennen).
+    /// Seiten, bei denen es schon so steht, bleiben unberührt. Gibt die Zahl der geänderten Seiten zurück.
+    @discardableResult
+    public func setToneForAllPages(documentID: UUID, _ on: Bool) -> Int {
+        guard var document = latestDocument(id: documentID) else { return 0 }
+        var changed = 0
+        for index in document.pages.indices where document.pages[index].corrections.tone.enabled != on {
+            let pageID = document.pages[index].id
+            _ = document.updateCorrections(pageID: pageID) { $0.setToneEnabled(on) }
+            if let scanIndex = scans.firstIndex(where: { $0.id == document.pages[index].scanID }), document.pages[index].region == .whole {
+                scans[scanIndex].corrections.setToneEnabled(on)
+                try? store.saveCorrections(scans[scanIndex].corrections, for: scans[scanIndex].id)
+            }
+            changed += 1
+        }
+        if changed > 0 { commit(document) }
+        return changed
+    }
+
     /// Nimmt den Geprüft-Vermerk von den Seiten eines Scans: Nach „Neu erkennen“ kann das Ergebnis zufällig dem alten gleichen,
     /// geprüft ist es deshalb nicht.
     private func clearReviewed(documentID: UUID, scanID: UUID) {
@@ -1168,6 +1187,7 @@ public final class AppModel {
     public func setPageRotation(pageID: UUID, degrees: Double) { updatePageCorrections(pageID: pageID) { $0.setRotation(degrees: degrees) } }
     public func setPageCropEnabled(pageID: UUID, _ on: Bool) { updatePageCorrections(pageID: pageID) { $0.setCropEnabled(on) } }
     public func setPageHandRemovalEnabled(pageID: UUID, _ on: Bool) { updatePageCorrections(pageID: pageID) { $0.setHandRemovalEnabled(on) } }
+    public func setPageToneEnabled(pageID: UUID, _ on: Bool) { updatePageCorrections(pageID: pageID) { $0.setToneEnabled(on) } }
 
     /// Rendert die Ansicht der Seiten eines Scans neu: dieselben Korrekturen wie im PDF, nur kleiner.
     private func refreshPagePreviews(scanID: UUID) {
@@ -1204,6 +1224,7 @@ public final class AppModel {
     public func setRotationEnabled(id: UUID, _ on: Bool) { updateCorrections(id: id) { $0.setRotationEnabled(on) } }
     public func setCropEnabled(id: UUID, _ on: Bool) { updateCorrections(id: id) { $0.setCropEnabled(on) } }
     public func setHandRemovalEnabled(id: UUID, _ on: Bool) { updateCorrections(id: id) { $0.setHandRemovalEnabled(on) } }
+    public func setToneEnabled(id: UUID, _ on: Bool) { updateCorrections(id: id) { $0.setToneEnabled(on) } }
     public func setCorrectionsEnabled(id: UUID, _ on: Bool) { updateCorrections(id: id) { $0.setEnabled(on) } }
 
     private func persistAndRender(index: Int) {

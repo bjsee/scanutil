@@ -112,6 +112,19 @@ Ansehen: `scanutil-cli analyze <scan.png> --hands --out ueberlagerung.png --clea
 
 *Schatten und Text neben dem Marker:* Der Marker wirft einen Schatten aufs Papier; er wird mit entfernt, aber nur dort, wo wirklich Schatten liegt (glattes, etwas dunkleres, ungefärbtes Papier). Schrift dicht neben dem Marker, etwa Zeilenanfänge an der Papierkante, bleibt unberührt. Eine pauschale Verbreiterung um den Marker hatte an einem echten Buch (7. und 13. November 2026) die ersten Buchstaben von Zeilen weggefüllt. `scanutil-cli hands <scan.png> --out überlagerung.png [--cleaned bereinigt.png]` zeigt die Maske und das Ergebnis an einem Scan.
 
+=== Papier aufhellen
+
+Die Aufnahmen sind flau: grauer Papierton, Schatten zum Falz, Schrift nicht kräftig. Im Vergleich mit der Software des Scanners (7. November 2026, am selben Buch) war das der auffälligste Unterschied. *Papier aufhellen* ist eine Korrektur je Seite, wie Zuschnitt und Drehung, nicht zerstörend (das Original bleibt):
+
+* Gemessen wird auf der fertig zugeschnittenen Seite, auf einer verkleinerten Fassung: In jedem Block die Helligkeit des Papiers (ein hoher Perzentilwert, Schrift ist dunkel und macht nur einen kleinen Teil aus). Daraus entsteht ein weicher Verlauf, durch den das Bild geteilt wird. So verschwinden Schatten und ungleichmäßiges Licht, das Papier wird nahezu weiß (95 %), die Schrift kräftiger (Mitteltöne etwas dunkler).
+* *Der Papierton bleibt:* Alle Farbkanäle bekommen dieselbe Verstärkung, vergilbtes Papier bleibt vergilbt, nur heller.
+* *Große dunkle Flächen* (Zeichnungen, Fotos) werden nicht ausgebrannt: Der Verlauf fällt nie unter 52 % des hellsten Papiers, die Verstärkung ist auf etwa das 1,9-fache begrenzt.
+* Gemessen an dem Buch: Papier von 211–220 auf 248 (von 255), Tinte bleibt schwarz, auf Textseiten und einer Strichzeichnung.
+* Die Automatik schaltet es für jede neue Aufnahme ein. Einzeln: Schalter *Papier aufhellen* in Scanansicht, je Buchseite und im Editor. Für Serien von früher: im Editor *Papier aufhellen: alle Seiten*. Das PDF enthält das Ergebnis.
+* `scanutil-cli tone <bild.png> --out hell.png` zeigt das Ergebnis an einem Bild.
+
+*Nicht gemessen:* Wie es sich bei stark vergilbtem oder fleckigem Papier und bei Fotos verhält (Zeitungsfotos, Rasterdruck). Ein Durchscheinen der Rückseite wird mit aufgehellt und kann sichtbarer werden. Das Begradigen der gewölbten Seite („Dewarping“, wie es die Scanner-Software macht) gibt es nicht.
+
 === Zoom
 
 Vorschau und Scanansicht (auch jede Seite einer Doppelseite) lassen sich vergrößern:

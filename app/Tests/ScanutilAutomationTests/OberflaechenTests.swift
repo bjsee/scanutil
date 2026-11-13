@@ -88,6 +88,17 @@ struct OberflaechenTests {
         #expect(shown, "Anzeige zeigt \(s.app.string("rotation-value") ?? "nichts")")
     }
 
+    @Test func paperLighteningIsOnByDefaultAndCanBeSwitchedOff() throws {
+        let s = try launch(); defer { s.close(); try? FileManager.default.removeItem(at: s.dir) }
+        scanOnce(s)
+        func tone() -> [String: Any]? { corrections(s.dir)?["tone"] as? [String: Any] }
+        #expect(s.app.wait { s.app.element("tone-toggle") != nil }, "Kein Schalter „Papier aufhellen“")
+        #expect(s.app.wait { (tone()?["enabled"] as? Bool) == true }, "Die Automatik schaltet das Aufhellen ein: \(String(describing: tone()))")
+        #expect(s.app.number("tone-toggle") == 1)
+        #expect(s.app.press("tone-toggle"))
+        #expect(s.app.wait { (tone()?["enabled"] as? Bool) == false && (tone()?["source"] as? String) == "manual" }, "Ausschalten wird nicht als Handeingabe gespeichert")
+    }
+
     @Test func masterSwitchDisablesCorrectionsAndControls() throws {
         let s = try launch(); defer { s.close(); try? FileManager.default.removeItem(at: s.dir) }
         scanOnce(s)

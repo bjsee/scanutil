@@ -209,6 +209,24 @@ struct SeriesEditingModelTests {
         await model.disconnect()
     }
 
+    @Test func lighteningCanBeSwitchedOnForAllPagesOfAnOlderSeries() async throws {
+        let (model, store, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "Alt", book: true)
+        await model.scan()
+        let id = try #require(model.series?.id)
+        let ids = try #require(model.series?.pages.map(\.id))
+        // Eine Serie von früher: das Aufhellen kennt sie nicht.
+        for pageID in ids { model.updatePage(documentID: id, pageID: pageID) { $0.tone = ToneCorrection(enabled: false) } }
+        #expect(model.latestDocument(id: id)?.pages.allSatisfy { !$0.corrections.tone.enabled } == true)
+        let changed = model.setToneForAllPages(documentID: id, true)
+        #expect(changed == ids.count)
+        #expect(model.latestDocument(id: id)?.pages.allSatisfy { $0.corrections.tone.enabled && $0.corrections.tone.source == .manual } == true)
+        #expect(try store.loadDocument(id: id).pages.allSatisfy { $0.corrections.tone.enabled }, "Auch auf der Platte")
+        #expect(model.setToneForAllPages(documentID: id, true) == 0, "Ein zweites Mal ändert nichts")
+        #expect(model.setToneForAllPages(documentID: UUID(), true) == 0)
+        await model.disconnect()
+    }
+
     @Test func theLatestVersionOfARunningSeriesBeatsTheListEntry() async throws {
         let (model, _, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
         model.startSeries(title: "Läuft")
