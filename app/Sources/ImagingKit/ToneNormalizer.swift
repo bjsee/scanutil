@@ -9,6 +9,10 @@ import Foundation
 /// dunkle Flächen (Zeichnungen, Fotos) würden dabei aufgehellt; deshalb bleibt der Verlauf über einer Untergrenze, und die
 /// Verstärkung ist nach oben begrenzt. Alle Farbkanäle bekommen dieselbe Verstärkung: Der Ton des Papiers bleibt, es wird nur heller.
 public enum ToneNormalizer {
+    /// Stärke und Radius des Schärfens am Ende (siehe `apply`).
+    static let sharpenIntensity = 0.6
+    static let sharpenRadiusFactor = 1.2
+
     /// Ein Core-Image-Kontext, der die Werte nicht umrechnet: Alles rechnet mit den Zahlen des sRGB-Bildes, wie die Messung auf der
     /// verkleinerten Fassung. Mit der Voreinstellung (lineares Arbeitsfarbmodell) stimmten Messung und Rechnung nicht überein,
     /// und das Ergebnis wurde grau.
@@ -112,9 +116,14 @@ public enum ToneNormalizer {
             "inputBVector": CIVector(x: 0, y: 0, z: factor, w: 0), "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
         ])
         // Kräftigere Schrift: Mitteltöne etwas abdunkeln, Weiß und Schwarz bleiben.
-        return scaled.applyingFilter("CIToneCurve", parameters: [
+        let curved = scaled.applyingFilter("CIToneCurve", parameters: [
             "inputPoint0": CIVector(x: 0, y: 0), "inputPoint1": CIVector(x: 0.25, y: 0.20), "inputPoint2": CIVector(x: 0.5, y: 0.47),
             "inputPoint3": CIVector(x: 0.75, y: 0.76), "inputPoint4": CIVector(x: 1, y: 1),
-        ]).cropped(to: extent)
+        ])
+        // Schärfen: Zuschnitt und Drehung rechnen das Bild zweimal um und verlieren dabei etwas Schärfe (bilinear etwa 14 %).
+        // Ein milder Schärfen-Schritt gleicht das aus. Der Radius hängt von der Seitengröße ab: etwa 1/1200 der längeren Kante.
+        let radius = max(1.0, Double(max(extent.width, extent.height)) / 1200 * sharpenRadiusFactor)
+        return curved.applyingFilter("CIUnsharpMask", parameters: [kCIInputRadiusKey: radius, kCIInputIntensityKey: sharpenIntensity])
+            .cropped(to: extent)
     }
 }
