@@ -117,11 +117,14 @@ Ansehen: `scanutil-cli analyze <scan.png> --hands --out ueberlagerung.png --clea
 Die Aufnahmen sind flau: grauer Papierton, Schatten zum Falz, Schrift nicht kräftig. Im Vergleich mit der Software des Scanners (7. November 2026, am selben Buch) war das der auffälligste Unterschied. *Papier aufhellen* ist eine Korrektur je Seite, wie Zuschnitt und Drehung, nicht zerstörend (das Original bleibt):
 
 * Gemessen wird auf der fertig zugeschnittenen Seite, auf einer verkleinerten Fassung: In jedem Block die Helligkeit des Papiers (ein hoher Perzentilwert, Schrift ist dunkel und macht nur einen kleinen Teil aus). Daraus entsteht ein weicher Verlauf, durch den das Bild geteilt wird. So verschwinden Schatten und ungleichmäßiges Licht, das Papier wird nahezu weiß (95 %), die Schrift kräftiger (Mitteltöne etwas dunkler).
+* *Schärfen:* Zuschnitt und Drehung rechnen das Bild zweimal um und verlieren dabei etwas Schärfe (bilinear rund 14 %, gemessen). Ein milder Schärfen-Schritt am Ende (Intensität 0,6, Radius etwa 1/1200 der längeren Kante) gleicht das aus: Das Schärfemaß (95. Perzentil des Gradienten der Schriftpixel, bezogen auf das Papier) stieg an einer Seite von 0,36 auf 0,51, die Scanner-Software liegt am selben Buch bei 0,51. Zeilenanfänge am Rand und Handschrift bleiben dabei unauffällig; ein leichter heller Saum um die Buchstaben ist bei stärkeren Werten sichtbar geworden, deshalb 0,6.
 * *Der Papierton bleibt:* Alle Farbkanäle bekommen dieselbe Verstärkung, vergilbtes Papier bleibt vergilbt, nur heller.
 * *Große dunkle Flächen* (Zeichnungen, Fotos) werden nicht ausgebrannt: Der Verlauf fällt nie unter 52 % des hellsten Papiers, die Verstärkung ist auf etwa das 1,9-fache begrenzt.
 * Gemessen an dem Buch: Papier von 211–220 auf 248 (von 255), Tinte bleibt schwarz, auf Textseiten und einer Strichzeichnung.
 * Die Automatik schaltet es für jede neue Aufnahme ein. Einzeln: Schalter *Papier aufhellen* in Scanansicht, je Buchseite und im Editor. Für Serien von früher: im Editor *Papier aufhellen: alle Seiten*. Das PDF enthält das Ergebnis.
 * `scanutil-cli tone <bild.png> --out hell.png` zeigt das Ergebnis an einem Bild.
+
+*Unscharfe Aufnahmen erkennen* (Geisterbild bei noch unruhigem Buch) ist versucht und verworfen: Ein Schärfemaß je Block und je Zeilenstreifen trennt die verschmierte Seite (Scan 4524) nicht zuverlässig von Seiten mit Überschriften, Handschrift oder Zeichnungen (Anteil unscharfer Blöcke 8 % gegen 15–20 % bei unauffälligen Seiten). Vorbeugen statt erkennen: die längere Ruhezeit der Auto-Auslösung.
 
 *Nicht gemessen:* Wie es sich bei stark vergilbtem oder fleckigem Papier und bei Fotos verhält (Zeitungsfotos, Rasterdruck). Ein Durchscheinen der Rückseite wird mit aufgehellt und kann sichtbarer werden. Das Begradigen der gewölbten Seite („Dewarping“, wie es die Scanner-Software macht) gibt es nicht.
 

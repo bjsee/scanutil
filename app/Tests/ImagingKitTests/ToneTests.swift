@@ -105,6 +105,20 @@ struct ToneTests {
         #expect(value(out, 450, 400) > 0.85, "Der Schatten rechts wird hell: \(value(out, 450, 400))")
     }
 
+    @Test func softEdgesBecomeSteeperButThePaperStaysFree() {
+        // Zuschnitt und Drehung verwischen Kanten etwas. Ein dunkler Balken mit weichen Rändern (6 Pixel Übergang) wird nach dem
+        // Aufhellen steiler; daneben liegt das Papier ohne Hof (kein Überschwingen über das Ziel).
+        let page = image(width: 600, height: 400) { x, _ in
+            let d = abs(Double(x) - 300) - 20            // Abstand vom Rand des Balkens
+            let t = max(0, min(1, d / 6 + 0.5))          // 0 im Balken, 1 im Papier, weicher Übergang
+            return 0.12 + (0.88 - 0.12) * t
+        }
+        let out = render(page, tone: true)
+        func steepest(_ image: CGImage) -> Double { (0..<599).map { abs(value(image, $0 + 1, 200) - value(image, $0, 200)) }.max() ?? 0 }
+        #expect(steepest(out) > steepest(page) * 1.15, "Steilere Kante: \(steepest(page)) → \(steepest(out))")
+        #expect(value(out, 100, 200) <= 1.0 && value(out, 100, 200) > 0.93, "Papier daneben: \(value(out, 100, 200))")
+    }
+
     @Test func withoutTheSwitchThePixelsStayExactlyAsTheyWere() {
         let src = shadedPage()
         let out = render(src, tone: false)
