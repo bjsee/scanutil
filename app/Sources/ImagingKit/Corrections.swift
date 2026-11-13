@@ -26,6 +26,19 @@ public struct Quad: Codable, Equatable, Sendable {
         self.bottomLeft = bottomLeft
     }
 
+    /// Liegt der Punkt im Viereck (konvex, Ecken im Uhrzeigersinn)? Punkte auf dem Rand zählen dazu.
+    public func contains(_ p: NormalizedPoint) -> Bool {
+        let corners = [topLeft, topRight, bottomRight, bottomLeft]
+        var sign = 0.0
+        for i in 0..<4 {
+            let a = corners[i], b = corners[(i + 1) % 4]
+            let cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)
+            if abs(cross) < 1e-12 { continue }
+            if sign == 0 { sign = cross } else if sign * cross < 0 { return false }
+        }
+        return true
+    }
+
     /// Das ganze Bild.
     public static let full = Quad(
         topLeft: .init(x: 0, y: 0), topRight: .init(x: 1, y: 0),
