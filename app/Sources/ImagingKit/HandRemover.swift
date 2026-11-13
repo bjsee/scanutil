@@ -12,6 +12,8 @@ public enum HandRemover {
     private static let context = CIContext()
     /// Längste Kante des Füllrasters in Zellen.
     static let fieldSize = 400
+    /// Halbe Fensterbreite in Zellen, in der der hellste Papierwert als Vorlage gesucht wird (7 × 7 Zellen).
+    static let paperLevelReach = 3
 
     /// Das Bild ohne die Flächen der Maske. Gibt das Bild unverändert zurück, wenn die Maske leer ist.
     /// - Parameter page: Der Teil des Bildes, der später als Seite bleibt. Dort füllt immer Papier, nie das Tuch: Neben einem Marker
@@ -82,6 +84,26 @@ public enum HandRemover {
             if paperLike[i] { count += 1 }
         }
         if count < brightness.count / 5 { paperLike = paper }
+        // Als Vorlage dient der Papierwert, nicht der Mittelwert der Zelle: Eine Zelle des Rasters mittelt dünne Schrift mit dem Papier
+        // dazwischen und ist dunkler als das Papier. Mit diesem Mischton gefüllt, bliebe an der Stelle des Markers ein grauer Fleck
+        // (gemessen: bis 36 Graustufen dunkler, direkt neben dichtem Text). Darum zählt je Zelle die hellste Papierzelle in der Nähe:
+        // Schrift ist dünner als das Fenster, auch ein dunkler Saum am Seitenrand fällt so heraus.
+        var level = values
+        let reach = paperLevelReach
+        for y in 0..<h {
+            for x in 0..<w where paperLike[y * w + x] {
+                var best: Float = -1, bestCell = y * w + x
+                for yy in max(0, y - reach)...min(h - 1, y + reach) {
+                    for xx in max(0, x - reach)...min(w - 1, x + reach) {
+                        let j = yy * w + xx
+                        guard paperLike[j] else { continue }
+                        let brightness = max(values[j * 3], values[j * 3 + 1], values[j * 3 + 2])
+                        if brightness > best { best = brightness; bestCell = j }
+                    }
+                }
+                for c in 0..<3 { level[(y * w + x) * 3 + c] = values[bestCell * 3 + c] }
+            }
+        }
         // Das Papier füllt die Hand harmonisch aus. Der dunkle Hintergrund zählt dabei nicht, er soll nicht ins Papier einfärben.
         // Gerechnet wird nur in einem Ausschnitt um jede Handfläche, mit Rand: Unbekannt ist im ganzen Bild auch das Tuch, die Hälfte
         // des Rasters, und dort wäre jede Rechnung umsonst.
@@ -98,7 +120,7 @@ public enum HandRemover {
             for y in y0...y1 {
                 for x in x0...x1 {
                     let source = y * w + x, target = (y - y0) * sw + (x - x0)
-                    for c in 0..<3 { window[target * 3 + c] = values[source * 3 + c] }
+                    for c in 0..<3 { window[target * 3 + c] = paperLike[source] ? level[source * 3 + c] : values[source * 3 + c] }
                     windowKnown[target] = paperLike[source]
                 }
             }

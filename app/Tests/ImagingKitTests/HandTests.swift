@@ -269,6 +269,31 @@ struct HandTests {
         #expect(clothOutside < 90, "Außerhalb der Seite bleibt das Tuch: \(clothOutside)")
     }
 
+    @Test func theFillMatchesThePaperBetweenDenseTextLinesAndDoesNotTurnGray() throws {
+        // Dichte Zeilen rings um den Marker: Die Zellen des groben Füllrasters mitteln Schrift und Papier. Mit diesem Mischton gefüllt,
+        // bliebe an der Stelle des Markers ein grauer Fleck. Dazu ein dunkler Randsaum der Seite, der nicht als Papier zählen darf.
+        var c = Canvas(width: 1600, height: 1200, fill: cloth)
+        c.rect(200, 120, 1400, 1080, paper)
+        c.rect(1388, 120, 1400, 1080, (120, 118, 110))                      // Randsaum der Seite
+        // Feine Schrift: Zeilen aus senkrechten Strichen (1 von 4 Punkten dunkel, 10 Punkte hoch, alle 17 Punkte), bis dicht an den Marker.
+        // Eine Zelle des Füllrasters (vier Bildpunkte breit) mittelt dann Schrift und Papier zu deutlich dunkler als das Papier.
+        for row in 0..<55 { for x in stride(from: 260, to: 1380, by: 4) { c.rect(x, 150 + row * 17, x + 1, 160 + row * 17, (30, 30, 30)) } }
+        c.ellipse(cx: 1400, cy: 600, rx: 110, ry: 70, yellow)               // Marker am rechten Seitenrand
+        let quad = Quad(topLeft: .init(x: 200.0 / 1600, y: 120.0 / 1200), topRight: .init(x: 1400.0 / 1600, y: 120.0 / 1200),
+                        bottomRight: .init(x: 1400.0 / 1600, y: 1080.0 / 1200), bottomLeft: .init(x: 200.0 / 1600, y: 1080.0 / 1200))
+        let mask = try #require(HandDetector.detect(in: c.image(), page: quad)?.mask)
+        let cleaned = try #require(HandRemover.apply(to: c.image(), mask: mask, page: quad))
+        let rgb = try #require(RGBBitmap(cleaned, width: 1600))
+        // Hellster Wert in der Mitte der Füllung: so hell wie das Papier daneben.
+        var brightest = 0
+        for y in 590..<606 { for x in 1330..<1380 { brightest = max(brightest, Int(rgb.pixels[(y * 1600 + x) * 4])) } }
+        var mean = 0, count = 0
+        for y in 560..<640 { for x in 1330..<1380 { mean += Int(rgb.pixels[(y * 1600 + x) * 4]); count += 1 } }
+        let average = mean / count
+        #expect(brightest >= 228, "Die Füllung ist so hell wie das Papier (238): \(brightest)")
+        #expect(average >= 215, "Auch im Mittel kein grauer Fleck: \(average)")
+    }
+
     @Test func removalWorksWhenTheMaskHasAnotherResolutionThanTheImage() throws {
         var c = bookPage()
         c.ellipse(cx: 160, cy: 500, rx: 45, ry: 40, skin)
