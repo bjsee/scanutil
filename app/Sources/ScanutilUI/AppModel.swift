@@ -541,11 +541,14 @@ public final class AppModel {
 
     /// Beginnt eine Serie: ein neues, sofort gespeichertes Dokument, dem jede Aufnahme als Seite angehängt wird.
     /// Mit `book` ergibt jede Aufnahme zwei Seiten (links und rechts), geteilt am erkannten Falz.
-    public func startSeries(title: String, book: Bool = false, inbox: Bool = false) {
+    /// - Parameter profile: Die Art der Vorlage. Ohne Angabe gilt Buch bei `book`, sonst Dokument; die Schnellablage nimmt Dokument.
+    public func startSeries(title: String, book: Bool = false, inbox: Bool = false, profile: ScanProfile? = nil) {
         guard status == .ready, series == nil else { return }
+        let chosen: ScanProfile = inbox ? .document : (profile ?? (book ? .book : .document))
+        let book = chosen.isBook
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let document = ScanDocument(title: trimmed.isEmpty ? (inbox ? Self.defaultInboxTitle() : Self.defaultSeriesTitle()) : trimmed,
-                                    inbox: inbox ? InboxInfo() : nil)
+                                    inbox: inbox ? InboxInfo() : nil, profile: chosen)
         do {
             try store.saveDocument(document)
             // Wurde gerade eine andere Serie angesehen, zeigt die Miniaturleiste deren Scans: die neue Serie beginnt leer.
@@ -939,11 +942,12 @@ public final class AppModel {
         for index in document.pages.indices where document.pages[index].scanID == scanID && document.pages[index].region == .whole {
             document.pages[index].analysis = result.analysis
             document.pages[index].reviewedKey = nil                       // neu erkannt heißt: wieder ungeprüft
-            document.updateCorrections(pageID: document.pages[index].id) { $0 = result.corrections }
+            let adjusted = document.effectiveProfile.adjusted(result.corrections)
+            document.updateCorrections(pageID: document.pages[index].id) { $0 = adjusted }
         }
         document.revision += 1
         commit(document)
-        try? self.store.saveCorrections(result.corrections, for: scanID)
+        try? self.store.saveCorrections(document.effectiveProfile.adjusted(result.corrections), for: scanID)
         if let index = scans.firstIndex(where: { $0.id == scanID }) {
             apply(result.corrections, warnings: result.warnings, analysis: result.analysis, at: index)
         } else {
@@ -1055,6 +1059,37 @@ public final class AppModel {
         }
         if changed > 0 { commit(document) }
         return changed
+    }
+
+    /// Das Profil der Serie, zu der ein Scan gehört; ohne Serie gilt Dokument.
+    func profile(forScan id: UUID) -> ScanProfile {
+        ([series, openedDocument].compactMap { $0 } + savedDocuments).first { $0.pages.contains { $0.scanID == id } }?.effectiveProfile ?? .document
+    }
+
+    /// Wechselt das Profil einer Serie. Das Aufhellen aller Seiten folgt dem neuen Profil; was der Nutzer an einer Seite von Hand
+    /// eingestellt hat, bleibt. Eine Serie mit Doppelseiten bleibt eine Buchserie (Buch), eine mit Einzelseiten wird nie zum Buch.
+    /// Gibt zurück, ob das Profil gilt.
+    @discardableResult
+    public func setProfile(_ profile: ScanProfile, documentID: UUID) -> Bool {
+        guard var document = latestDocument(id: documentID) else { return false }
+        let hasSpreads = document.pages.contains { $0.region != .whole }
+        guard profile.isBook == hasSpreads || document.pages.isEmpty else {
+            post(.warning, hasSpreads ? "Eine Serie mit Doppelseiten bleibt ein Buch." : "Eine Serie mit Einzelseiten lässt sich nicht in ein Buch verwandeln.")
+            return false
+        }
+        document.profile = profile
+        for index in document.pages.indices {
+            let adjusted = profile.adjusted(document.pages[index].corrections)
+            guard adjusted.tone != document.pages[index].corrections.tone else { continue }
+            let pageID = document.pages[index].id
+            _ = document.updateCorrections(pageID: pageID) { $0.tone = adjusted.tone }
+            if document.pages[index].region == .whole, let scanIndex = scans.firstIndex(where: { $0.id == document.pages[index].scanID }) {
+                scans[scanIndex].corrections.tone = adjusted.tone
+                try? store.saveCorrections(scans[scanIndex].corrections, for: scans[scanIndex].id)
+            }
+        }
+        commit(document)
+        return true
     }
 
     /// Nimmt den Geprüft-Vermerk von den Seiten eines Scans: Nach „Neu erkennen“ kann das Ergebnis zufällig dem alten gleichen,
@@ -1206,7 +1241,7 @@ public final class AppModel {
     }
 
     private func apply(_ corrections: Corrections, warnings: [String], analysis: PageAnalysis?, at index: Int) {
-        scans[index].corrections = corrections
+        scans[index].corrections = profile(forScan: scans[index].id).adjusted(corrections)
         scans[index].warnings = warnings
         scans[index].analysis = analysis
         for warning in warnings { post(.warning, warning, scanID: scans[index].id, asMessage: false) }

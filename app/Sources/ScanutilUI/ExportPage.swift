@@ -140,6 +140,8 @@ struct ExportPage: View {
         let url = ExportTarget.url(directory: directory, title: title)
         var options = small ? ExportOptions.web : ExportOptions.archive
         options.ocr = withOCR
+        // Fotos behalten mehr Qualität (JPEG 95 statt 85 %); „Kleine Datei“ bleibt klein.
+        if !small { options.jpegQuality = max(options.jpegQuality, document.effectiveProfile.jpegQuality) }
         Task { await model.exportDocument(document, to: url, options: options) }
     }
 
