@@ -1,5 +1,6 @@
 import AppKit
 import ArchiveKit
+import ImagingKit
 import SwiftUI
 
 /// Namen für Tasten, die ein Fußtaster typischerweise sendet.
@@ -356,5 +357,34 @@ struct TargetListEditor: View {
         panel.canCreateDirectories = true
         panel.prompt = "Hinzufügen"
         if panel.runModal() == .OK, let url = panel.url { model.addInboxTarget(path: url.path) }
+    }
+}
+
+/// Die Profile als Schaltflächen zum Wählen. Der gewählte ist hervorgehoben; ein Hilfetext nennt, was das Profil bedeutet.
+struct ProfileChips: View {
+    let selected: ScanProfile
+    var options: [ScanProfile] = ScanProfile.allCases
+    var prefix = "profile-chip"
+    let choose: (ScanProfile) -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(options) { profile in
+                Button { choose(profile) } label: {
+                    Text(profile.title)
+                        .padding(.horizontal, 10).padding(.vertical, 3)
+                        .background(Capsule().fill(selected == profile ? Color.accentColor : Color.secondary.opacity(0.15)))
+                        .foregroundStyle(selected == profile ? Color.white : Color.primary)
+                }
+                .buttonStyle(.plain)
+                .help(profile.summary)
+                .accessibilityLabel(profile.title)
+                .accessibilityValue(selected == profile ? "gewählt" : "")
+                .accessibilityAddTraits(selected == profile ? .isSelected : [])
+                .accessibilityIdentifier("\(prefix)-\(profile.rawValue)")
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("\(prefix)s")
     }
 }

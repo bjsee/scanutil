@@ -128,6 +128,24 @@ Die Aufnahmen sind flau: grauer Papierton, Schatten zum Falz, Schrift nicht krä
 
 *Nicht gemessen:* Wie es sich bei stark vergilbtem oder fleckigem Papier und bei Fotos verhält (Zeitungsfotos, Rasterdruck). Ein Durchscheinen der Rückseite wird mit aufgehellt und kann sichtbarer werden. Das Begradigen der gewölbten Seite („Dewarping“, wie es die Scanner-Software macht) gibt es nicht.
 
+=== Profile: Buch, Dokument, Foto
+
+Ein Profil sagt, *wofür* eine Serie aufgenommen wird, und legt Voreinstellungen fest. Es steht im Dokument und gilt für die ganze Serie. Jede Einstellung bleibt je Seite änderbar; was von Hand eingestellt wurde, überschreibt ein Profilwechsel nicht.
+
+[cols="1,2,2,2"]
+|===
+| | Buch | Dokument | Foto
+
+| Aufnahme | Doppelseiten, am Falz geteilt | einzelne Seiten | einzelne Seiten
+| Papier aufhellen und schärfen | ja | ja | *aus* (kein „Papier“, das weiß werden soll; würde Farben verschieben und Korn betonen)
+| JPEG im PDF | 85 % | 85 % | 95 %
+|===
+
+* *Beim Beginnen:* Der Schalter „Doppelseiten (Buch)“ wählt Buch; ist er aus, stehen daneben *Dokument* und *Foto* zur Wahl (auch im Formular für eine neue Serie). Die Schnellablage nimmt immer Dokument.
+* *Im Editor:* Die Schaltflächen *Vorlage* wechseln zwischen Dokument und Foto; das Aufhellen aller automatisch eingestellten Seiten folgt. Eine Serie mit Doppelseiten bleibt ein Buch, Einzelseiten werden nie zum Buch (die Aufnahmen sind ja schon geteilt oder nicht).
+* Ältere Serien haben kein Profil: Buch bei Doppelseiten, sonst Dokument.
+* *Noch nicht:* eigene Profile mit Namen, weitere Vorlagen (Zeitung, Plan). Das Profil legt keine Ruhezeit und keine Texterkennung fest; beides bleibt eine Einstellung.
+
 === Zoom
 
 Vorschau und Scanansicht (auch jede Seite einer Doppelseite) lassen sich vergrößern:

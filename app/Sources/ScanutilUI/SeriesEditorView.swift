@@ -84,6 +84,18 @@ public struct SeriesEditorView: View {
                     .font(.caption).foregroundStyle(.orange)
                     .accessibilityIdentifier("editor-open-count")
             }
+            if !document.isInbox {
+                // Wechselt nur zwischen Dokument und Foto (Einzelseiten) bzw. bleibt Buch: Doppelseiten bleiben Doppelseiten.
+                let options: [ScanProfile] = document.pages.contains { $0.region != .whole } ? [.book] : [.document, .photo]
+                if options.count > 1 || document.profile != nil {
+                    HStack(spacing: 6) {
+                        Text("Vorlage:").font(.caption).foregroundStyle(.secondary)
+                        ProfileChips(selected: document.effectiveProfile, options: options, prefix: "editor-profile") {
+                            model.setProfile($0, documentID: document.id)
+                        }
+                    }
+                }
+            }
             let withoutTone = document.pages.filter { !$0.corrections.tone.enabled }.count
             if withoutTone > 0 {
                 Button("Papier aufhellen: alle Seiten") { model.setToneForAllPages(documentID: document.id, true) }

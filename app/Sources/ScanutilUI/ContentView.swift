@@ -304,6 +304,8 @@ struct SeriesBar: View {
     let nav: Navigator
     /// Vor dem Beginn gewählt: jede Aufnahme ist eine Doppelseite.
     @State private var bookMode = false
+    /// Die Art der Einzelseiten, wenn kein Buch aufgenommen wird: Dokument oder Foto.
+    @State private var profile: ScanProfile = .document
     /// Der Dialog „neu oder fortsetzen?“ beim Beginnen, und die Liste der Serien.
     @State private var showStartSheet = false
     /// Die Rückfrage „Schnellablage verwerfen?“ steht in der Leiste.
@@ -380,7 +382,7 @@ struct SeriesBar: View {
                 Button {
                     // Gibt es schon Serien, fragt ein Dialog: neu beginnen oder in einer fortsetzen. Sonst geht es sofort los.
                     if model.seriesDocuments.isEmpty {
-                        model.startSeries(title: Self.defaultTitle(), book: bookMode)
+                        model.startSeries(title: Self.defaultTitle(), book: bookMode, profile: bookMode ? .book : profile)
                     } else {
                         showStartSheet = true
                     }
@@ -394,6 +396,7 @@ struct SeriesBar: View {
                     .toggleStyle(.switch)
                     .help("Jede Aufnahme wird am Falz in eine linke und eine rechte Seite geteilt")
                     .accessibilityIdentifier("book-mode-toggle")
+                if !bookMode { ProfileChips(selected: profile, options: [.document, .photo], prefix: "profile-chip") { profile = $0 } }
                 if let opened = model.openedDocument {
                     Label("Angesehen: \(opened.title) · \(opened.pages.count) Seite\(opened.pages.count == 1 ? "" : "n")", systemImage: "eye")
                         .font(.callout).lineLimit(1)
@@ -455,6 +458,7 @@ struct StartSeriesSheet: View {
     @State private var name = ""
     @State private var book: Bool
     @State private var resumeID: UUID?
+    @State private var profile: ScanProfile = .document
 
     init(model: AppModel, initialBook: Bool, started: (() -> Void)? = nil, done: @escaping () -> Void) {
         self.model = model
@@ -484,6 +488,12 @@ struct StartSeriesSheet: View {
                 Toggle("Doppelseiten (Buch)", isOn: $book)
                     .help("Jede Aufnahme wird am Falz in eine linke und eine rechte Seite geteilt")
                     .accessibilityIdentifier("sheet-book-toggle")
+                if !book {
+                    HStack(spacing: 8) {
+                        Text("Vorlage:").font(.callout)
+                        ProfileChips(selected: profile, options: [.document, .photo], prefix: "sheet-profile-chip") { profile = $0 }
+                    }
+                }
             case .resume:
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(model.seriesDocuments.prefix(8)) { document in
@@ -531,7 +541,7 @@ struct StartSeriesSheet: View {
     private func confirm() {
         switch mode {
         case .new:
-            model.startSeries(title: name, book: book)
+            model.startSeries(title: name, book: book, profile: book ? .book : profile)
         case .resume:
             if let id = resumeID { Task { await model.resumeSeries(id: id) } }
         }

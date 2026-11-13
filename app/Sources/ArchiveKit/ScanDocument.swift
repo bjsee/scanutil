@@ -75,23 +75,31 @@ public struct ScanDocument: Codable, Equatable, Identifiable, Sendable {
     public var modifiedAt: Date?
     /// Gesetzt bei einer Schnellablage (lose Dokumente, jede Seite zunächst für sich) statt einer Serie.
     public var inbox: InboxInfo?
+    /// Die Art der Vorlage (Buch, Dokument, Foto). Ältere Dokumente haben keine: Dann gilt Buch bei Doppelseiten, sonst Dokument.
+    public var profile: ScanProfile?
     public var metadata: DocumentMetadata
     public var pages: [DocumentPage]
     /// Hochgezählt bei jeder Änderung.
     public var revision: Int
 
-    public init(id: UUID = UUID(), title: String, createdAt: Date = Date(), inbox: InboxInfo? = nil,
+    public init(id: UUID = UUID(), title: String, createdAt: Date = Date(), inbox: InboxInfo? = nil, profile: ScanProfile? = nil,
                 metadata: DocumentMetadata = .init(), pages: [DocumentPage] = [], revision: Int = 0) {
         self.id = id
         self.title = title
         self.createdAt = createdAt.roundedToMilliseconds
         self.inbox = inbox
+        self.profile = profile
         self.metadata = metadata
         self.pages = pages
         self.revision = revision
     }
 
     public var isInbox: Bool { inbox != nil }
+
+    /// Das Profil, das gilt: das gesetzte, sonst aus den Seiten abgelesen.
+    public var effectiveProfile: ScanProfile {
+        profile ?? (pages.contains { $0.region != .whole } ? .book : .document)
+    }
 
     /// Der Zeitpunkt der letzten Bearbeitung; ohne Angabe der Anlegezeitpunkt.
     public var lastModified: Date { modifiedAt ?? createdAt }

@@ -359,4 +359,41 @@ struct SerieOberflaechenTests {
         #expect(s.app.press("export-run-button"))
         #expect(s.app.wait(timeout: 60) { s.pdfs.count == 2 }, "Das zweite PDF überschrieb das erste: \(s.pdfs.map(\.lastPathComponent))")
     }
+
+    // MARK: Profile
+
+    @Test func aPhotoSeriesIsStartedFromTheChipsAndSkipsTheLightening() throws {
+        let s = try launch(); defer { s.close() }
+        #expect(s.app.wait { s.app.element("profile-chip-photo") != nil && s.app.element("profile-chip-document") != nil }, "Keine Auswahl der Vorlage")
+        #expect(s.app.press("profile-chip-photo"))
+        #expect(s.app.wait { s.app.string("profile-chip-photo") == "gewählt" })
+        #expect(s.app.press("series-start-button"))
+        #expect(s.app.wait { s.app.element("series-page-count") != nil })
+        #expect(s.app.press("scan-button"))
+        #expect(s.app.wait(timeout: 30) { s.pages.count == 1 && s.pages[0]["analysis"] != nil }, "Keine Seite mit Analyse")
+        #expect(s.document?["profile"] as? String == "photo", "Das Profil steht im Dokument: \(String(describing: s.document?["profile"]))")
+        func tone() -> Bool? { ((s.pages.first?["corrections"] as? [String: Any])?["tone"] as? [String: Any])?["enabled"] as? Bool }
+        #expect(tone() == false, "Fotos werden nicht aufgehellt")
+        #expect(s.pages.count == 1, "Ein Foto ist eine Seite, keine Doppelseite")
+    }
+
+    @Test func theProfileOfASeriesCanBeSwitchedInTheEditor() throws {
+        let s = try launch(); defer { s.close() }
+        #expect(s.app.press("series-start-button"))
+        #expect(s.app.wait { s.app.element("series-page-count") != nil })
+        #expect(s.app.press("scan-button"))
+        #expect(s.app.wait(timeout: 30) { s.pages.count == 1 && s.pages[0]["analysis"] != nil })
+        #expect(s.app.press("series-end-button"))
+        #expect(s.app.wait { s.app.element("series-start-button") != nil })
+        #expect(s.app.press("series-list-button"))
+        #expect(s.app.wait { s.app.element("series-edit-button") != nil })
+        #expect(s.app.press("series-edit-button"))
+        #expect(s.app.wait(timeout: 15) { s.app.element("editor-profile-photo") != nil }, "Keine Profilwahl im Editor")
+        func tone() -> Bool? { ((s.pages.first?["corrections"] as? [String: Any])?["tone"] as? [String: Any])?["enabled"] as? Bool }
+        #expect(tone() == true)
+        #expect(s.app.press("editor-profile-photo"))
+        #expect(s.app.wait(timeout: 10) { s.document?["profile"] as? String == "photo" && tone() == false }, "Profilwechsel greift nicht")
+        #expect(s.app.press("editor-profile-document"))
+        #expect(s.app.wait(timeout: 10) { s.document?["profile"] as? String == "document" && tone() == true })
+    }
 }
