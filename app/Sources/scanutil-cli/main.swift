@@ -122,6 +122,38 @@ do {
         guard let result = CorrectionRenderer.render(image, corrections: corrections),
               let d = CGImageDestinationCreateWithURL(URL(fileURLWithPath: out) as CFURL, UTType.png.identifier as CFString, 1, nil) else { fail("Fehlgeschlagen") }
         CGImageDestinationAddImage(d, result, nil); CGImageDestinationFinalize(d)
+    case "skew-strips":
+        // scanutil-cli skew-strips <bild.png>   Schräglage jeder Buchseite insgesamt und je senkrechtem Streifen (Untersuchung der Wölbung)
+        guard args.count >= 2, let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: args[1]) as CFURL, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { fail("Bild nicht lesbar") }
+        let analysis = BookAnalyzer.analyze(image)
+        if let outDir = option("--out", in: args) {
+            let pair = BookAnalyzer.corrections(from: analysis)
+            for (name, corr) in [("links", pair.left), ("rechts", pair.right)] {
+                if let img = CorrectionRenderer.render(image, corrections: corr),
+                   let d = CGImageDestinationCreateWithURL(URL(fileURLWithPath: outDir + "/seite-\(name).png") as CFURL, UTType.png.identifier as CFString, 1, nil) {
+                    CGImageDestinationAddImage(d, img, nil); CGImageDestinationFinalize(d)
+                }
+            }
+        }
+        for (name, quad) in [("links", analysis.leftQuad), ("rechts", analysis.rightQuad)] {
+            var c = Corrections(crop: CropCorrection(quad: quad, enabled: true)); c.enabled = true
+            guard let page = CorrectionRenderer.render(image, corrections: c) else { continue }
+            var line = String(format: "%@: ganz %.2f", name, SkewEstimator.estimate(page)?.degrees ?? .nan)
+            let w = page.width, h = page.height
+            for (a, b) in [(0.0, 0.25), (0.15, 0.4), (0.3, 0.55), (0.45, 0.7), (0.6, 0.85), (0.75, 1.0)] {
+                if let strip = page.cropping(to: CGRect(x: Double(w) * a, y: 0, width: Double(w) * (b - a), height: Double(h))) {
+                    line += String(format: " | %.1f–%.1f: %.2f", a, b, SkewEstimator.estimate(strip)?.degrees ?? .nan)
+                }
+            }
+            line += " || Höhe"
+            for (a, b) in [(0.0, 0.34), (0.33, 0.67), (0.66, 1.0), (0.0, 0.5), (0.5, 1.0)] {
+                if let band = page.cropping(to: CGRect(x: 0, y: Double(h) * a, width: Double(w), height: Double(h) * (b - a))) {
+                    line += String(format: " | %.2f–%.2f: %.2f", a, b, SkewEstimator.estimate(band)?.degrees ?? .nan)
+                }
+            }
+            print(line)
+        }
     case "usb-descriptor":
         // Gibt die Konfigurationsbeschreibung des Scanners als Hexzeichen aus, zur Untersuchung der UVC-Fähigkeiten.
         var bytes = [UInt8](repeating: 0, count: 4096)

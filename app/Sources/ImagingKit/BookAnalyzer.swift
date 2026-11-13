@@ -130,7 +130,7 @@ public enum BookAnalyzer {
         var crop = Corrections(crop: CropCorrection(quad: quad, enabled: true))
         crop.enabled = true
         guard let page = CorrectionRenderer.render(image, corrections: crop) else { return nil }
-        return SkewEstimator.estimate(page)
+        return SkewEstimator.estimateAveraged(page)
     }
 
     private static func downscaled(_ image: CGImage, maxDimension: Double) -> CGImage {

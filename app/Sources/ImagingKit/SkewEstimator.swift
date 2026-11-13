@@ -36,6 +36,35 @@ public enum SkewEstimator {
         return estimate(gray)
     }
 
+    /// Anzahl der Höhenbänder für die gemittelte Messung.
+    static let averagingBands = 3
+    /// Ein Band, dessen Winkel so weit vom Wert der ganzen Seite abweicht, gilt als Ausreißer (Überschrift, Zeichnung, Fleck).
+    static let bandOutlierDegrees = 3.0
+
+    /// Schräglage einer Seite aus mehreren Höhenbändern, gemittelt.
+    ///
+    /// Eine gewölbte Buchseite hat keine einheitliche Schräglage: Die Zeilen fächern sich über die Höhe auf (gemessen an echten Seiten:
+    /// oben 0°, in der Mitte −0,9°, unten −1,3° bis −2,2°). Das Projektionsprofil über die ganze Seite gewichtet dabei jedes
+    /// dunkle Pixel, also dichte Textstellen, und kippt zu einem Ende hin. Der Mittelwert der Bänder verteilt die Abweichung
+    /// gleichmäßig; von Hand gewählt lag der Wert in den Beispielen auch dort. Bei ebenen Seiten ändert sich nichts.
+    public static func estimateAveraged(_ image: CGImage) -> SkewEstimate? {
+        guard let whole = estimate(image) else { return nil }
+        let h = image.height
+        guard h >= averagingBands * 60 else { return whole }
+        var angles: [Double] = []
+        for band in 0..<averagingBands {
+            let top = h * band / averagingBands, bottom = h * (band + 1) / averagingBands
+            guard let part = image.cropping(to: CGRect(x: 0, y: top, width: image.width, height: bottom - top)),
+                  let measured = estimate(part), measured.confidence >= Corrections.defaultConfidenceThreshold,
+                  abs(measured.degrees - whole.degrees) <= bandOutlierDegrees else { continue }
+            angles.append(measured.degrees)
+        }
+        guard angles.count >= 2 else { return whole }
+        let mean = angles.reduce(0, +) / Double(angles.count)
+        let rounded = (mean / 0.05).rounded() * 0.05
+        return SkewEstimate(degrees: rounded, confidence: whole.confidence, contrast: whole.contrast, peakRatio: whole.peakRatio)
+    }
+
     static func estimate(_ gray: GrayBitmap) -> SkewEstimate? {
         let threshold = otsuThreshold(gray.pixels)
         // Ränder weglassen: Schatten, Falz und Papierkante täuschen sonst eine Linie vor.
