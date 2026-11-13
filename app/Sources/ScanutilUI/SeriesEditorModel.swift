@@ -37,8 +37,36 @@ public enum EditorFilter: String, CaseIterable, Identifiable, Sendable {
 public final class SeriesEditorModel {
     public var filter: EditorFilter = .all
     public var selectedPageID: UUID?
+    /// Die markierten Seiten: Auf sie wirken Zuschnitt, Papier aufhellen und Hände entfernen gemeinsam. Unabhängig von der Auswahl,
+    /// die bestimmt, welche Seite rechts groß zu sehen ist.
+    public private(set) var markedIDs: Set<UUID> = []
+    /// Die zuletzt markierte oder abgewählte Seite: Anfang eines Bereichs bei Umschalt-Klick.
+    private var markAnchor: UUID?
 
     public init() {}
+
+    public func isMarked(_ id: UUID) -> Bool { markedIDs.contains(id) }
+
+    /// Markiert eine Seite oder nimmt die Markierung zurück.
+    public func toggleMark(_ id: UUID) {
+        if markedIDs.contains(id) { markedIDs.remove(id) } else { markedIDs.insert(id) }
+        markAnchor = id
+    }
+
+    /// Markiert alle Seiten von der zuletzt markierten (sonst der gewählten) bis `id`, in der Reihenfolge von `ordered`.
+    public func markRange(to id: UUID, in ordered: [UUID]) {
+        guard let end = ordered.firstIndex(of: id) else { return }
+        let from = markAnchor ?? selectedPageID
+        let start = from.flatMap { ordered.firstIndex(of: $0) } ?? end
+        for page in ordered[min(start, end)...max(start, end)] { markedIDs.insert(page) }
+        markAnchor = id
+    }
+
+    public func mark(_ ids: [UUID]) { markedIDs.formUnion(ids); markAnchor = ids.last ?? markAnchor }
+    public func clearMarks() { markedIDs.removeAll(); markAnchor = nil }
+
+    /// Die markierten Seiten, die es im Dokument noch gibt, in Dokumentreihenfolge.
+    public func marked(in document: ScanDocument) -> [UUID] { document.pages.map(\.id).filter { markedIDs.contains($0) } }
 
     /// Seiten in Dokumentreihenfolge, die der Filter durchlässt.
     public func visiblePages(of document: ScanDocument, review: DocumentReview) -> [DocumentPage] {

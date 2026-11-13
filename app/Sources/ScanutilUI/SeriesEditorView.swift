@@ -17,6 +17,8 @@ public struct SeriesEditorView: View {
     @State private var cardHeight = 170.0
     /// Was die große Ansicht zeigt. Hier und nicht in der Ansicht, damit die Werkzeuge „Rahmen ziehen“ umschalten können.
     @State private var previewMode = PagePreview.Mode.original
+    /// Was die letzte Aktion auf markierte Seiten bewirkt hat („Papier aufhellen bei 5 von 8 Seiten geändert“).
+    @State private var batchNote: String?
 
     public init(model: AppModel, documentID: UUID?, nav: Navigator) { self.model = model; self.documentID = documentID; self.nav = nav }
 
@@ -40,8 +42,12 @@ public struct SeriesEditorView: View {
         return VStack(spacing: 0) {
             header(document, review: review)
             Divider()
-            filterBar(document, review: review)
+            filterBar(document, review: review, visible: visible)
             Divider()
+            if !editor.marked(in: document).isEmpty {
+                markStrip(document)
+                Divider()
+            }
             if let before = model.undoablePageRemoval, before.id == document.id {
                 let removed = before.pages.count - document.pages.count
                 HStack {
@@ -62,6 +68,7 @@ public struct SeriesEditorView: View {
             }
         }
         .onAppear { if editor.selectedPageID == nil { editor.selectedPageID = document.pages.first?.id } }
+        .onChange(of: document.id) { editor.clearMarks(); batchNote = nil }
     }
 
     // MARK: Kopf und Filter
@@ -159,7 +166,7 @@ public struct SeriesEditorView: View {
         if model.renameDocument(id: document.id, to: renameText) { renaming = false }
     }
 
-    private func filterBar(_ document: ScanDocument, review: DocumentReview) -> some View {
+    private func filterBar(_ document: ScanDocument, review: DocumentReview, visible: [DocumentPage]) -> some View {
         HStack(spacing: 6) {
             ForEach(EditorFilter.allCases) { filter in
                 let count = editor.count(filter, document: document, review: review)
@@ -172,6 +179,11 @@ public struct SeriesEditorView: View {
                 .accessibilityValue("\(count)")
                 .accessibilityIdentifier("editor-filter-\(filter.rawValue)")
             }
+            Divider().frame(height: 16)
+            Button("Alle markieren") { editor.mark(visible.map(\.id)); batchNote = nil }
+                .disabled(visible.isEmpty)
+                .help("Markiert alle Seiten, die der Filter zeigt. Einzelne Seiten markierst du mit dem Kreis oben links, mit Befehl-Klick; Umschalt-Klick markiert einen Bereich")
+                .accessibilityIdentifier("editor-mark-all")
             Spacer()
             Image(systemName: "photo").foregroundStyle(.secondary)
             Slider(value: $cardHeight, in: 100...360).frame(width: 120)
@@ -212,10 +224,7 @@ public struct SeriesEditorView: View {
                             }
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: cardHeight * 0.8, maximum: cardHeight * 1.2), spacing: 10)], spacing: 10) {
                                 ForEach(pages) { page in
-                                    let number = (document.pages.firstIndex { $0.id == page.id } ?? 0) + 1
-                                    PageCard(model: model, documentID: document.id, page: page, number: number,
-                                             review: review.pages[page.id], selected: editor.selectedPageID == page.id, height: cardHeight)
-                                        .onTapGesture { editor.selectedPageID = page.id }
+                                    markableCard(document, page: page, ordered: visible.map(\.id), review: review)
                                 }
                             }
                         }
@@ -240,16 +249,107 @@ public struct SeriesEditorView: View {
             }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: cardHeight * 0.8, maximum: cardHeight * 1.2), spacing: 10)], spacing: 10) {
                 ForEach(visible) { page in
-                    let number = (document.pages.firstIndex { $0.id == page.id } ?? 0) + 1
-                    PageCard(model: model, documentID: document.id, page: page, number: number,
-                             review: review.pages[page.id], selected: editor.selectedPageID == page.id, height: cardHeight)
-                        .onTapGesture { editor.selectedPageID = page.id }
+                    markableCard(document, page: page, ordered: visible.map(\.id), review: review)
                 }
             }
             .padding(12)
         }
         .frame(maxWidth: .infinity)
         .accessibilityIdentifier("editor-grid")
+    }
+
+    /// Eine Seitenkarte mit dem Kreis zum Markieren oben links. Klick wählt die Seite aus; Befehl-Klick schaltet die Markierung um,
+    /// Umschalt-Klick markiert alle Seiten bis zur geklickten.
+    private func markableCard(_ document: ScanDocument, page: DocumentPage, ordered: [UUID], review: DocumentReview) -> some View {
+        let number = (document.pages.firstIndex { $0.id == page.id } ?? 0) + 1
+        let marked = editor.isMarked(page.id)
+        return ZStack(alignment: .topLeading) {
+            PageCard(model: model, documentID: document.id, page: page, number: number, review: review.pages[page.id],
+                     selected: editor.selectedPageID == page.id, height: cardHeight, marked: marked)
+                .onTapGesture {
+                    let flags = NSEvent.modifierFlags
+                    if flags.contains(.command) { editor.toggleMark(page.id) }
+                    else if flags.contains(.shift) { editor.markRange(to: page.id, in: ordered) }
+                    editor.selectedPageID = page.id
+                }
+            Button { editor.toggleMark(page.id); batchNote = nil } label: {
+                Image(systemName: marked ? "checkmark.circle.fill" : "circle")
+                    .font(.title3).foregroundStyle(marked ? Color.accentColor : Color.secondary)
+                    .background(Circle().fill(.background).opacity(0.85))
+            }
+            .buttonStyle(.plain).padding(8)
+            .help(marked ? "Markierung zurücknehmen" : "Seite markieren")
+            .accessibilityLabel("Seite \(number) markieren")
+            .accessibilityValue(marked ? "markiert" : "nicht markiert")
+            .accessibilityIdentifier("editor-mark-\(number)")
+        }
+    }
+
+    /// Die Leiste für die markierten Seiten: Bildhälfte, Papier aufhellen und Hände entfernen wirken auf alle gemeinsam.
+    private func markStrip(_ document: ScanDocument) -> some View {
+        let ids = editor.marked(in: document)
+        let pages = ids.compactMap { document.page(id: $0) }
+        let allWhole = pages.allSatisfy { $0.region == .whole }, noneWhole = pages.allSatisfy { $0.region != .whole }
+        let cropTitle = noneWhole ? "Bildhälfte" : (allWhole ? "Ganzes Bild" : "Bildhälfte / Ganzes Bild")
+        let withoutHands = pages.filter { !$0.corrections.handRemoval.hasMask }.count
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 14) {
+                Text("\(ids.count) Seite\(ids.count == 1 ? "" : "n") markiert").font(.callout.bold())
+                    .accessibilityIdentifier("editor-mark-count")
+                Button("Markierung aufheben") { editor.clearMarks(); batchNote = nil }.accessibilityIdentifier("editor-mark-none")
+                Divider().frame(height: 16)
+                HStack(spacing: 6) {
+                    Text("Zuschnitt").font(.callout)
+                    Button(cropTitle) {
+                        let n = model.updatePages(documentID: document.id, pageIDs: ids) { page, c in
+                            c.setCrop(page.region == .whole ? .full : PageGeometry.half(of: .full, region: page.region))
+                        }
+                        batchNote = "Zuschnitt bei \(n) von \(ids.count) Seiten gesetzt."
+                    }
+                    .help(noneWhole ? "Setzt den Zuschnitt aller markierten Seiten auf die linke bzw. rechte Bildhälfte"
+                                    : "Setzt den Zuschnitt auf das ganze Bild bzw. die linke oder rechte Hälfte")
+                    .accessibilityIdentifier("editor-batch-crop")
+                }
+                HStack(spacing: 6) {
+                    Text("Papier aufhellen").font(.callout)
+                    batchButton("An", id: "editor-batch-tone-on") { setTone(true, document, ids) }
+                    batchButton("Aus", id: "editor-batch-tone-off") { setTone(false, document, ids) }
+                }
+                HStack(spacing: 6) {
+                    Text("Hände und Daumen entfernen").font(.callout)
+                    batchButton("An", id: "editor-batch-hands-on") { setHands(true, document, ids, withoutHands: withoutHands) }
+                    batchButton("Aus", id: "editor-batch-hands-off") { setHands(false, document, ids, withoutHands: withoutHands) }
+                }
+                if let note = batchNote {
+                    Text(note).font(.callout).foregroundStyle(.secondary).accessibilityIdentifier("editor-batch-note")
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+        }
+        .background(.quaternary)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("editor-mark-strip")
+    }
+
+    private func batchButton(_ title: String, id: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action).accessibilityIdentifier(id)
+    }
+
+    private func setTone(_ on: Bool, _ document: ScanDocument, _ ids: [UUID]) {
+        let n = model.updatePages(documentID: document.id, pageIDs: ids) { _, c in
+            guard c.tone.enabled != on else { return }
+            c.setToneEnabled(on)
+        }
+        batchNote = "Papier aufhellen bei \(n) von \(ids.count) Seiten \(on ? "eingeschaltet" : "ausgeschaltet")."
+    }
+
+    private func setHands(_ on: Bool, _ document: ScanDocument, _ ids: [UUID], withoutHands: Int) {
+        let n = model.updatePages(documentID: document.id, pageIDs: ids) { _, c in
+            guard c.handRemoval.hasMask, c.handRemoval.enabled != on else { return }
+            c.setHandRemovalEnabled(on)
+        }
+        let rest = withoutHands > 0 ? " \(withoutHands) Seite\(withoutHands == 1 ? " hat" : "n haben") keine erkannten Hände." : ""
+        batchNote = "Hände bei \(n) von \(ids.count) Seiten \(on ? "entfernt" : "behalten")." + rest
     }
 
     // MARK: Werkzeuge
@@ -373,6 +473,7 @@ struct PageCard: View {
     let review: PageReview?
     let selected: Bool
     var height = 170.0
+    var marked = false
     @State private var image: CGImage?
 
     var body: some View {
@@ -389,7 +490,7 @@ struct PageCard: View {
                 .font(.caption.monospacedDigit())
         }
         .padding(4)
-        .background(selected ? Color.accentColor.opacity(0.15) : Color.clear)
+        .background(selected ? Color.accentColor.opacity(0.15) : (marked ? Color.accentColor.opacity(0.07) : Color.clear))
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(selected ? Color.accentColor : Color.clear, lineWidth: 2))
         
         .task(id: "\(page.corrections.cacheKey)/\(AppModel.bucket(Int(height * 2.5)))") { image = await model.pagePreview(documentID: documentID, pageID: page.id, maxPixelSize: Int(height * 2.5)) }
