@@ -84,6 +84,12 @@ public struct SeriesEditorView: View {
                     .font(.caption).foregroundStyle(.orange)
                     .accessibilityIdentifier("editor-open-count")
             }
+            let withoutTone = document.pages.filter { !$0.corrections.tone.enabled }.count
+            if withoutTone > 0 {
+                Button("Papier aufhellen: alle Seiten") { model.setToneForAllPages(documentID: document.id, true) }
+                    .help("Schaltet das Aufhellen für \(withoutTone) Seite\(withoutTone == 1 ? "" : "n") ein, bei denen es noch aus ist")
+                    .accessibilityIdentifier("editor-tone-all")
+            }
             if document.isInbox {
                 inboxFileButton(document)
             } else {
@@ -297,6 +303,9 @@ public struct SeriesEditorView: View {
                 Text(String(format: "%+.2f°", c.rotation.degrees)).font(.callout.monospacedDigit()).frame(width: 60, alignment: .trailing)
                 Button("0°") { change { $0.setRotation(degrees: 0) } }.accessibilityIdentifier("editor-rotation-zero")
             }
+            Toggle("Papier aufhellen", isOn: Binding(get: { c.tone.enabled }, set: { on in change { $0.setToneEnabled(on) } }))
+                .help("Macht das Papier hell und gleichmäßig und die Schrift kräftiger")
+                .accessibilityIdentifier("editor-tone")
             if c.handRemoval.hasMask {
                 Toggle("Hände und Daumen entfernen", isOn: Binding(get: { c.handRemoval.enabled }, set: { on in change { $0.setHandRemovalEnabled(on) } }))
                     .accessibilityIdentifier("editor-hands")

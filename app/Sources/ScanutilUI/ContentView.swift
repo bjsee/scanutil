@@ -893,6 +893,8 @@ struct ScanDetailView: View {
                                isOn: Binding(get: { c.handRemoval.enabled }, set: { model.setPageHandRemovalEnabled(pageID: page.id, $0) }))
                             .accessibilityIdentifier("book-hands-\(side)")
                     }
+                    Toggle("Papier aufhellen \(side)", isOn: Binding(get: { c.tone.enabled }, set: { model.setPageToneEnabled(pageID: page.id, $0) }))
+                        .accessibilityIdentifier("book-tone-\(side)")
                     HStack {
                         Text("Drehung \(side)").font(.callout).frame(width: 90, alignment: .leading)
                         Slider(value: Binding(get: { c.rotation.degrees }, set: { model.setPageRotation(pageID: page.id, degrees: $0) }), in: -15...15, step: 0.05)
@@ -952,6 +954,10 @@ struct ScanDetailView: View {
                     .help("Füllt die Stellen mit dem Papierton der Umgebung. Text unter einem Daumen lässt sich nicht wiederherstellen.")
                     .accessibilityIdentifier("hands-toggle")
             }
+            Toggle("Papier aufhellen", isOn: Binding(get: { c.tone.enabled }, set: { model.setToneEnabled(id: item.id, $0) }))
+                .disabled(!c.enabled)
+                .help("Macht das Papier hell und gleichmäßig und die Schrift kräftiger; der Papierton bleibt")
+                .accessibilityIdentifier("tone-toggle")
             HStack {
                 Slider(
                     value: Binding(get: { c.rotation.degrees }, set: { model.setRotation(id: item.id, degrees: $0) }),

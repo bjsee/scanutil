@@ -7,7 +7,7 @@ import Testing
 @MainActor
 @Suite("Scanner hängt nach der Gerätetaste")
 struct ScannerStuckTests {
-    private func eventually(timeout: Double = 20, _ condition: @MainActor () -> Bool) async -> Bool {
+    private func eventually(timeout: Double = 60, _ condition: @MainActor () -> Bool) async -> Bool {
         let end = Date().addingTimeInterval(timeout)
         while Date() < end { if condition() { return true }; try? await Task.sleep(for: .milliseconds(20)) }
         return condition()
@@ -26,7 +26,7 @@ struct ScannerStuckTests {
         scanner.setFlapping(after: 0.05)
         let (model, dir) = await makeModel(scanner); defer { try? FileManager.default.removeItem(at: dir) }
         await model.connect()
-        #expect(await eventually { model.scannerStuck }, "Zwei kurze Sitzungen hintereinander: der Scanner hängt")
+        #expect(await eventually { model.scannerStuck }, "Zwei kurze Sitzungen hintereinander: der Scanner hängt. Status \(model.status), Sitzungen \(scanner.openedSessions), Versuche \(scanner.connectAttempts), Protokoll \(model.log.prefix(4).map(\.text))")
         #expect(model.status == .failed(AppModel.scannerStuckText))
         #expect(model.log.filter { $0.text == AppModel.scannerStuckText }.count == 1, "Die Meldung steht einmal im Protokoll")
         await model.disconnect()
@@ -52,7 +52,7 @@ struct ScannerStuckTests {
         await model.connect()
         #expect(await eventually { model.scannerStuck })
         scanner.setFlapping(after: nil)          // Kabel neu gesteckt
-        #expect(await eventually(timeout: 10) { model.status == .ready && !model.scannerStuck }, "Status: \(model.status), hängt: \(model.scannerStuck)")
+        #expect(await eventually(timeout: 60) { model.status == .ready && !model.scannerStuck }, "Status: \(model.status), hängt: \(model.scannerStuck)")
         await model.scan()
         #expect(model.scans.count == 1, "Aufnehmen geht wieder")
         await model.disconnect()

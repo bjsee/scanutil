@@ -73,7 +73,10 @@ struct CorrectionsTests {
 
     @Test func analyzerWithoutResultsDoesNothing() {
         let empty = ImageAnalyzer.corrections(from: Analysis(detection: nil, skew: nil, warnings: []))
-        #expect(empty == Corrections())
+        // Kein Zuschnitt, keine Drehung, keine Hände; nur das Aufhellen des Papiers gilt für jede Aufnahme.
+        var expected = Corrections()
+        expected.tone = ToneCorrection(enabled: true, source: .automatic)
+        #expect(empty == expected)
     }
 
     @Test func plausibilityOfRectangleIsHigh() {

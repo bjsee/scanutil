@@ -52,6 +52,11 @@ public enum CorrectionRenderer {
 
         let extent = ci.extent.integral
         guard extent.width >= 1, extent.height >= 1 else { return nil }
+        // Zuletzt das Papier: Es wird auf der fertig zugeschnittenen Seite gemessen, ohne das schwarze Tuch ringsum.
+        if corrections.tone.enabled {
+            ci = ToneNormalizer.apply(to: ci.cropped(to: extent))
+            return ToneNormalizer.context.createCGImage(ci, from: extent, format: .RGBA8, colorSpace: ToneNormalizer.srgb)
+        }
         return context.createCGImage(ci, from: extent)
     }
 

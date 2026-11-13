@@ -59,6 +59,8 @@ public enum ImageAnalyzer {
     /// Aus einer Analyse werden Korrekturen: sichere Ergebnisse sind aktiv, unsichere nur vorgeschlagen.
     public static func corrections(from analysis: Analysis, threshold: Double = Corrections.defaultConfidenceThreshold) -> Corrections {
         var result = Corrections()
+        // Papier aufhellen gilt für jede Aufnahme von Papier, unabhängig von der Sicherheit der Erkennung.
+        result.tone = ToneCorrection(enabled: true, source: .automatic)
         if let d = analysis.detection {
             let confident = d.plausibility >= threshold
             result.crop = CropCorrection(quad: d.quad, enabled: confident, source: .automatic, confidence: d.plausibility)

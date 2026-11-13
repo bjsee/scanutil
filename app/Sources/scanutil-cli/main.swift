@@ -112,6 +112,16 @@ do {
             if let result = context.makeImage() { write(result, to: out) }
         }
         if let cleaned = option("--cleaned", in: args), let result = HandRemover.apply(to: image, mask: mask) { write(result, to: cleaned) }
+    case "tone":
+        // scanutil-cli tone <bild.png> --out hell.png: das Bild mit Papier aufhellen, zum Ansehen.
+        guard args.count >= 2, let out = option("--out", in: args) else { fail("Aufruf: scanutil-cli tone <bild.png> --out hell.png") }
+        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: args[1]) as CFURL, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { fail("Bild nicht lesbar") }
+        var corrections = Corrections()
+        corrections.tone = ToneCorrection(enabled: true)
+        guard let result = CorrectionRenderer.render(image, corrections: corrections),
+              let d = CGImageDestinationCreateWithURL(URL(fileURLWithPath: out) as CFURL, UTType.png.identifier as CFString, 1, nil) else { fail("Fehlgeschlagen") }
+        CGImageDestinationAddImage(d, result, nil); CGImageDestinationFinalize(d)
     case "usb-descriptor":
         // Gibt die Konfigurationsbeschreibung des Scanners als Hexzeichen aus, zur Untersuchung der UVC-Fähigkeiten.
         var bytes = [UInt8](repeating: 0, count: 4096)
