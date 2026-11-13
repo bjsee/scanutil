@@ -204,6 +204,18 @@ struct SettingsPage: View {
                     Text("Ein kurzer Ton, sobald das Bild aufgenommen ist: dann darf das nächste Dokument unter den Scanner. Gilt für jede Aufnahme, auch ohne Serie.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                Section("Auto-Auslösung (Serien)") {
+                    LabeledContent("Ruhezeit vor der Aufnahme") {
+                        HStack {
+                            Slider(value: $model.autoTriggerCalm, in: AppModel.calmRange, step: 0.2)
+                                .frame(width: 220).accessibilityIdentifier("settings-calm-slider")
+                            Text(String(format: "%.1f s", model.autoTriggerCalm)).font(.callout.monospacedDigit()).frame(width: 52, alignment: .trailing)
+                                .accessibilityIdentifier("settings-calm-value")
+                        }
+                    }
+                    Text("So lange muss das Bild still stehen, bevor die Serie von selbst aufnimmt. Länger gibt dem Buch Zeit, zur Ruhe zu kommen (sonst wird der Text verschmiert); kürzer geht schneller.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Section("Auslöser") {
                     LabeledContent("Taste für die Aufnahme") {
                         HStack {

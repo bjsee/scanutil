@@ -147,6 +147,19 @@ public final class AppModel {
     public var triggerKeyCode: UInt16 {
         didSet { defaults?.set(Int(triggerKeyCode), forKey: Self.triggerKeyKey) }
     }
+    static let calmKey = "autoTriggerCalm"
+    /// Wie lange das Bild ruhig sein muss, bevor die Auto-Auslösung aufnimmt, in Sekunden. Die Scanner-Software lässt sich mehr Zeit
+    /// als die ersten 0,8 s dieser App: Ein Buch, das noch zur Ruhe kommt, gab verschmierten Text. Einstellbar.
+    public var autoTriggerCalm: TimeInterval {
+        didSet {
+            defaults?.set(autoTriggerCalm, forKey: Self.calmKey)
+            trigger.configuration.calmDuration = autoTriggerCalm
+        }
+    }
+    /// Die Grenzen der Einstellung.
+    public static let calmRange: ClosedRange<TimeInterval> = 0.6...4.0
+    public static let defaultCalm: TimeInterval = 1.6
+
     /// Ob der Name der Dokumente von der KI auf dem Mac vorgeschlagen wird (sonst nach einer einfachen Regel).
     public var aiNamingEnabled: Bool {
         didSet { defaults?.set(aiNamingEnabled, forKey: Self.aiNamingKey) }
@@ -246,6 +259,9 @@ public final class AppModel {
         self.describer = describer
         triggerKeyCode = UInt16(defaults?.integer(forKey: Self.triggerKeyKey) ?? 0).nonZero ?? 49
         aiNamingEnabled = defaults?.object(forKey: Self.aiNamingKey) as? Bool ?? true
+        let savedCalm = defaults?.object(forKey: Self.calmKey) as? Double
+        autoTriggerCalm = min(max(savedCalm ?? Self.defaultCalm, Self.calmRange.lowerBound), Self.calmRange.upperBound)
+        trigger.configuration.calmDuration = autoTriggerCalm
         // Die Zielordner: gespeicherte Liste, sonst der einzelne Ordner einer früheren Fassung als erstes Ziel.
         if let data = defaults?.data(forKey: Self.inboxTargetsKey), let saved = try? JSONDecoder().decode(InboxTargets.self, from: data) {
             inboxTargets = saved
@@ -539,7 +555,7 @@ public final class AppModel {
             updateSavedDocuments(with: document)
             seriesIsBook = book
             pagePreviews = [:]
-            trigger = AutoTrigger()
+            trigger = AutoTrigger(); trigger.configuration.calmDuration = autoTriggerCalm
             seriesPhase = trigger.phase
             message = nil
             post(.info, (inbox ? "Schnellablage „" : "Serie „") + document.title + "“ begonnen" + (book ? " (Doppelseiten)." : "."))
@@ -575,7 +591,7 @@ public final class AppModel {
         series = document          // vor dem Laden, damit die Seiten der Scans bekannt sind
         seriesIsBook = document.pages.isEmpty ? book : document.pages.contains { $0.region != .whole }
         await showScans(of: document)
-        trigger = AutoTrigger()
+        trigger = AutoTrigger(); trigger.configuration.calmDuration = autoTriggerCalm
         seriesPhase = trigger.phase
         message = nil
         post(.info, "Serie „\(document.title)“ fortgesetzt (\(document.pages.count) Seite(n)" + (seriesIsBook ? ", Doppelseiten)." : ")."))
