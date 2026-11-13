@@ -88,6 +88,30 @@ do {
         await session.close()
         print("  Schärfe bei Aufnahme: \(sharpness.map(String.init) ?? "unverändert")")
 
+    case "hands":
+        // scanutil-cli hands <scan.png> --out überlagerung.png [--cleaned bereinigt.png]
+        // Zeigt, welche Fläche die Hand- und Markererkennung maskiert (rot), und schreibt auf Wunsch das bereinigte Bild.
+        guard args.count >= 2 else { fail("Aufruf: scanutil-cli hands <scan.png> --out überlagerung.png [--cleaned bereinigt.png]") }
+        let input = URL(fileURLWithPath: args[1])
+        guard let source = CGImageSourceCreateWithURL(input as CFURL, nil), let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { fail("Bild nicht lesbar") }
+        guard let detection = HandDetector.detect(in: image) else { print("Nichts erkannt."); break }
+        let mask = detection.mask
+        print("Erkannt: \(detection.regions) Fläche(n), \(detection.markers) Marker, Anteil \(String(format: "%.1f", mask.coverage * 100)) %")
+        func write(_ image: CGImage, to path: String) {
+            guard let d = CGImageDestinationCreateWithURL(URL(fileURLWithPath: path) as CFURL, UTType.png.identifier as CFString, 1, nil) else { return }
+            CGImageDestinationAddImage(d, image, nil); CGImageDestinationFinalize(d)
+        }
+        if let out = option("--out", in: args),
+           let context = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 0.45))
+            let cw = Double(image.width) / Double(mask.width), ch = Double(image.height) / Double(mask.height)
+            for y in 0..<mask.height { for x in 0..<mask.width where mask.cells[y * mask.width + x] > 127 {
+                context.fill(CGRect(x: Double(x) * cw, y: Double(image.height) - Double(y + 1) * ch, width: cw + 1, height: ch + 1))
+            } }
+            if let result = context.makeImage() { write(result, to: out) }
+        }
+        if let cleaned = option("--cleaned", in: args), let result = HandRemover.apply(to: image, mask: mask) { write(result, to: cleaned) }
     case "usb-descriptor":
         // Gibt die Konfigurationsbeschreibung des Scanners als Hexzeichen aus, zur Untersuchung der UVC-Fähigkeiten.
         var bytes = [UInt8](repeating: 0, count: 4096)

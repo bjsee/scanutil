@@ -118,10 +118,12 @@ public enum HandDetector {
         // Danach Löcher füllen: Ein überstrahlter Glanzpunkt mitten im Marker ist weder gelb noch hautfarben, wäre sonst aber
         // eine Lücke in der Maske. Das Verbreitern schließt vorher feine Spalten, durch die das Füllen sonst entwiche.
         var grown = fillHoles(dilate(mask.map { $0 > 127 }, width: w, height: h, radius: max(3, w / 130)), width: w, height: h)
-        // Ein Marker wirft einen Schatten aufs Papier, der als dunkler Saum neben der Füllung stehen bliebe: Um ihn herum
-        // wird deutlich weiter verbreitert als um Finger.
+        // Ein Marker wirft einen Schatten aufs Papier, der als dunkler Saum neben der Füllung stehen bliebe. Er wird mitgenommen,
+        // aber nur dort, wo wirklich Schatten liegt: glattes, etwas dunkleres, ungefärbtes Papier. Text (Striche mit scharfen
+        // Kanten, viel dunkler) bleibt davon unberührt, auch wenn der Marker dicht daneben liegt.
         if markerCount > 0 {
-            let shadow = dilate(markerCells, width: w, height: h, radius: max(8, w / 40))
+            let zone = dilate(markerCells, width: w, height: h, radius: max(8, w / 40))
+            let shadow = shadowCells(in: zone, excluding: grown, rgb: rgb, width: w, height: h)
             for i in 0..<(w * h) where shadow[i] { grown[i] = true }
         }
         let cells = grown.map { $0 ? UInt8(255) : 0 }
@@ -130,6 +132,43 @@ public enum HandDetector {
         let coverage = result.coverage
         guard coverage < 0.30 else { return nil }
         return HandDetection(mask: result, regions: kept, markers: markerCount, confidence: 1)
+    }
+
+    /// Die Zellen in `zone`, die nach Schatten aussehen: nicht schon maskiert, ungefärbt (kein Gelb, keine Haut, kein grüner Einband),
+    /// etwas dunkler als das Papier ringsum und glatt (ohne scharfe Kanten wie bei Schrift).
+    static func shadowCells(in zone: [Bool], excluding mask: [Bool], rgb: RGBBitmap, width w: Int, height h: Int) -> [Bool] {
+        var luminance = [Float](repeating: 0, count: w * h)
+        var colorful = [Bool](repeating: false, count: w * h)
+        rgb.pixels.withUnsafeBufferPointer { p in
+            for i in 0..<(w * h) {
+                let r = Float(p[i * 4]), g = Float(p[i * 4 + 1]), b = Float(p[i * 4 + 2])
+                luminance[i] = 0.299 * r + 0.587 * g + 0.114 * b
+                colorful[i] = max(r, g, b) - min(r, g, b) > 38
+            }
+        }
+        // Das Papier ringsum: helle, ungefärbte Zellen in der Zone, ohne die schon maskierten (Marker, Finger). Ein hoher
+        // Perzentilwert, damit Schrift und Schatten ihn nicht herunterziehen.
+        var reference: [Float] = []
+        for i in 0..<(w * h) where zone[i] && !mask[i] && !colorful[i] && luminance[i] > 90 { reference.append(luminance[i]) }
+        guard reference.count >= 20 else { return [Bool](repeating: false, count: w * h) }
+        reference.sort()
+        let paper = reference[reference.count * 7 / 10]
+        var result = [Bool](repeating: false, count: w * h)
+        for y in 1..<(h - 1) {
+            for x in 1..<(w - 1) {
+                let i = y * w + x
+                guard zone[i], !mask[i], !colorful[i] else { continue }
+                let v = luminance[i]
+                guard v < 0.94 * paper, v > 0.45 * paper else { continue }       // etwas dunkler, aber nicht schwarz wie Schrift
+                var low = v, high = v
+                for dy in -1...1 { for dx in -1...1 {
+                    let n = luminance[(y + dy) * w + x + dx]
+                    low = min(low, n); high = max(high, n)
+                } }
+                if high - low < 0.16 * paper { result[i] = true }                // glatt: keine Schriftkante
+            }
+        }
+        return result
     }
 
     /// Vereinigt zwei Erkennungen desselben Bildes zu einer. Eine fehlende zählt nicht.

@@ -129,17 +129,38 @@ struct HandTests {
         #expect(!covered(300, 300))
     }
 
-    @Test func theMaskOfAMarkerReachesFarEnoughToCoverItsShadow() throws {
-        // Der Marker wirft einen Schatten aufs Papier. Bliebe er stehen, sähe man neben der Füllung einen dunklen Saum.
+    /// Ein Marker am rechten Seitenrand (Papier bis x=700), Punktfeld wie am echten Marker.
+    private func pageWithMarker() -> Canvas {
         var c = bookPage()
         c.rect(640, 380, 760, 440, yellow)
         c.rect(640, 388, 690, 432, (240, 240, 240))
         for k in 0..<3 { c.ellipse(cx: 656 + k * 12, cy: 410, rx: 4, ry: 4, (20, 20, 20)) }
+        return c
+    }
+
+    private func covered(_ mask: HandMask, _ x: Int, _ y: Int) -> Bool {
+        mask.cells[(y * mask.height / 600) * mask.width + (x * mask.width / 800)] > 127
+    }
+
+    @Test func theShadowOfAMarkerIsCoveredToo() throws {
+        // Der Marker wirft einen weichen, etwas dunkleren Schatten aufs Papier. Bliebe er stehen, sähe man neben der Füllung einen Saum.
+        var c = pageWithMarker()
+        c.rect(630, 440, 690, 462, (186, 186, 180))      // Schatten unter dem Marker
+        c.rect(612, 380, 640, 440, (186, 186, 180))      // und links davon
         let mask = try #require(HandDetector.detect(in: c.image())).mask
-        func covered(_ x: Int, _ y: Int) -> Bool { mask.cells[(y * mask.height / 600) * mask.width + (x * mask.width / 800)] > 127 }
-        #expect(covered(700, 455), "Schatten unter dem Marker, 15 Pixel unter der gelben Kante")
-        #expect(covered(625, 410), "Schatten links vom Marker")
-        #expect(!covered(700, 520), "Weiter weg bleibt das Papier")
+        #expect(covered(mask, 660, 452), "Schatten unter dem Marker")
+        #expect(covered(mask, 622, 410), "Schatten links vom Marker")
+        #expect(!covered(mask, 660, 520), "Weiter weg bleibt das Papier")
+    }
+
+    @Test func textNextToAMarkerIsNotEatenByTheMask() throws {
+        // Schrift dicht neben dem Marker (Zeilenanfänge an der Papierkante) gehört nicht zum Marker, auch nicht zu seinem Schatten:
+        // Sie wäre sonst im fertigen Bild weg. Die Schriftzeilen reichen hier bis 6 Pixel an den Marker heran (x = 634, Marker ab 640).
+        var c = pageWithMarker()
+        for row in 0..<4 { c.rect(540, 372 + row * 22, 634, 378 + row * 22, (30, 30, 30)) }
+        let mask = try #require(HandDetector.detect(in: c.image())).mask
+        #expect(covered(mask, 700, 410), "Der Marker selbst")
+        for row in 0..<4 { #expect(!covered(mask, 626, 375 + row * 22), "Schriftzeile \(row) liegt in der Maske") }
     }
 
     @Test func fillNextToAMarkerIsNotBrighterThanTheDimPaperAroundIt() throws {

@@ -49,8 +49,9 @@ public enum HandRemover {
             let my = min(mask.height - 1, y * mask.height / h)
             for x in 0..<w { isHand[y * w + x] = mask.cells[my * mask.width + min(mask.width - 1, x * mask.width / w)] > 127 }
         }
-        // Etwas Abstand: Schatten neben dem Daumen oder Marker färbt sonst den Rand der Füllung grau.
-        isHand = HandDetector.dilate(isHand, width: w, height: h, radius: 5)
+        // Etwas Abstand zum Rand der Maske (Schatten und weiche Fingerränder liegen schon in der Maske). Nicht mehr: Er frisst sonst
+        // Text, der neben einem Marker steht.
+        isHand = HandDetector.dilate(isHand, width: w, height: h, radius: 2)
 
         var values = [Float](repeating: 0, count: w * h * 3)
         var paper = [Bool](repeating: false, count: w * h)

@@ -110,6 +110,8 @@ In der Scanansicht steht, wenn etwas erkannt wurde, der Schalter „Hände und D
 *Grenzen:* Text oder Bild unter einem Daumen oder Marker lässt sich nicht wiederherstellen, er wird durch Papierton ersetzt. Der Füllton ist ein glatter Durchschnitt des umgebenden Papiers und kann einen Hauch heller oder grauer sein als das Papier daneben. Außerhalb der Seite entstehen kantige helle Reste auf dem Tuch, die erst der Zuschnitt entfernt. Getestet an einem Buch auf schwarzem Tuch; bei hellem Hintergrund oder anderem Licht ist die Erkennung nicht geprüft.
 Ansehen: `scanutil-cli analyze <scan.png> --hands --out ueberlagerung.png --clean ohne-haende.png`.
 
+*Schatten und Text neben dem Marker:* Der Marker wirft einen Schatten aufs Papier; er wird mit entfernt, aber nur dort, wo wirklich Schatten liegt (glattes, etwas dunkleres, ungefärbtes Papier). Schrift dicht neben dem Marker, etwa Zeilenanfänge an der Papierkante, bleibt unberührt. Eine pauschale Verbreiterung um den Marker hatte an einem echten Buch (7. und 13. November 2026) die ersten Buchstaben von Zeilen weggefüllt. `scanutil-cli hands <scan.png> --out überlagerung.png [--cleaned bereinigt.png]` zeigt die Maske und das Ergebnis an einem Scan.
+
 === Zoom
 
 Vorschau und Scanansicht (auch jede Seite einer Doppelseite) lassen sich vergrößern:
@@ -207,6 +209,7 @@ Das Erkennen eines abgezogenen oder ausgeschalteten Scanners wurde am 3. Novembe
 
 *Taste am Scanner und CZUR-Fußtaster:* Sie lassen sich mit der App nicht benutzen. Ein Druck bringt den Scanner in einen Zustand, in dem er pro Verbindung nur ein Bild liefert und dann schweigt (am 7. November 2026 am echten ET24 gemessen: Bildstrom steht, Neuverbinden hilft nicht, erst Abziehen und Einstecken des USB-Kabels löst es). Der Scanner meldet den Druck nur über den Statuskanal der Kamera (UVC-Status-Interrupt, als „allgemeines Tastenereignis“ beschrieben); macOS gibt ihn weder an Programme noch ins System-Protokoll weiter, und der Kanal ließe sich nur mit einem eigenen UVC-Treiber lesen. Der CZUR-Fußtaster meldet sich am Mac nicht als Gerät. Für einen Fußtaster taugt ein USB-Fußschalter, der sich als Tastatur meldet (Einstellungen → „Taste lernen“).
 Hängt der Scanner, erkennt die App das (zwei Verluste des Bildstroms hintereinander, ohne dass das Gerät dazwischen weg war), sagt es in der Statuszeile und sucht nur noch alle zehn Sekunden. `scanutil-cli usb-descriptor` gibt die Konfigurationsbeschreibung des Scanners aus, `SCANUTIL_TRACE=1` zeigt Pausen des Bildstroms, `SCANUTIL_NO_WATCHDOG=1` schaltet das automatische Neuverbinden für Untersuchungen ab.
+*Ruhezeit der Auto-Auslösung:* Standard 1,6 Sekunden (vorher 0,8; die Scanner-Software lässt sich ebenfalls mehr Zeit, und ein Buch, das noch zur Ruhe kam, gab verschmierten Text); unter *Einstellungen* zwischen 0,6 und 4 Sekunden einstellbar.
 *Ton:* Jede Aufnahme piept kurz (auch eine einzelne per Leertaste ohne Serie); unter Einstellungen lässt sich das abschalten.
 
 *Texterkennung:* Mit „Mit Texterkennung“ beim Export (CLI: `--ocr`, `--lang de-DE,en-US`) legt Apple Vision den erkannten Text unsichtbar über jede Seite, das PDF wird durchsuchbar.
