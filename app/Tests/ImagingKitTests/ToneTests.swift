@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreImage
 import Foundation
 import Testing
 @testable import ImagingKit
@@ -113,9 +114,18 @@ struct ToneTests {
             let t = max(0, min(1, d / 6 + 0.5))          // 0 im Balken, 1 im Papier, weicher Übergang
             return 0.12 + (0.88 - 0.12) * t
         }
-        let out = render(page, tone: true)
-        func steepest(_ image: CGImage) -> Double { (0..<599).map { abs(value(image, $0 + 1, 200) - value(image, $0, 200)) }.max() ?? 0 }
-        #expect(steepest(out) > steepest(page) * 1.15, "Steilere Kante: \(steepest(page)) → \(steepest(out))")
+        // Dieselbe Rechnung mit und ohne Schärfen: Das Aufhellen allein steigert den Kontrast und macht jede Kante steiler; nur
+        // das Schärfen macht sie steiler, als der Kontrast es erklärt.
+        func rendered(sharpen: Double) -> CGImage {
+            let ci = ToneNormalizer.apply(to: CIImage(cgImage: page), sharpen: sharpen)
+            return ToneNormalizer.context.createCGImage(ci, from: ci.extent, format: .RGBA8, colorSpace: ToneNormalizer.srgb)!
+        }
+        func steepness(_ image: CGImage) -> Double {
+            let contrast = value(image, 100, 200) - value(image, 300, 200)
+            return ((0..<599).map { abs(value(image, $0 + 1, 200) - value(image, $0, 200)) }.max() ?? 0) / contrast
+        }
+        let plain = rendered(sharpen: 0), out = rendered(sharpen: ToneNormalizer.sharpenIntensity)
+        #expect(steepness(out) > steepness(plain) * 1.12, "Steilere Kante durch das Schärfen: \(steepness(plain)) → \(steepness(out))")
         #expect(value(out, 100, 200) <= 1.0 && value(out, 100, 200) > 0.93, "Papier daneben: \(value(out, 100, 200))")
     }
 

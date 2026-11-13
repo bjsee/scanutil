@@ -77,7 +77,7 @@ public enum ToneNormalizer {
     }
 
     /// Wendet das Aufhellen auf ein Bild an. Gibt das Bild unverändert zurück, wenn keine Papierfläche zu messen ist.
-    static func apply(to image: CIImage) -> CIImage {
+    static func apply(to image: CIImage, sharpen: Double = sharpenIntensity) -> CIImage {
         let extent = image.extent
         guard extent.width >= 16, extent.height >= 16 else { return image }
         let scale = min(1, workingSize / max(extent.width, extent.height))
@@ -123,7 +123,7 @@ public enum ToneNormalizer {
         // Schärfen: Zuschnitt und Drehung rechnen das Bild zweimal um und verlieren dabei etwas Schärfe (bilinear etwa 14 %).
         // Ein milder Schärfen-Schritt gleicht das aus. Der Radius hängt von der Seitengröße ab: etwa 1/1200 der längeren Kante.
         let radius = max(1.0, Double(max(extent.width, extent.height)) / 1200 * sharpenRadiusFactor)
-        return curved.applyingFilter("CIUnsharpMask", parameters: [kCIInputRadiusKey: radius, kCIInputIntensityKey: sharpenIntensity])
+        return curved.applyingFilter("CIUnsharpMask", parameters: [kCIInputRadiusKey: radius, kCIInputIntensityKey: sharpen])
             .cropped(to: extent)
     }
 }
