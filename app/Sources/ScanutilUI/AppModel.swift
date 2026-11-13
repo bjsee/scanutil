@@ -905,6 +905,35 @@ public final class AppModel {
         if shownDocument?.id == documentID { refreshPagePreviews(scanID: page.scanID) }
     }
 
+    /// Ändert die Korrekturen mehrerer Seiten einer Serie in einem Schritt und speichert einmal. `change` bekommt die Seite (für Bildhälfte
+    /// oder ganzes Bild) und ihre Korrekturen; wer nichts zu ändern hat, lässt sie unberührt. Gibt zurück, bei wie vielen Seiten sich
+    /// etwas geändert hat. Bei einer Einzelseite gelten dieselben Korrekturen für den Scan in der Miniaturleiste (wie `updatePage`).
+    @discardableResult
+    public func updatePages(documentID: UUID, pageIDs: [UUID], _ change: (DocumentPage, inout Corrections) -> Void) -> Int {
+        guard var document = latestDocument(id: documentID) else { return 0 }
+        var changed: [DocumentPage] = []
+        for id in pageIDs {
+            guard let page = document.page(id: id) else { continue }
+            _ = document.updateCorrections(pageID: id) { change(page, &$0) }
+            // `updateCorrections` zählt immer; geändert ist, was sich im Inhalt unterscheidet (ohne den Zähler der Korrekturen).
+            guard let after = document.page(id: id) else { continue }
+            var a = after.corrections, b = page.corrections
+            a.revision = 0; b.revision = 0
+            if a == b { document.pages[document.pages.firstIndex { $0.id == id }!].corrections = page.corrections } else { changed.append(after) }
+        }
+        guard !changed.isEmpty else { return 0 }
+        commit(document)
+        for page in changed where page.region == .whole {
+            try? store.saveCorrections(page.corrections, for: page.scanID)
+            if let index = scans.firstIndex(where: { $0.id == page.scanID }) {
+                scans[index].corrections = page.corrections
+                persistAndRender(index: index)
+            }
+        }
+        if shownDocument?.id == documentID { for scanID in Set(changed.map(\.scanID)) { refreshPagePreviews(scanID: scanID) } }
+        return changed.count
+    }
+
     /// Markiert Seiten als geprüft oder nimmt die Markierung zurück. „Geprüft“ gilt für den jetzigen Zustand der Korrekturen:
     /// Ändert sich danach etwas, gilt die Seite wieder als ungeprüft.
     public func setReviewed(_ reviewed: Bool, documentID: UUID, pageIDs: [UUID]) {

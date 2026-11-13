@@ -63,6 +63,42 @@ struct SerieBearbeitenOberflaechenTests {
         #expect(s.app.wait { s.app.element("editor-page-1") != nil })
     }
 
+    @Test func markedPagesGetPaperBrighteningTogetherAndTheOthersStayAsTheyAre() throws {
+        let s = try recordedSeries(scans: 3); defer { s.close() }
+        func toneEnabled(_ page: Int) -> Bool? {
+            let pages = s.pages
+            guard pages.indices.contains(page) else { return nil }
+            return ((pages[page]["corrections"] as? [String: Any])?["tone"] as? [String: Any])?["enabled"] as? Bool
+        }
+        openEditor(s)
+        #expect(s.app.wait { s.app.element("editor-page-3") != nil })
+        #expect(s.app.element("editor-mark-strip") == nil, "Ohne Markierung gibt es die Leiste nicht")
+
+        // Seite 1 und 3 markieren.
+        #expect(s.app.press("editor-mark-1"))
+        #expect(s.app.press("editor-mark-3"))
+        #expect(s.app.wait { s.app.string("editor-mark-count")?.hasPrefix("2") == true }, "Anzeige: \(s.app.string("editor-mark-count") ?? "keine")")
+        #expect(s.app.string("editor-mark-1") == "markiert" && s.app.string("editor-mark-2") == "nicht markiert")
+
+        // Aus für beide markierten Seiten; Seite 2 bleibt, wie sie war.
+        let before2 = toneEnabled(1)
+        #expect(s.app.press("editor-batch-tone-off"))
+        #expect(s.app.wait(timeout: 10) { toneEnabled(0) == false && toneEnabled(2) == false }, "Aus ist nicht gespeichert: \(String(describing: toneEnabled(0))), \(String(describing: toneEnabled(2)))")
+        #expect(toneEnabled(1) == before2, "Die nicht markierte Seite bleibt unberührt")
+        #expect(s.app.wait { s.app.string("editor-batch-note")?.contains("Papier aufhellen") == true })
+
+        // An für beide.
+        #expect(s.app.press("editor-batch-tone-on"))
+        #expect(s.app.wait(timeout: 10) { toneEnabled(0) == true && toneEnabled(2) == true }, "An ist nicht gespeichert")
+        #expect(toneEnabled(1) == before2)
+
+        // Die Markierung lässt sich aufheben; „Alle markieren“ markiert alle sichtbaren Seiten.
+        #expect(s.app.press("editor-mark-none"))
+        #expect(s.app.wait { s.app.element("editor-mark-strip") == nil }, "Die Leiste sollte verschwinden")
+        #expect(s.app.press("editor-mark-all"))
+        #expect(s.app.wait { s.app.string("editor-mark-count")?.hasPrefix("3") == true })
+    }
+
     @Test func changingTheRotationInTheEditorIsSavedAsManualAndReopensThePage() throws {
         let s = try recordedSeries(scans: 1); defer { s.close() }
         openEditor(s)
