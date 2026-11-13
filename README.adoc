@@ -187,6 +187,7 @@ Fehlgeschlagene Aufnahmen und übersprungene Dubletten haben keinen Ton, ebenso 
 Der Schalter „Ton“ in der Serienleiste schaltet ihn ab, die Einstellung bleibt erhalten. Der Ton wird in der App erzeugt und folgt der Ausgabelautstärke des Macs, nicht der Alarmlautstärke.
 Mit dem Schalter „Doppelseiten (Buch)“ vor dem Beginn ergibt jede Aufnahme zwei Seiten, links und rechts.
 Der Falz wird als Schattental in der Mitte des Buchs gesucht (auch schräg), die Seiten werden daran geteilt und ihre Schräglage getrennt gemessen.
+Das Tal wird gegen seine Umgebung gemessen (gleitender Median), nicht gegen das ganze Suchfenster: Ein Helligkeitsverlauf über das Bild, wie bei einem Buch mit flachem Falz unter seitlichem Licht (Seite 9/10 der Serie „sagenbuch neu“, 13. November 2026), machte sonst die Fensterkante zum dunkelsten Punkt, und die Falzlinie lief quer durchs Bild. An den 26 Originalen im Archiv kamen mit der Änderung Falze dazu (fünf zuvor nicht gefunden), keiner ging verloren, und die Lagen blieben bei 0,44 bis 0,46.
 Ist der Falz oder die Schräglage unsicher, wird der Vorschlag nur angezeigt und nicht angewendet; die Warnung steht über den Reglern.
 Zuschnitt und Drehung lassen sich je Seite von Hand ändern, „Automatisch neu erkennen“ verwirft das wieder.
 === Mehrere Serien
@@ -221,6 +222,7 @@ Auf der Seite Serien (*Bearbeiten*) oder in der Leiste einer angesehenen Serie �
 * *Drehung ändern:* Regler, dazu Knöpfe − und + (0,1° je Klick) und *0°*.
 * Handentfernung an/aus. Jede Änderung wirkt auf die Vorschau, wird sofort gespeichert und gilt als von Hand gemacht.
 * *Geprüft* hakt die Seite ab und springt zur nächsten offenen. Das Häkchen merkt sich den Stand der Korrekturen: Ändert man danach etwas, ist die Seite wieder offen. *Neu erkennen* verwirft die Änderungen von Hand am Scan (bei einer Doppelseite an beiden Seiten) und nimmt auch das Häkchen weg.
+* *Seite entfernen* nimmt die gewählte Seite aus der Serie (zum Beispiel eine versehentliche Aufnahme am Ende). Das Original bleibt im Archiv. Oben im Editor erscheint eine Zeile mit *Rückgängig*, die die Seiten an ihren Platz zurückholt.
 * *Die Schwelle* für „unsicher“ liegt bei 0,6 (`PageReviewer.defaultThreshold`). Die Bewertung läuft auch bei älteren Serien ohne gespeicherte Zusammenfassung der Analyse, dann aus Sicherheitswerten von Zuschnitt und Drehung.
 
 Die Zusammenfassung der Analyse (Rand, Falz, Hände, Warnungen) steht seit dieser Fassung im Dokument. Warnungen gehen so beim Neustart nicht mehr verloren. Eine Analyse, die erst nach einem Serienwechsel fertig wird, landet trotzdem in ihrer Serie.

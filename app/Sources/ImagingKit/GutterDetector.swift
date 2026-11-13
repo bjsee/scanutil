@@ -33,7 +33,7 @@ public enum GutterDetector {
     /// Anzahl der waagerechten Bänder.
     static let bandCount = 10
     /// Mindesttiefe des Tals gegenüber dem Median des Suchfensters, in Grauwerten (von 255).
-    static let minimumDepth = 8.0
+    static let minimumDepth = 5.0
     /// Mindestzahl brauchbarer Bänder.
     static let minimumBands = 4
 
@@ -89,12 +89,21 @@ public enum GutterDetector {
         return Gutter(xTop: xTop, xBottom: xBottom, confidence: confidence)
     }
 
+    /// Radius der Umgebung, gegen die ein Tal gemessen wird, als Anteil der Bildbreite.
+    static let baselineRadiusShare = 0.04
+
     /// Tiefste Stelle des Profils in einem Band, oder `nil`, wenn dort kein Tal liegt.
+    ///
+    /// Gemessen wird gegen die Umgebung (gleitender Median), nicht gegen das ganze Fenster: Ein Helligkeitsverlauf über das Bild
+    /// (Licht von einer Seite, Papier das zum Rand hin dunkler wird) macht sonst die Fensterkante zum „dunkelsten“ Punkt und
+    /// übertönt einen flachen Falz.
     private static func valley(in gray: GrayBitmap, columns: Range<Int>, rows: Range<Int>) -> (column: Int, depth: Double)? {
+        let reach = max(4, Int(baselineRadiusShare * Double(gray.width)))
+        let lo = max(0, columns.lowerBound - reach), hi = min(gray.width, columns.upperBound + reach)
         // Heller Perzentilwert je Spalte: Text (dunkel, dünn) fällt heraus, Schatten (dunkel in jeder Zeile) bleibt.
-        var profile = [Double](repeating: 0, count: columns.count)
+        var profile = [Double](repeating: 0, count: hi - lo)
         var values = [UInt8](repeating: 0, count: rows.count)
-        for (i, x) in columns.enumerated() {
+        for (i, x) in (lo..<hi).enumerated() {
             for (j, y) in rows.enumerated() { values[j] = gray.pixels[y * gray.width + x] }
             values.sort()
             profile[i] = Double(values[min(values.count - 1, values.count * 85 / 100)])
@@ -102,16 +111,25 @@ public enum GutterDetector {
         // Glätten, damit Papierkörnung nicht das Minimum bestimmt.
         let radius = 3
         let smooth = profile.indices.map { i -> Double in
-            let lo = max(0, i - radius), hi = min(profile.count - 1, i + radius)
-            return profile[lo...hi].reduce(0, +) / Double(hi - lo + 1)
+            let a = max(0, i - radius), b = min(profile.count - 1, i + radius)
+            return profile[a...b].reduce(0, +) / Double(b - a + 1)
         }
-        guard let minIndex = smooth.indices.min(by: { smooth[$0] < smooth[$1] }) else { return nil }
-        // Liegt das Minimum am Rand des Fensters, fällt das Profil nur ab: dort ist kein Tal, sondern eine Kante.
-        let margin = max(2, smooth.count / 20)
-        guard minIndex >= margin, minIndex < smooth.count - margin else { return nil }
-        let depth = smooth.sorted()[smooth.count / 2] - smooth[minIndex]
+        // Abstand zur Umgebung, nur im Suchfenster.
+        let offset = columns.lowerBound - lo
+        var dips = [Double](repeating: 0, count: columns.count)
+        for i in 0..<columns.count {
+            let c = offset + i
+            let a = max(0, c - reach), b = min(smooth.count - 1, c + reach)
+            let around = smooth[a...b].sorted()[(b - a + 1) / 2]
+            dips[i] = around - smooth[c]
+        }
+        guard let maxIndex = dips.indices.max(by: { dips[$0] < dips[$1] }) else { return nil }
+        // Liegt das Maximum am Rand des Fensters, fällt das Profil nur ab: dort ist kein Tal, sondern eine Kante.
+        let margin = max(2, dips.count / 20)
+        guard maxIndex >= margin, maxIndex < dips.count - margin else { return nil }
+        let depth = dips[maxIndex]
         guard depth >= minimumDepth else { return nil }
-        return (columns.lowerBound + minIndex, depth)
+        return (columns.lowerBound + maxIndex, depth)
     }
 
     private static func leastSquares(_ points: [(Double, Double)]) -> (intercept: Double, slope: Double) {
