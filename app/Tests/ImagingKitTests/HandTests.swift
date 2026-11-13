@@ -251,6 +251,24 @@ struct HandTests {
         #expect(overCloth.0 < 90, "Ein Finger über dem Tuch wird Tuch, nicht Papier: \(overCloth)")
     }
 
+    @Test func insideThePageTheFillIsAlwaysPaperNeverCloth() throws {
+        // Ein Marker über der oberen linken Ecke der Seite: Das Tuch liegt dem Papier unter dem Marker näher als das sichtbare Papier.
+        var c = bookPage()
+        c.ellipse(cx: 140, cy: 95, rx: 70, ry: 55, yellow)
+        let mask = try #require(HandDetector.detect(in: c.image(), page: pageQuad)?.mask)
+        let withPage = try #require(HandRemover.apply(to: c.image(), mask: mask, page: pageQuad))
+        let withoutPage = try #require(HandRemover.apply(to: c.image(), mask: mask))
+        func red(_ image: CGImage, _ x: Int, _ y: Int) throws -> Int {
+            let rgb = try #require(RGBBitmap(image, width: 800)); return Int(rgb.pixels[(y * 800 + x) * 4])
+        }
+        // Eine Stelle auf dem Papier, dicht an der Ecke.
+        let clothInPaper = try red(withoutPage, 108, 68), paperInPage = try red(withPage, 108, 68), clothOutside = try red(withPage, 108, 30)
+        #expect(clothInPaper < 120, "Ohne Seitenrand zieht das Tuch ins Papier: Das ist der Fall, den der Test fassen soll (\(clothInPaper))")
+        #expect(paperInPage > 200, "Innerhalb der Seite füllt Papier: \(paperInPage)")
+        // Über dem Tuch außerhalb der Seite bleibt es Tuch.
+        #expect(clothOutside < 90, "Außerhalb der Seite bleibt das Tuch: \(clothOutside)")
+    }
+
     @Test func removalWorksWhenTheMaskHasAnotherResolutionThanTheImage() throws {
         var c = bookPage()
         c.ellipse(cx: 160, cy: 500, rx: 45, ry: 40, skin)

@@ -13,7 +13,7 @@ public enum CorrectionRenderer {
         // Zuerst die Hände: Zuschnitt und Drehung arbeiten dann auf dem bereinigten Bild.
         var image = image
         if corrections.handRemoval.enabled, let data = corrections.handRemoval.mask, let mask = HandMask(pngData: data),
-           let cleaned = HandRemover.apply(to: image, mask: mask) {
+           let cleaned = HandRemover.apply(to: image, mask: mask, page: corrections.crop.enabled ? corrections.crop.quad : nil) {
             image = cleaned
         }
         var ci = CIImage(cgImage: image)

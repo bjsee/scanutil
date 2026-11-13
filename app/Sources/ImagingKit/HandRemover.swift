@@ -14,9 +14,11 @@ public enum HandRemover {
     static let fieldSize = 400
 
     /// Das Bild ohne die Flächen der Maske. Gibt das Bild unverändert zurück, wenn die Maske leer ist.
-    public static func apply(to image: CGImage, mask: HandMask) -> CGImage? {
+    /// - Parameter page: Der Teil des Bildes, der später als Seite bleibt. Dort füllt immer Papier, nie das Tuch: Neben einem Marker
+    ///   am Seitenrand liegt das Tuch oft näher als das Papier und hätte sonst einen schwarzen Block in die Seite gezogen.
+    public static func apply(to image: CGImage, mask: HandMask, page: Quad? = nil) -> CGImage? {
         guard !mask.isEmpty else { return image }
-        guard let field = fillField(for: image, mask: mask) else { return nil }
+        guard let field = fillField(for: image, mask: mask, page: page) else { return nil }
         let extent = CGRect(x: 0, y: 0, width: image.width, height: image.height)
         let original = CIImage(cgImage: image)
 
@@ -40,7 +42,7 @@ public enum HandRemover {
     // MARK: Füllung
 
     /// Das gefüllte Raster in RGB: überall der Papierton, an den Stellen der Hand aus der Umgebung gerechnet.
-    static func fillField(for image: CGImage, mask: HandMask) -> CGImage? {
+    static func fillField(for image: CGImage, mask: HandMask, page: Quad? = nil) -> CGImage? {
         guard let rgb = RGBBitmap(image, width: min(fieldSize, image.width)) else { return nil }
         let w = rgb.width, h = rgb.height
         // Die Maske auf das Raster bringen (nächster Nachbar) und etwas verbreitern, damit der Rand der Finger nicht Randwert wird.
@@ -113,6 +115,7 @@ public enum HandRemover {
         if dark.contains(true) {
             let toPaper = distances(from: paper, width: w, height: h), toDark = distances(from: dark, width: w, height: h)
             for i in 0..<(w * h) where isHand[i] && toDark[i] < toPaper[i] {
+                if let page, page.contains(NormalizedPoint(x: (Double(i % w) + 0.5) / Double(w), y: (Double(i / w) + 0.5) / Double(h))) { continue }
                 for c in 0..<3 { values[i * 3 + c] = background[c] }
             }
         }
