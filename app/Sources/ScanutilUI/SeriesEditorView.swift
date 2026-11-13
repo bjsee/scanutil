@@ -42,6 +42,18 @@ public struct SeriesEditorView: View {
             Divider()
             filterBar(document, review: review)
             Divider()
+            if let before = model.undoablePageRemoval, before.id == document.id {
+                let removed = before.pages.count - document.pages.count
+                HStack {
+                    Text(removed == 1 ? "Eine Seite wurde entfernt." : "\(removed) Seiten wurden entfernt.")
+                    Button("Rückgängig") { model.undoPageRemoval() }.buttonStyle(.link)
+                        .accessibilityIdentifier("editor-undo-remove")
+                    Spacer()
+                }
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(.quaternary)
+                Divider()
+            }
             HSplitView {
                 grid(document, visible: visible, review: review)
                     .frame(minWidth: 260)
@@ -260,6 +272,15 @@ public struct SeriesEditorView: View {
                     }
                     .keyboardShortcut(.return, modifiers: [])
                     .accessibilityIdentifier("editor-reviewed")
+                    Button("Seite entfernen", role: .destructive) {
+                        let ids = visible.map(\.id)
+                        let index = ids.firstIndex(of: page.id) ?? 0
+                        model.removePages(documentID: document.id, pageIDs: [page.id])
+                        let rest = ids.filter { $0 != page.id }
+                        editor.selectedPageID = rest.isEmpty ? nil : rest[min(index, rest.count - 1)]
+                    }
+                    .help("Nimmt die Seite aus der Serie. Das Original bleibt im Archiv; „Rückgängig“ holt sie zurück")
+                    .accessibilityIdentifier("editor-remove-page")
                     Button("Neu erkennen") { Task { await model.reanalyzeScan(documentID: document.id, scanID: page.scanID) } }
                         .help("Verwirft die Änderungen von Hand und lässt die Automatik diesen Scan neu auswerten")
                         .accessibilityIdentifier("editor-reanalyze")

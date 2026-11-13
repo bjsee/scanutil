@@ -919,6 +919,32 @@ public final class AppModel {
         commit(document)
     }
 
+    /// Der Stand einer Serie vor dem letzten Entfernen von Seiten, damit sich das rückgängig machen lässt.
+    public var undoablePageRemoval: ScanDocument?
+
+    /// Nimmt Seiten aus der Serie. Die Originale bleiben im Archiv; die Seiten lassen sich mit `undoPageRemoval` zurückholen.
+    /// Gibt zurück, wie viele Seiten entfernt wurden.
+    @discardableResult
+    public func removePages(documentID: UUID, pageIDs: [UUID]) -> Int {
+        guard var document = latestDocument(id: documentID) else { return 0 }
+        let before = document
+        var count = 0
+        for id in pageIDs where document.removePage(id: id) != nil { count += 1 }
+        guard count > 0 else { return 0 }
+        undoablePageRemoval = before
+        commit(document)
+        return count
+    }
+
+    /// Stellt die Serie wieder her, wie sie vor dem letzten Entfernen von Seiten war.
+    @discardableResult
+    public func undoPageRemoval() -> Bool {
+        guard let document = undoablePageRemoval else { return false }
+        undoablePageRemoval = nil
+        commit(document)
+        return true
+    }
+
     /// Erkennt die Aufnahme einer Seite neu und verwirft dabei Änderungen von Hand. Bei einer Doppelseite beide Seiten.
     public func reanalyzeScan(documentID: UUID, scanID: UUID) async {
         let store = self.store, size = thumbnailSize
