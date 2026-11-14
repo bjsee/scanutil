@@ -99,6 +99,34 @@ struct OberflaechenTests {
         #expect(s.app.wait { (tone()?["enabled"] as? Bool) == false && (tone()?["source"] as? String) == "manual" }, "Ausschalten wird nicht als Handeingabe gespeichert")
     }
 
+    @Test func theCaptureViewOffersTheCropFrameWholeImageAndTurningLikeTheEditor() throws {
+        let s = try launch(); defer { s.close(); try? FileManager.default.removeItem(at: s.dir) }
+        scanOnce(s)
+        #expect(s.app.wait { s.app.element("scan-crop-edit") != nil }, "Kein Knopf „Rahmen ziehen“ in der Aufnahme")
+
+        // Rahmen ziehen: Der Editor mit den vier Ecken erscheint und lässt sich wieder schließen.
+        #expect(s.app.press("scan-crop-edit"))
+        #expect(s.app.wait { s.app.element("scan-crop-editor") != nil }, "Der Zuschnittsrahmen öffnet sich nicht")
+        #expect(s.app.wait { s.app.element("scan-crop-handle-topLeft") != nil && s.app.element("scan-crop-handle-bottomRight") != nil }, "Die Ecken fehlen")
+        #expect(s.app.press("scan-crop-edit"))
+        #expect(s.app.wait { s.app.element("scan-crop-editor") == nil }, "Der Rahmen schließt sich nicht")
+
+        // Ganzes Bild: manueller, aktiver Zuschnitt auf das ganze Bild.
+        #expect(s.app.press("scan-crop-full"))
+        #expect(s.app.wait {
+            let crop = self.corrections(s.dir)?["crop"] as? [String: Any]
+            return (crop?["source"] as? String) == "manual" && (crop?["enabled"] as? Bool) == true
+        }, "Ganzes Bild wurde nicht als manueller Zuschnitt gespeichert")
+
+        // Links drehen, dann rechts drehen.
+        func turns() -> Int? { corrections(s.dir)?["quarterTurns"] as? Int }
+        #expect(s.app.press("scan-turn-left"))
+        #expect(s.app.wait(timeout: 20) { turns() == 3 }, "Links drehen ist nicht gespeichert: \(String(describing: turns()))")
+        #expect(s.app.wait { s.app.element("scan-turn-state") != nil }, "Die Ausrichtung wird nicht angezeigt")
+        #expect(s.app.press("scan-turn-right"))
+        #expect(s.app.wait(timeout: 20) { turns() == 0 }, "Rechts drehen macht es nicht rückgängig: \(String(describing: turns()))")
+    }
+
     @Test func masterSwitchDisablesCorrectionsAndControls() throws {
         let s = try launch(); defer { s.close(); try? FileManager.default.removeItem(at: s.dir) }
         scanOnce(s)

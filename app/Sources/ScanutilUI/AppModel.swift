@@ -1276,26 +1276,63 @@ public final class AppModel {
         return turned
     }
 
+    /// Misst Schräglage und Wölbung eines Scans auf der zugeschnittenen und ausgerichteten Seite, ohne Drehung, Wölbung und Aufhellen.
+    nonisolated static func measureGeometry(store: ArchiveStore, scanID: UUID, corrections: Corrections) -> (skew: SkewEstimate?, dewarp: DewarpEstimate?) {
+        var c = corrections
+        c.rotation.enabled = false; c.tone.enabled = false; c.dewarp.enabled = false
+        guard let record = try? store.load(id: scanID),
+              let image = store.thumbnail(for: record, maxPixelSize: curvatureMeasuringSize),
+              let flat = CorrectionRenderer.render(image, corrections: c) else { return (nil, nil) }
+        return (SkewEstimator.estimateAveraged(flat), DewarpEstimator.estimate(flat))
+    }
+
+    /// Das Original eines Scans, verkleinert auf höchstens `maxPixelSize` an der längsten Kante, zum Ziehen des Zuschnitts.
+    public func scanOriginal(scanID: UUID, maxPixelSize: Int = 2000) async -> CGImage? {
+        let store = self.store
+        return await Task.detached {
+            guard let record = try? store.load(id: scanID) else { return nil }
+            return store.thumbnail(for: record, maxPixelSize: maxPixelSize)
+        }.value
+    }
+
+    /// Dreht einen einzelnen Scan der Aufnahmeansicht um Vierteldrehungen im Uhrzeigersinn (negativ: dagegen), wie `turnPages` für Seiten
+    /// einer Serie: Schräglage und Wölbung werden danach neu gemessen, Handeingaben bleiben.
+    public func turnScan(id: UUID, quarters: Int) async {
+        guard Corrections.normalized(quarters) != 0, scans.contains(where: { $0.id == id }) else { return }
+        updateCorrections(id: id) { c in
+            c.turn(by: quarters)
+            if c.rotation.source == .automatic { c.rotation = RotationCorrection(degrees: 0, enabled: false, source: .automatic, confidence: nil) }
+            if c.dewarp.source == .automatic { c.dewarp = .init() }
+        }
+        guard let corrections = scans.first(where: { $0.id == id })?.corrections else { return }
+        let store = self.store
+        let result = await Task.detached { Self.measureGeometry(store: store, scanID: id, corrections: corrections) }.value
+        updateCorrections(id: id) { c in
+            if c.rotation.source == .automatic, let skew = result.skew {
+                c.rotation = RotationCorrection(degrees: skew.degrees, enabled: skew.confidence >= Corrections.defaultConfidenceThreshold,
+                                                source: .automatic, confidence: skew.confidence)
+            }
+            if c.dewarp.source == .automatic {
+                c.dewarp = result.dewarp.map { DewarpCorrection(enabled: $0.worthApplying, source: .automatic, confidence: $0.reliableShare, field: $0.field) }
+                    ?? .notMeasurable
+            }
+        }
+    }
+
     /// Misst Schräglage und Wölbung der Seiten (und bei verbundenen Seiten der genannten Teile) auf der zugeschnittenen und
     /// ausgerichteten Seite neu und trägt sie ein, wo sie nicht von Hand eingestellt sind.
     func remeasureGeometry(documentID: UUID, pageIDs: [UUID], parts: [PagePart] = [.first, .second]) async {
         guard let document = latestDocument(id: documentID) else { return }
-        let store = self.store, scale = Self.curvatureMeasuringSize
+        let store = self.store
         var measured: [String: (skew: SkewEstimate?, dewarp: DewarpEstimate?)] = [:]
         for id in pageIDs {
             guard let page = document.page(id: id) else { continue }
             for part in parts {
                 if part == .second && page.joined == nil { continue }
-                var corrections = part == .first ? PageGeometry.effectiveCorrections(for: page) : (page.joined?.corrections ?? .none)
-                corrections.rotation.enabled = false; corrections.tone.enabled = false; corrections.dewarp.enabled = false
+                let corrections = part == .first ? PageGeometry.effectiveCorrections(for: page) : (page.joined?.corrections ?? .none)
                 let scanID = page.scanID(of: part)
-                let result: (SkewEstimate?, DewarpEstimate?) = await Task.detached {
-                    guard let record = try? store.load(id: scanID),
-                          let image = store.thumbnail(for: record, maxPixelSize: scale),
-                          let flat = CorrectionRenderer.render(image, corrections: corrections) else { return (nil, nil) }
-                    return (SkewEstimator.estimateAveraged(flat), DewarpEstimator.estimate(flat))
-                }.value
-                measured["\(id.uuidString)/\(part.rawValue)"] = (result.0, result.1)
+                let result = await Task.detached { Self.measureGeometry(store: store, scanID: scanID, corrections: corrections) }.value
+                measured["\(id.uuidString)/\(part.rawValue)"] = (result.skew, result.dewarp)
             }
         }
         for part in parts {
