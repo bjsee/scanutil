@@ -313,6 +313,15 @@ public struct SeriesEditorView: View {
                     .accessibilityIdentifier("editor-batch-crop")
                 }
                 HStack(spacing: 6) {
+                    Text("Ausrichtung").font(.callout)
+                    Button { turnMarked(document, ids, quarters: -1) } label: { Label("Links drehen", systemImage: "rotate.left") }
+                        .help("Dreht alle markierten Seiten um 90° gegen den Uhrzeigersinn")
+                        .accessibilityIdentifier("editor-batch-turn-left")
+                    Button { turnMarked(document, ids, quarters: 1) } label: { Label("Rechts drehen", systemImage: "rotate.right") }
+                        .help("Dreht alle markierten Seiten um 90° im Uhrzeigersinn")
+                        .accessibilityIdentifier("editor-batch-turn-right")
+                }
+                HStack(spacing: 6) {
                     Text("Drehung").font(.callout)
                     TextField("0", text: $batchRotationText)
                         .textFieldStyle(.roundedBorder).frame(width: 56).multilineTextAlignment(.trailing)
@@ -347,6 +356,14 @@ public struct SeriesEditorView: View {
 
     private func batchButton(_ title: String, id: String, action: @escaping () -> Void) -> some View {
         Button(title, action: action).accessibilityIdentifier(id)
+    }
+
+    private func turnMarked(_ document: ScanDocument, _ ids: [UUID], quarters: Int) {
+        batchNote = "Drehe \(ids.count) Seite\(ids.count == 1 ? "" : "n") …"
+        Task {
+            let n = await model.turnPages(documentID: document.id, pageIDs: ids, quarters: quarters)
+            batchNote = "\(n) Seite\(n == 1 ? "" : "n") um 90° \(quarters < 0 ? "nach links" : "nach rechts") gedreht, Schräglage neu gemessen."
+        }
     }
 
     private func setRotation(_ document: ScanDocument, _ ids: [UUID]) {
@@ -459,6 +476,23 @@ public struct SeriesEditorView: View {
                 Toggle("anwenden", isOn: Binding(get: { c.crop.enabled }, set: { on in change { $0.setCropEnabled(on) } }))
                     .disabled(c.crop.quad == nil)
                     .accessibilityIdentifier("editor-crop")
+            }
+            Text("Ausrichtung").font(.subheadline.bold())
+            HStack(spacing: 8) {
+                Button { Task { await model.turnPages(documentID: document.id, pageIDs: [page.id], quarters: -1) } } label: {
+                    Label("Links drehen", systemImage: "rotate.left")
+                }
+                .help("Dreht die Seite um 90° gegen den Uhrzeigersinn, zum Beispiel wenn sie quer gescannt wurde")
+                .accessibilityIdentifier("editor-turn-left")
+                Button { Task { await model.turnPages(documentID: document.id, pageIDs: [page.id], quarters: 1) } } label: {
+                    Label("Rechts drehen", systemImage: "rotate.right")
+                }
+                .help("Dreht die Seite um 90° im Uhrzeigersinn")
+                .accessibilityIdentifier("editor-turn-right")
+                if c.quarterTurns != 0 {
+                    Text("\(c.quarterTurns * 90)° im Uhrzeigersinn").font(.caption).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("editor-turn-state")
+                }
             }
             Text("Drehung").font(.subheadline.bold())
             HStack(spacing: 6) {

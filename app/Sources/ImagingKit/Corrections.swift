@@ -127,6 +127,10 @@ public struct Corrections: Codable, Equatable, Sendable {
     public var rotation: RotationCorrection
     /// Hände und Daumen entfernen. Wird zuerst angewendet, vor Zuschnitt und Drehung.
     public var handRemoval: HandRemovalCorrection
+    /// Vierteldrehungen im Uhrzeigersinn (0 bis 3) für eine Seite, die quer gescannt wurde. Wird gleich nach dem Zuschnitt angewendet, vor
+    /// Wölbung, Drehung und Aufhellen: Alles Weitere rechnet auf der aufrechten Seite. Gilt auch bei ausgeschalteten Korrekturen,
+    /// weil es die Ausrichtung ist und keine Korrektur.
+    public var quarterTurns: Int
     /// Wölbung ausgleichen. Wird nach dem Zuschnitt und vor der Drehung angewendet.
     public var dewarp: DewarpCorrection
     /// Papier aufhellen und Kontrast anheben. Wird zuletzt angewendet, nach Zuschnitt und Drehung.
@@ -136,11 +140,12 @@ public struct Corrections: Codable, Equatable, Sendable {
 
     public init(enabled: Bool = true, crop: CropCorrection = .init(), rotation: RotationCorrection = .init(),
                 handRemoval: HandRemovalCorrection = .init(), dewarp: DewarpCorrection = .init(), tone: ToneCorrection = .init(),
-                revision: Int = 0) {
+                quarterTurns: Int = 0, revision: Int = 0) {
         self.enabled = enabled
         self.crop = crop
         self.rotation = rotation
         self.handRemoval = handRemoval
+        self.quarterTurns = Corrections.normalized(quarterTurns)
         self.dewarp = dewarp
         self.tone = tone
         self.revision = revision
@@ -154,6 +159,7 @@ public struct Corrections: Codable, Equatable, Sendable {
         crop = try c.decode(CropCorrection.self, forKey: .crop)
         rotation = try c.decode(RotationCorrection.self, forKey: .rotation)
         handRemoval = try c.decodeIfPresent(HandRemovalCorrection.self, forKey: .handRemoval) ?? .init()
+        quarterTurns = Corrections.normalized(try c.decodeIfPresent(Int.self, forKey: .quarterTurns) ?? 0)
         dewarp = try c.decodeIfPresent(DewarpCorrection.self, forKey: .dewarp) ?? .init()
         tone = try c.decodeIfPresent(ToneCorrection.self, forKey: .tone) ?? .init()
         revision = try c.decode(Int.self, forKey: .revision)
@@ -182,6 +188,16 @@ public struct Corrections: Codable, Equatable, Sendable {
     public mutating func setHandRemovalEnabled(_ on: Bool) {
         handRemoval.enabled = on
         handRemoval.source = .manual
+        revision += 1
+    }
+
+    /// Vierteldrehungen auf 0 bis 3 gebracht (auch für negative Werte).
+    public static func normalized(_ turns: Int) -> Int { ((turns % 4) + 4) % 4 }
+
+    /// Dreht die Seite um Vierteldrehungen im Uhrzeigersinn (negativ: gegen den Uhrzeigersinn). Die bisher gemessene Schräglage und
+    /// Wölbung gelten für die alte Ausrichtung und passen danach nicht mehr; sie müssen neu gemessen werden (`AppModel.turnPages`).
+    public mutating func turn(by quarters: Int) {
+        quarterTurns = Corrections.normalized(quarterTurns + quarters)
         revision += 1
     }
 
