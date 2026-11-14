@@ -8,13 +8,43 @@ public enum PageRegion: String, Codable, Equatable, Sendable {
     case right
 }
 
+/// Der zweite Scan einer Seite, die aus zwei Aufnahmen besteht (ein großer Plan, der in zwei Hälften gescannt wurde). Er liegt rechts
+/// vom ersten, mit eigenen Korrekturen (quer gescannt, eigener Zuschnitt). Die Hälften überlappen sich meist nicht: Der Schnitt an
+/// der Papierkante und etwas Abstand oder Überlappung machen die Naht.
+public struct JoinedPart: Codable, Equatable, Sendable {
+    public var scanID: UUID
+    public var corrections: Corrections
+    /// Was die Analyse über den Scan wusste, bevor er mit der Seite verbunden wurde.
+    public var analysis: PageAnalysis?
+    /// Abstand zwischen den Teilen als Anteil der Breite des ersten Teils. Negativ: Der zweite Teil überlappt den ersten.
+    public var gap: Double
+    /// Verschiebung des zweiten Teils nach unten als Anteil der Höhe des ersten Teils. Negativ: nach oben.
+    public var shift: Double
+
+    public static let gapRange = -0.2...0.2
+    public static let shiftRange = -0.2...0.2
+
+    public init(scanID: UUID, corrections: Corrections = .none, analysis: PageAnalysis? = nil, gap: Double = 0, shift: Double = 0) {
+        self.scanID = scanID
+        self.corrections = corrections
+        self.analysis = analysis
+        self.gap = gap
+        self.shift = shift
+    }
+}
+
+/// Welcher Scan einer Seite gemeint ist: der erste, oder bei einer verbundenen Seite der zweite (rechts).
+public enum PagePart: String, Codable, Sendable, CaseIterable {
+    case first, second
+}
+
 /// Eine Seite eines Dokuments. Sie verweist auf ein Original und trägt eigene Korrekturen,
 /// weil zwei Seiten desselben Originals unterschiedlich geneigt oder zugeschnitten sein können.
 public struct DocumentPage: Codable, Equatable, Identifiable, Sendable {
     /// Stabil, auch wenn sich die Reihenfolge ändert.
     public let id: UUID
     /// Das Original, aus dem die Seite entsteht.
-    public let scanID: UUID
+    public var scanID: UUID
     public var region: PageRegion
     public var corrections: Corrections
     /// Seitenbezeichnung, falls sie von der Position abweicht, etwa „Vorsatz“ oder „iv“.
@@ -28,11 +58,14 @@ public struct DocumentPage: Codable, Equatable, Identifiable, Sendable {
     /// Zu welchem Dokument die Seite in der Schnellablage gehört. Ohne Angabe ist sie ein Dokument für sich;
     /// Seiten mit derselben Kennung bilden zusammen ein Dokument (siehe `ScanDocument.groups`).
     public var groupID: UUID?
+    /// Der zweite Scan, wenn die Seite aus zwei Aufnahmen besteht (rechts vom ersten). Sonst `nil`.
+    public var joined: JoinedPart?
 
     public init(id: UUID = UUID(), scanID: UUID, region: PageRegion = .whole,
                 corrections: Corrections = .none, label: String? = nil, analysis: PageAnalysis? = nil, reviewedKey: String? = nil,
-                groupID: UUID? = nil) {
+                groupID: UUID? = nil, joined: JoinedPart? = nil) {
         self.groupID = groupID
+        self.joined = joined
         self.id = id
         self.scanID = scanID
         self.region = region
@@ -42,8 +75,27 @@ public struct DocumentPage: Codable, Equatable, Identifiable, Sendable {
         self.reviewedKey = reviewedKey
     }
 
-    /// Ob der Nutzer die Seite in ihrem jetzigen Zustand als geprüft markiert hat.
-    public var isReviewed: Bool { reviewedKey != nil && reviewedKey == corrections.cacheKey }
+    /// Ob der Nutzer die Seite in ihrem jetzigen Zustand als geprüft markiert hat. Bei einer verbundenen Seite gehören beide Teile
+    /// und die Naht dazu: Ändert sich am zweiten etwas, ist die Seite wieder ungeprüft.
+    public var isReviewed: Bool { reviewedKey != nil && reviewedKey == reviewKey }
+
+    /// Was „geprüft“ festhält: die Korrekturen der Seite, bei einer verbundenen auch die des zweiten Teils und die Naht.
+    public var reviewKey: String {
+        guard let joined else { return corrections.cacheKey }
+        return corrections.cacheKey + "|" + joined.corrections.cacheKey + "|\(joined.scanID)|\(joined.gap)|\(joined.shift)"
+    }
+
+    /// Alle Scans, aus denen die Seite besteht.
+    public var scanIDs: [UUID] { [scanID] + (joined.map { [$0.scanID] } ?? []) }
+
+    /// Die Korrekturen des Teils; für `.second` ohne verbundenen Teil die der Seite.
+    public func corrections(of part: PagePart) -> Corrections { part == .second ? (joined?.corrections ?? corrections) : corrections }
+
+    /// Der Scan des Teils; für `.second` ohne verbundenen Teil der erste.
+    public func scanID(of part: PagePart) -> UUID { part == .second ? (joined?.scanID ?? scanID) : scanID }
+
+    /// Ob die Seite diesen Scan benutzt, als ersten oder als verbundenen zweiten Teil.
+    public func uses(scan id: UUID) -> Bool { scanID == id || joined?.scanID == id }
 }
 
 /// Beschreibende Angaben zu einem Dokument. Alles ist freiwillig.
@@ -144,6 +196,64 @@ public struct ScanDocument: Codable, Equatable, Identifiable, Sendable {
     public mutating func replacePage(id: UUID, with page: DocumentPage) -> Bool {
         guard let index = pages.firstIndex(where: { $0.id == id }) else { return false }
         pages[index] = page
+        revision += 1
+        return true
+    }
+
+    /// Fügt zwei Seiten zu einer zusammen: Der Scan der zweiten wird der rechte Teil der ersten, die zweite Seite verschwindet aus der
+    /// Liste. Beide müssen ganze Seiten sein (keine Buchhälften), verschiedene Scans haben und selbst noch nicht verbunden sein.
+    @discardableResult
+    public mutating func joinPages(first firstID: UUID, second secondID: UUID) -> Bool {
+        guard firstID != secondID,
+              let a = pages.firstIndex(where: { $0.id == firstID }), let b = pages.firstIndex(where: { $0.id == secondID }),
+              pages[a].region == .whole, pages[b].region == .whole,
+              pages[a].joined == nil, pages[b].joined == nil, pages[a].scanID != pages[b].scanID else { return false }
+        let second = pages[b]
+        pages[a].joined = JoinedPart(scanID: second.scanID, corrections: second.corrections, analysis: second.analysis)
+        pages.remove(at: b)
+        revision += 1
+        return true
+    }
+
+    /// Trennt eine verbundene Seite wieder: Der zweite Teil wird eine eigene Seite gleich hinter der ersten, mit seinen Korrekturen.
+    @discardableResult
+    public mutating func unjoinPage(id: UUID) -> Bool {
+        guard let index = pages.firstIndex(where: { $0.id == id }), let part = pages[index].joined else { return false }
+        pages[index].joined = nil
+        pages.insert(DocumentPage(scanID: part.scanID, corrections: part.corrections, analysis: part.analysis, groupID: pages[index].groupID), at: index + 1)
+        revision += 1
+        return true
+    }
+
+    /// Vertauscht links und rechts einer verbundenen Seite: Der zweite Scan wird der erste und umgekehrt, jeder behält seine Korrekturen.
+    @discardableResult
+    public mutating func swapJoinedParts(id: UUID) -> Bool {
+        guard let index = pages.firstIndex(where: { $0.id == id }), let part = pages[index].joined else { return false }
+        let first = pages[index]
+        pages[index].scanID = part.scanID
+        pages[index].corrections = part.corrections
+        pages[index].analysis = part.analysis
+        pages[index].joined = JoinedPart(scanID: first.scanID, corrections: first.corrections, analysis: first.analysis, gap: part.gap, shift: -part.shift)
+        revision += 1
+        return true
+    }
+
+    /// Ändert die Korrekturen eines Teils einer Seite. `.second` wirkt nur bei einer verbundenen Seite.
+    @discardableResult
+    public mutating func updateCorrections(pageID: UUID, part: PagePart, _ change: (inout Corrections) -> Void) -> Bool {
+        guard part == .second else { return updateCorrections(pageID: pageID, change) }
+        guard let index = pages.firstIndex(where: { $0.id == pageID }), pages[index].joined != nil else { return false }
+        change(&pages[index].joined!.corrections)
+        revision += 1
+        return true
+    }
+
+    /// Stellt die Naht einer verbundenen Seite ein (Abstand und Höhenversatz, begrenzt auf ±20 %).
+    @discardableResult
+    public mutating func setSeam(pageID: UUID, gap: Double? = nil, shift: Double? = nil) -> Bool {
+        guard let index = pages.firstIndex(where: { $0.id == pageID }), pages[index].joined != nil else { return false }
+        if let gap { pages[index].joined!.gap = min(JoinedPart.gapRange.upperBound, max(JoinedPart.gapRange.lowerBound, gap)) }
+        if let shift { pages[index].joined!.shift = min(JoinedPart.shiftRange.upperBound, max(JoinedPart.shiftRange.lowerBound, shift)) }
         revision += 1
         return true
     }

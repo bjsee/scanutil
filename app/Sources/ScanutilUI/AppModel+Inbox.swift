@@ -83,10 +83,8 @@ extension AppModel {
     /// Der erkannte Text der Seite, Zeilen von oben nach unten, so wie sie später im PDF stünde (mit den Korrekturen).
     func recognizedLines(of page: DocumentPage) async -> [String] {
         let store = self.store, recognizer = self.recognizer
-        let corrections = PageGeometry.effectiveCorrections(for: page), scanID = page.scanID
         return await Task.detached { () -> [String] in
-            guard let record = try? store.load(id: scanID), let thumb = store.thumbnail(for: record, maxPixelSize: 2000),
-                  let image = CorrectionRenderer.render(thumb, corrections: corrections),
+            guard let image = Self.renderPage(page, store: store, pageSize: 2000, fullResolution: false),
                   let lines = try? recognizer.recognize(image, languages: ["de-DE", "en-US"]) else { return [] }
             return lines.sorted { $0.box.maxY > $1.box.maxY }.map(\.text)
         }.value

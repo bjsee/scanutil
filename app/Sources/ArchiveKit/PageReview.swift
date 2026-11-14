@@ -131,6 +131,7 @@ public enum PageReviewer {
         if c.rotation.source == .manual { manual.append("Drehung") }
         if c.handRemoval.source == .manual && c.handRemoval.hasMask { manual.append("Hände") }
         if c.dewarp.source == .manual && c.dewarp.hasField { manual.append("Wölbung") }
+        if page.joined != nil { manual.append("zwei Scans verbunden") }
         if !manual.isEmpty { add(.manual, .note, "Von Hand geändert: " + manual.joined(separator: ", ") + ".") }
 
         return PageReview(findings: findings, isReviewed: page.isReviewed)

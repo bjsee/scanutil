@@ -72,16 +72,13 @@ public struct PDFExporter: Sendable {
 
     /// Lädt das Original, wendet die Korrekturen an, verkleinert auf Wunsch und kodiert als JPEG.
     private func renderedJPEG(_ page: DocumentPage, number: Int, options: ExportOptions) throws -> (jpeg: Data, pageSize: CGSize, ocrImage: CGImage?) {
-        let record = try store.load(id: page.scanID)
-        let originalURL = store.originalURL(for: record)
-        guard let source = CGImageSourceCreateWithURL(originalURL as CFURL, nil),
-              let original = CGImageSourceCreateImageAtIndex(source, 0, nil)
-        else { throw ExportError.originalUnreadable(record.original.path) }
-
-        let corrections = PageGeometry.effectiveCorrections(for: page)
-        guard let corrected = CorrectionRenderer.render(original, corrections: corrections) else {
-            throw ExportError.renderFailed(pageNumber: number)
+        // Jeder Scan der Seite in voller Auflösung (bei einer verbundenen Seite zwei).
+        var loadError: Error?
+        let rendered = PageRenderer.render(page) { id in
+            do { return try loadOriginal(id) } catch { loadError = loadError ?? error; return nil }
         }
+        if let loadError { throw loadError }
+        guard let corrected = rendered else { throw ExportError.renderFailed(pageNumber: number) }
         guard let opaque = Self.opaque(corrected, maxLongSide: options.maxLongSide) else {
             throw ExportError.renderFailed(pageNumber: number)
         }
@@ -98,6 +95,14 @@ public struct PDFExporter: Sendable {
         // Texterkennung auf dem Bild der Seite, auf höchstens `ocrMaxLongSide` verkleinert.
         let ocrImage = options.ocr ? Self.opaque(corrected, maxLongSide: ExportOptions.ocrMaxLongSide) : nil
         return (data as Data, pageSize, ocrImage)
+    }
+
+    private func loadOriginal(_ scanID: UUID) throws -> CGImage {
+        let record = try store.load(id: scanID)
+        guard let source = CGImageSourceCreateWithURL(store.originalURL(for: record) as CFURL, nil),
+              let original = CGImageSourceCreateImageAtIndex(source, 0, nil)
+        else { throw ExportError.originalUnreadable(record.original.path) }
+        return original
     }
 
     /// Schreibt das JPEG als eigene PDF-Seite. Die Größe der Seite folgt aus der Auflösung des Originals,

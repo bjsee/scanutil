@@ -232,4 +232,91 @@ struct MarkedPagesTests {
         #expect(await model.turnPages(documentID: doc.id, pageIDs: ids, quarters: 4) == 0)
         await model.disconnect()
     }
+
+    // MARK: Zwei Scans zu einer Seite verbinden
+
+    @Test func joiningTwoPagesMakesOnePageUndoBringsBackAndSplittingRestoresTwo() async throws {
+        let (model, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "Pläne")
+        await model.scan(); await model.scan(); await model.scan()
+        let doc = try #require(model.series)
+        let ids = doc.pages.map(\.id)
+        let scans = doc.pages.map(\.scanID)
+        #expect(ids.count == 3)
+
+        #expect(model.joinPages(documentID: doc.id, first: ids[0], second: ids[1]))
+        var after = try #require(model.latestDocument(id: doc.id))
+        #expect(after.pages.map(\.id) == [ids[0], ids[2]], "Aus zwei Seiten wurde eine")
+        #expect(after.pages[0].joined?.scanID == scans[1])
+        #expect(model.undoNote == "Zwei Seiten wurden zu einer verbunden.")
+        // Gespeichert samt zweitem Scan.
+        let saved = try ArchiveStore(root: dir).loadDocument(id: doc.id)
+        #expect(saved.pages[0].joined?.scanID == scans[1])
+
+        // Rückgängig.
+        #expect(model.undoPageRemoval())
+        #expect(model.latestDocument(id: doc.id)?.pages.map(\.id) == ids)
+
+        // Nochmal verbinden und die Naht einstellen; die Grenzen gelten.
+        #expect(model.joinPages(documentID: doc.id, first: ids[0], second: ids[1]))
+        #expect(model.setSeam(documentID: doc.id, pageID: ids[0], gap: 0.01, shift: -0.005))
+        #expect(model.setSeam(documentID: doc.id, pageID: ids[0], gap: 5))
+        after = try #require(model.latestDocument(id: doc.id))
+        #expect(after.pages[0].joined?.gap == JoinedPart.gapRange.upperBound && after.pages[0].joined?.shift == -0.005)
+        #expect(!model.setSeam(documentID: doc.id, pageID: ids[2], gap: 0.01), "Eine nicht verbundene Seite hat keine Naht")
+
+        // Teile einzeln ändern: der zweite Teil bekommt seine Korrektur, der erste nicht.
+        model.updatePage(documentID: doc.id, pageID: ids[0], part: .second) { $0.setRotation(degrees: 1.25) }
+        after = try #require(model.latestDocument(id: doc.id))
+        #expect(after.pages[0].joined?.corrections.rotation.degrees == 1.25 && after.pages[0].corrections.rotation.degrees != 1.25)
+
+        // Tauschen und Trennen.
+        #expect(model.swapJoinedParts(documentID: doc.id, pageID: ids[0]))
+        #expect(model.latestDocument(id: doc.id)?.pages[0].scanID == scans[1])
+        #expect(model.unjoinPage(documentID: doc.id, pageID: ids[0]))
+        after = try #require(model.latestDocument(id: doc.id))
+        #expect(after.pages.count == 3 && after.pages[0].joined == nil)
+        #expect(Set(after.pages.map(\.scanID)) == Set(scans))
+        await model.disconnect()
+    }
+
+    @Test func marksActOnBothPartsOfAJoinedPageAndTurningCanTargetOnePart() async throws {
+        let (model, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "Pläne")
+        await model.scan(); await model.scan()
+        let doc = try #require(model.series)
+        let ids = doc.pages.map(\.id)
+        #expect(model.joinPages(documentID: doc.id, first: ids[0], second: ids[1]))
+
+        // Eine gemeinsame Aktion wirkt auf beide Teile.
+        let n = model.setRotation(degrees: 0.5, documentID: doc.id, pageIDs: [ids[0]])
+        #expect(n == 1)
+        var page = try #require(model.latestDocument(id: doc.id)?.pages.first)
+        #expect(page.corrections.rotation.degrees == 0.5 && page.joined?.corrections.rotation.degrees == 0.5, "Beide Teile")
+
+        // Drehen nur des zweiten Teils.
+        #expect(await model.turnPages(documentID: doc.id, pageIDs: [ids[0]], quarters: 1, parts: [.second]) == 1)
+        page = try #require(model.latestDocument(id: doc.id)?.pages.first)
+        #expect(page.corrections.quarterTurns == 0 && page.joined?.corrections.quarterTurns == 1, "Nur der zweite Teil ist gedreht")
+        await model.disconnect()
+    }
+
+    @Test func deletingTheSecondScanKeepsThePageWithItsFirstPartAndDeletingTheFirstRemovesThePage() async throws {
+        let (model, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "Pläne")
+        await model.scan(); await model.scan(); await model.scan(); await model.scan()
+        let doc = try #require(model.series)
+        let ids = doc.pages.map(\.id), scans = doc.pages.map(\.scanID)
+        #expect(model.joinPages(documentID: doc.id, first: ids[0], second: ids[1]))
+        #expect(model.joinPages(documentID: doc.id, first: ids[2], second: ids[3]))
+        #expect(model.documents(containing: scans[1]).isEmpty || model.documents(containing: scans[1]).first?.id == doc.id)
+
+        await model.deleteScan(id: scans[1])                 // zweiter Teil der ersten Seite
+        var after = try #require(model.latestDocument(id: doc.id))
+        #expect(after.pages.count == 2 && after.pages[0].joined == nil && after.pages[0].scanID == scans[0], "Die Seite bleibt mit ihrem ersten Teil")
+        await model.deleteScan(id: scans[2])                 // erster Teil der zweiten Seite
+        after = try #require(model.latestDocument(id: doc.id))
+        #expect(after.pages.map(\.scanID) == [scans[0]], "Fehlt der erste Scan, entfällt die Seite")
+        await model.disconnect()
+    }
 }

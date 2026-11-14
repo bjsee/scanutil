@@ -11,7 +11,7 @@ extension ArchiveStore {
     /// damit nach einem Absturz mitten im Serienmodus keine halbe Datei bleibt.
     /// Jede Seite muss auf ein vorhandenes Original verweisen.
     public func saveDocument(_ document: ScanDocument) throws {
-        for page in document.pages { _ = try load(id: page.scanID) }
+        for page in document.pages { for id in page.scanIDs { _ = try load(id: id) } }
         try FileManager.default.createDirectory(at: documentsDirectory, withIntermediateDirectories: true)
         try Self.encoder().encode(document).write(to: documentURL(for: document.id), options: .atomic)
     }
@@ -42,7 +42,7 @@ extension ArchiveStore {
 
     /// Scans, die in keinem Dokument vorkommen, etwa verworfene Seiten oder Aufnahmen vor einem Absturz.
     public func unassignedScans() throws -> [ScanRecord] {
-        let used = Set(try allDocuments().flatMap { $0.pages.map(\.scanID) })
+        let used = Set(try allDocuments().flatMap { $0.pages.flatMap(\.scanIDs) })
         return try allRecords().filter { !used.contains($0.id) }
     }
 }
