@@ -75,6 +75,10 @@ Die App ist *ein Fenster* mit einer Seitenleiste links, die Seiten wechseln wie 
 
 Ausnahme: Der Ordner für das PDF wird mit der Ordnerauswahl von macOS geändert („Ändern …“).
 
+=== Version in der Oberfläche
+
+Unten in der Seitenleiste steht, welcher Stand läuft: „Version 14.11.2026 09:41“, der Zeitpunkt, an dem `scripts/bundle.sh` die App gebaut hat. Beim Daraufzeigen erscheint dazu die Sekunde und der Commit („Commit 5d161ae“; ein „+“ dahinter heißt: mit noch nicht committeten Änderungen). Beides schreibt `bundle.sh` in die Info.plist der App (`ScanutilBuildTimestamp`, `ScanutilBuildCommit`); `BuildInfo` liest es. Eine App, die nicht aus dem Bündel gestartet wurde (`swift run`), zeigt „Entwicklungsstand“. Die Zeit ist die Ortszeit des Rechners, auf dem gebaut wurde. Wer sehen will, ob die laufende App der neueste Bau ist, vergleicht die Anzeige mit der Zeit des letzten `bundle.sh`-Laufs.
+
 === Oberfläche starten
 
 [source,sh]

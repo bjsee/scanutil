@@ -127,6 +127,26 @@ struct OberflaechenTests {
         #expect(s.app.wait(timeout: 20) { turns() == 0 }, "Rechts drehen macht es nicht rückgängig: \(String(describing: turns()))")
     }
 
+    @Test func theSidebarShowsWhichVersionIsRunningAndItMatchesTheBuiltBundle() throws {
+        let s = try launch(); defer { s.close(); try? FileManager.default.removeItem(at: s.dir) }
+        #expect(s.app.wait { s.app.element("app-version") != nil }, "Keine Versionsanzeige in der Seitenleiste")
+        let shown = s.app.string("app-version") ?? ""
+        #expect(shown.range(of: #"^Version \d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$"#, options: .regularExpression) != nil, "Anzeige: „\(shown)“")
+
+        // Dieselbe Zeit steht in der Info.plist des Bündels, das die Tests gestartet haben (gebaut von bundle.sh).
+        let plist = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("build/Chronik-Scanner.app/Contents/Info.plist")
+        let info = NSDictionary(contentsOf: plist)
+        let raw = info?["ScanutilBuildTimestamp"] as? String
+        #expect(raw != nil, "Die Info.plist hat keinen Zeitstempel: \(plist.path)")
+        if let raw {
+            let parts = raw.split(separator: " ")                     // „2026-11-14 09:41:07“
+            let date = parts[0].split(separator: "-"), time = parts[1].split(separator: ":")
+            #expect(shown == "Version \(date[2]).\(date[1]).\(date[0]) \(time[0]):\(time[1])", "Anzeige „\(shown)“, Info.plist „\(raw)“")
+        }
+        #expect((info?["ScanutilBuildCommit"] as? String)?.isEmpty == false, "Der Commit fehlt in der Info.plist")
+    }
+
     @Test func masterSwitchDisablesCorrectionsAndControls() throws {
         let s = try launch(); defer { s.close(); try? FileManager.default.removeItem(at: s.dir) }
         scanOnce(s)

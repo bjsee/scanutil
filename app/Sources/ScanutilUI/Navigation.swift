@@ -177,6 +177,13 @@ struct Sidebar: View {
             }
             Button("Archiv im Finder zeigen") { NSWorkspace.shared.activateFileViewerSelecting([model.archiveURL]) }
                 .buttonStyle(.link).font(.caption)
+            Text(BuildInfo.displayText)
+                .font(.caption2).foregroundStyle(.secondary)
+                .help(BuildInfo.detailText)
+                .textSelection(.enabled)
+                .accessibilityLabel("Version")
+                .accessibilityValue(BuildInfo.displayText)
+                .accessibilityIdentifier("app-version")
         }
         .padding(.horizontal, 6).padding(.top, 4)
     }
