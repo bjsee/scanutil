@@ -789,12 +789,21 @@ struct ScanDetailView: View {
     @Bindable var model: AppModel
     let item: ScanItem
     @State private var confirmDelete = false
+    /// Was gerade im Zuschnittsrahmen bearbeitet wird: der ganze Scan oder eine Seite einer Doppelseite. `nil`: die Ansicht des Ergebnisses.
+    @State private var cropTarget: CropTarget?
+
+    enum CropTarget: Equatable {
+        case scan
+        case page(UUID)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack {
                 Color(nsColor: .underPageBackgroundColor)
-                if model.isBookScan(item.id) {
+                if let target = cropTarget {
+                    cropEditor(target)
+                } else if model.isBookScan(item.id) {
                     HStack(alignment: .center, spacing: 6) {
                         ForEach(model.pages(of: item.id)) { page in
                             BookPageView(
@@ -818,6 +827,7 @@ struct ScanDetailView: View {
                     ProgressView("Analyse läuft …").padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
                 }
             }
+            .onChange(of: item.id) { cropTarget = nil }          // ein anderer Scan beginnt wieder mit dem Ergebnis
             if item.corrections.needsReview || !item.warnings.isEmpty { reviewBanner }
             if model.isBookScan(item.id) {
                 bookControls.padding(12)
@@ -825,6 +835,61 @@ struct ScanDetailView: View {
                 controls.padding(12)
             }
             deleteButton.padding(.horizontal, 12).padding(.bottom, 10)
+        }
+    }
+
+    /// Der Zuschnittsrahmen auf dem Original: Ecken ziehen, beim Loslassen gilt der Rahmen sofort (als manueller Zuschnitt).
+    @ViewBuilder
+    private func cropEditor(_ target: CropTarget) -> some View {
+        VStack(spacing: 4) {
+            switch target {
+            case .scan:
+                CropEditor(imageKey: item.id.uuidString, loadImage: { await model.scanOriginal(scanID: item.id) },
+                           stored: item.corrections.crop.quad ?? .full,
+                           commit: { quad in model.updateCorrections(id: item.id) { $0.setCrop(quad); if !$0.enabled { $0.setEnabled(true) } } },
+                           identifier: "scan-crop")
+            case .page(let pageID):
+                let page = model.pages(of: item.id).first { $0.id == pageID }
+                let stored: Quad = page.flatMap { PageGeometry.effectiveCorrections(for: $0).crop.quad } ?? .full
+                CropEditor(imageKey: "\(item.id)/\(pageID)", loadImage: { await model.scanOriginal(scanID: item.id) },
+                           stored: stored,
+                           commit: { quad in model.updatePageCorrections(pageID: pageID) { $0.setCrop(quad) } },
+                           identifier: "scan-crop")
+            }
+            Text("Ziehe die vier Ecken des Rahmens. Was außerhalb liegt, fällt weg. Die Änderung gilt sofort.")
+                .font(.caption).foregroundStyle(.secondary).padding(.bottom, 4)
+        }
+        .padding(6)
+    }
+
+    /// Zuschnitt, Ausrichtung und Wölbung eines einzelnen Scans: Rahmen ziehen, ganzes Bild, Links und Rechts drehen.
+    private func editControls(_ c: Corrections) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Button(cropTarget == .scan ? "Rahmen fertig" : "Rahmen ziehen") { cropTarget = cropTarget == .scan ? nil : .scan }
+                    .help("Zeigt das Original mit vier Ecken, die du mit der Maus ziehst")
+                    .accessibilityIdentifier("scan-crop-edit")
+                Button("Ganzes Bild") { model.updateCorrections(id: item.id) { $0.setCrop(.full); if !$0.enabled { $0.setEnabled(true) } } }
+                    .help("Setzt den Zuschnitt auf das ganze Bild")
+                    .accessibilityIdentifier("scan-crop-full")
+                Divider().frame(height: 16)
+                Button { Task { await model.turnScan(id: item.id, quarters: -1) } } label: { Label("Links drehen", systemImage: "rotate.left") }
+                    .help("Dreht den Scan um 90° gegen den Uhrzeigersinn, zum Beispiel wenn er quer liegt")
+                    .accessibilityIdentifier("scan-turn-left")
+                Button { Task { await model.turnScan(id: item.id, quarters: 1) } } label: { Label("Rechts drehen", systemImage: "rotate.right") }
+                    .help("Dreht den Scan um 90° im Uhrzeigersinn")
+                    .accessibilityIdentifier("scan-turn-right")
+                if c.quarterTurns != 0 {
+                    Text("\(c.quarterTurns * 90)° im Uhrzeigersinn").font(.caption).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("scan-turn-state")
+                }
+            }
+            if c.dewarp.hasField {
+                Toggle("Wölbung ausgleichen", isOn: Binding(get: { c.dewarp.enabled }, set: { on in model.updateCorrections(id: item.id) { $0.setDewarpEnabled(on) } }))
+                    .disabled(!c.enabled)
+                    .help("Gleicht aus, dass die Zeilen oben anders laufen als unten")
+                    .accessibilityIdentifier("dewarp-toggle")
+            }
         }
     }
 
@@ -894,6 +959,28 @@ struct ScanDetailView: View {
                 let c = page.corrections
                 let side = page.region == .left ? "links" : "rechts"
                 VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Button(cropTarget == .page(page.id) ? "Rahmen fertig \(side)" : "Rahmen ziehen \(side)") {
+                            cropTarget = cropTarget == .page(page.id) ? nil : .page(page.id)
+                        }
+                        .help("Zeigt das Original mit den vier Ecken des Zuschnitts dieser Seite, die du mit der Maus ziehst")
+                        .accessibilityIdentifier("book-crop-edit-\(side)")
+                        Button("Bildhälfte \(side)") { model.updatePageCorrections(pageID: page.id) { $0.setCrop(PageGeometry.half(of: .full, region: page.region)) } }
+                            .help("Setzt den Zuschnitt auf die \(side)e Hälfte des Bildes")
+                            .accessibilityIdentifier("book-crop-half-\(side)")
+                        Divider().frame(height: 16)
+                        Button { turnBookPage(page, quarters: -1) } label: { Label("Links drehen \(side)", systemImage: "rotate.left") }
+                            .accessibilityIdentifier("book-turn-left-\(side)")
+                        Button { turnBookPage(page, quarters: 1) } label: { Label("Rechts drehen \(side)", systemImage: "rotate.right") }
+                            .accessibilityIdentifier("book-turn-right-\(side)")
+                        if c.quarterTurns != 0 {
+                            Text("\(c.quarterTurns * 90)°").font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("book-turn-state-\(side)")
+                        }
+                    }
+                    if c.dewarp.hasField {
+                        Toggle("Wölbung ausgleichen \(side)", isOn: Binding(get: { c.dewarp.enabled }, set: { on in model.updatePageCorrections(pageID: page.id) { $0.setDewarpEnabled(on) } }))
+                            .accessibilityIdentifier("book-dewarp-\(side)")
+                    }
                     Toggle("Zuschnitt \(side)" + (c.crop.source == .manual ? " (manuell)" : c.crop.confidence.map { String(format: " (automatisch, Sicherheit %.2f)", $0) } ?? ""),
                            isOn: Binding(get: { c.crop.enabled }, set: { model.setPageCropEnabled(pageID: page.id, $0) }))
                         .disabled(c.crop.quad == nil)
@@ -918,6 +1005,12 @@ struct ScanDetailView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("book-controls")
+    }
+
+    /// Dreht eine Seite einer Doppelseite in der Aufnahme; sie gehört zur gezeigten Serie, die auch ihre Korrekturen trägt.
+    private func turnBookPage(_ page: DocumentPage, quarters: Int) {
+        guard let documentID = model.shownDocument?.id else { return }
+        Task { await model.turnPages(documentID: documentID, pageIDs: [page.id], quarters: quarters, parts: [.first]) }
     }
 
     private var reviewBanner: some View {
@@ -950,6 +1043,7 @@ struct ScanDetailView: View {
                     .disabled(model.analyzing.contains(item.id))
                     .accessibilityIdentifier("reanalyze-button")
             }
+            editControls(c)
             Toggle(cropLabel(c), isOn: Binding(get: { c.crop.enabled }, set: { model.setCropEnabled(id: item.id, $0) }))
                 .disabled(!c.enabled || c.crop.quad == nil)
                 .accessibilityIdentifier("crop-toggle")

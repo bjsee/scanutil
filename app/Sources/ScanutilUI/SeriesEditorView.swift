@@ -765,7 +765,10 @@ struct PagePreview: View {
             .pickerStyle(.segmented).labelsHidden()
             .accessibilityIdentifier("editor-preview-mode")
             if mode == .crop {
-                CropEditor(model: model, documentID: documentID, page: page, part: part)
+                CropEditor(imageKey: "\(page.id)/\(part.rawValue)",
+                           loadImage: { await model.pageOriginal(documentID: documentID, pageID: page.id, part: part) },
+                           stored: (part == .second ? page.corrections(of: .second) : PageGeometry.effectiveCorrections(for: page)).crop.quad ?? .full,
+                           commit: { quad in model.updatePage(documentID: documentID, pageID: page.id, part: part) { $0.setCrop(quad) } })
                     .frame(minHeight: 280, maxHeight: .infinity)
             } else {
             ZStack {
@@ -808,17 +811,18 @@ struct PagePreview: View {
 /// Der Zuschnittsrahmen zum Ziehen: das Original, darauf das Viereck mit vier Ecken. Beim Loslassen wird der Rahmen als
 /// manueller Zuschnitt gespeichert und gilt sofort.
 struct CropEditor: View {
-    let model: AppModel
-    let documentID: UUID
-    let page: DocumentPage
-    var part: PagePart = .first
+    /// Ändert sich der Schlüssel, wird das Bild neu geladen (andere Seite, anderer Teil).
+    let imageKey: String
+    let loadImage: () async -> CGImage?
+    /// Der gespeicherte Rahmen.
+    let stored: Quad
+    /// Wird beim Loslassen einer Ecke mit dem neuen Rahmen aufgerufen.
+    let commit: (Quad) -> Void
+    /// Vorsilbe der Kennungen für die Bedienungshilfen: „editor-crop“ im Editor, „scan-crop“ in der Aufnahme.
+    var identifier = "editor-crop"
     @State private var image: CGImage?
     /// Der Rahmen während des Ziehens; sonst gilt der gespeicherte.
     @State private var draft: Quad?
-
-    private var stored: Quad {
-        (part == .second ? page.corrections(of: .second) : PageGeometry.effectiveCorrections(for: page)).crop.quad ?? .full
-    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -852,10 +856,10 @@ struct CropEditor: View {
                                 .onEnded { value in
                                     let result = corner.moved(in: draft ?? stored, to: Self.normalized(value.location, rect))
                                     draft = nil
-                                    model.updatePage(documentID: documentID, pageID: page.id, part: part) { $0.setCrop(result) }
+                                    commit(result)
                                 })
                             .accessibilityLabel("Ecke \(corner.rawValue)")
-                            .accessibilityIdentifier("editor-crop-handle-\(corner.rawValue)")
+                            .accessibilityIdentifier("\(identifier)-handle-\(corner.rawValue)")
                     }
                 } else {
                     ProgressView()
@@ -863,9 +867,9 @@ struct CropEditor: View {
             }
             .coordinateSpace(name: "crop-editor")
         }
-        .task(id: "\(page.id)/\(part.rawValue)") { image = await model.pageOriginal(documentID: documentID, pageID: page.id, part: part) }
+        .task(id: imageKey) { image = await loadImage() }
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("editor-crop-editor")
+        .accessibilityIdentifier("\(identifier)-editor")
     }
 
     /// Wo ein Bild der Größe `size` in `container` liegt, ganz sichtbar und zentriert.
