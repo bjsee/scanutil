@@ -14,6 +14,11 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Scanutil"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
+# Version = Zeitpunkt des Baus (die Oberfläche zeigt ihn an, damit man sieht, welcher Stand läuft) und der Commit dazu.
+BUILD_TIME="$(date '+%Y-%m-%d %H:%M:%S')"
+BUILD_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unbekannt)"
+if [ -n "$(git status --porcelain -- . 2>/dev/null)" ]; then BUILD_COMMIT="$BUILD_COMMIT+"; fi   # „+“: mit Änderungen, die noch nicht committet sind
+
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -27,6 +32,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>CFBundleVersion</key><string>1</string>
+    <key>ScanutilBuildTimestamp</key><string>$BUILD_TIME</string>
+    <key>ScanutilBuildCommit</key><string>$BUILD_COMMIT</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSCameraUsageDescription</key>
