@@ -319,4 +319,38 @@ struct MarkedPagesTests {
         #expect(after.pages.map(\.scanID) == [scans[0]], "Fehlt der erste Scan, entfällt die Seite")
         await model.disconnect()
     }
+
+    // MARK: Historisches Dokument
+
+    @Test func theHistoricDocumentCropTakesTheWholePaperForWholePagesAndSkipsBookHalves() async throws {
+        let (model, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "Alte Blätter")
+        await model.scan(); await model.scan()
+        let doc = try #require(model.series)
+        let ids = doc.pages.map(\.id)
+        // Beide Seiten bekommen einen anderen Zuschnitt von Hand; „Historisches Dokument“ ersetzt ihn durch das Papier.
+        for id in ids { model.updatePage(documentID: doc.id, pageID: id) { $0.setCrop(Quad(topLeft: .init(x: 0.4, y: 0.4), topRight: .init(x: 0.6, y: 0.4), bottomRight: .init(x: 0.6, y: 0.6), bottomLeft: .init(x: 0.4, y: 0.6))); $0.setCropEnabled(false) } }
+        let result = await model.setPaperCrop(documentID: doc.id, pageIDs: ids)
+        #expect(result.changed + result.notFound == 2, "Jede Seite ist gesetzt oder als „kein Papier“ gemeldet: \(result)")
+        let after = try #require(model.latestDocument(id: doc.id))
+        for page in after.pages where result.notFound == 0 {
+            #expect(page.corrections.crop.enabled && page.corrections.crop.source == .manual, "An und von Hand")
+            let quad = try #require(page.corrections.crop.quad)
+            #expect(quad != Quad(topLeft: .init(x: 0.4, y: 0.4), topRight: .init(x: 0.6, y: 0.4), bottomRight: .init(x: 0.6, y: 0.6), bottomLeft: .init(x: 0.4, y: 0.6)), "Der alte Rahmen ist ersetzt")
+        }
+        await model.disconnect()
+    }
+
+    @Test func theHistoricCropIsSkippedForBookHalvesAndUnknownPagesAndSetsASingleScan() async throws {
+        let (model, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "Buch", book: true)
+        await model.scan(); await waitForAnalysis(model)
+        let doc = try #require(model.series)
+        let before = doc.pages.map(\.corrections.crop)
+        let result = await model.setPaperCrop(documentID: doc.id, pageIDs: doc.pages.map(\.id))
+        #expect(result.changed == 0 && result.notFound == 0, "Hälften einer Doppelseite werden übersprungen: \(result)")
+        #expect(model.latestDocument(id: doc.id)?.pages.map(\.corrections.crop) == before)
+        #expect(await model.setPaperCrop(documentID: UUID(), pageIDs: []) == (0, 0))
+        await model.disconnect()
+    }
 }

@@ -202,6 +202,24 @@ do {
             print("\(n): Zuschnitt \(c.crop.enabled ? "an" : "aus"), Drehung \(String(format: "%+.2f", c.rotation.degrees))° (\(c.rotation.enabled ? "an" : "aus")), Vierteldrehungen \(c.quarterTurns)")
         }
         print("Seite: \(result.width)x\(result.height), gerechnet in \(ContinuousClock.now - t0)")
+    case "paper":
+        // scanutil-cli paper <bild.png> [--out zuschnitt.png] [--margin 0.03]   Rahmen um das ganze Papier samt schwarzem Rand (Historisches Dokument)
+        guard args.count >= 2, let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: args[1]) as CFURL, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { fail("Bild nicht lesen") }
+        let t0 = ContinuousClock.now
+        let hands = HandDetector.detect(in: image)?.mask
+        guard let quad = PaperBounds.detect(in: image, margin: Double(option("--margin", in: args) ?? "") ?? PaperBounds.defaultMargin, hands: hands) else {
+            print("Kein Papier gefunden"); break
+        }
+        print(String(format: "Rahmen x %.3f–%.3f, y %.3f–%.3f (%@)", quad.topLeft.x, quad.topRight.x, quad.topLeft.y, quad.bottomLeft.y, "\(ContinuousClock.now - t0)"))
+        if let out = option("--out", in: args) {
+            var c = Corrections(); c.crop = CropCorrection(quad: quad, enabled: true, source: .manual)
+            if let rendered = CorrectionRenderer.render(image, corrections: c),
+               let d = CGImageDestinationCreateWithURL(URL(fileURLWithPath: out) as CFURL, UTType.png.identifier as CFString, 1, nil) {
+                CGImageDestinationAddImage(d, rendered, nil); CGImageDestinationFinalize(d)
+                print("Zuschnitt: \(rendered.width)x\(rendered.height) → \(out)")
+            }
+        }
     case "usb-descriptor":
         // Gibt die Konfigurationsbeschreibung des Scanners als Hexzeichen aus, zur Untersuchung der UVC-Fähigkeiten.
         var bytes = [UInt8](repeating: 0, count: 4096)

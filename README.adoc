@@ -129,6 +129,18 @@ Die Randerkennung (Vision) folgt dem Buch als Ganzem, und dazu gehört der Rand 
 * Gemessen an denselben sechs Scans: grüner Anteil im linken Randstreifen danach 0 bis 0,9 %; Text, Zeilenanfänge und Seitenzahlen bleiben vollständig.
 * *Nicht getan:* die Seitengrößen im PDF angleichen. Sie schwanken bei uns um 8 % (421 bis 456 pt Breite), bei der Scanner-Software um 6 % (462 bis 492 pt), das ist kein nennenswerter Unterschied.
 
+=== Historisches Dokument: das ganze Papier als Zuschnitt
+
+Alte Blätter sind eingerissen, ausgefranst oder abgerundet. Die gewöhnliche Dokumenterkennung sucht ein Viereck und schneidet dann Papier ab (oder findet nur den beschriebenen Teil). Der Knopf *Historisches Dokument* im Zuschnitt nimmt stattdessen das *ganze Papier* mit einem schmalen schwarzen Rand (`PaperBounds`):
+
+* Gemessen wird auf einer Fassung von 1000 Punkten: Alles, was heller ist als der dunkle Untergrund (Schwelle nach Otsu, zwischen 25 und 110 von 255), ist Papier. Hände, die die Handerkennung gefunden hat, zählen nicht dazu, sonst zöge ein Daumen den Rahmen auf. Kleine helle Punkte (Staub) fallen durch Abtragen weg, die größte zusammenhängende Fläche ist das Papier; ist sie kleiner als 4 % des Bildes, gilt Papier als nicht gefunden.
+* Der Rahmen ist achsenparallel um diese Fläche, dazu ein schwarzer Rand von 3 % der Breite und Höhe des Papiers (mindestens 6 Punkte). Ein schief liegendes Blatt liegt damit ganz im Rahmen; die Drehung stellt es danach gerade.
+* Der Zuschnitt gilt als von Hand gesetzt und ist an. Man kann ihn danach mit *Rahmen ziehen* nachstellen.
+* Wo: im Editor je Seite und für alle markierten Seiten (Leiste, mit Rückmeldung: wie viele gesetzt, bei wie vielen kein Papier gefunden, wie viele Buchhälften übersprungen), und in der Aufnahme je Scan. Hälften einer Doppelseite werden übersprungen, dort teilt der Falz. Bei einer verbundenen Seite wirkt es auf beide Teile. Mit `scanutil-cli paper <bild.png> [--out zuschnitt.png] [--margin 0.03]` lässt sich das Ergebnis an einem Scan ansehen.
+* Gemessen an vier alten Seiten eines Rechnungsbuchs (Schnellablage vom 14. November 2026): Der Rahmen umfasst jeweils das ganze Papier, auch die eingerissenen Ecken, etwa 0,26 s je Scan.
+
+*Ausgeschalteter Zuschnitt:* Ein Rahmen, der nicht wirkt, ist leicht zu übersehen: Das Ergebnis zeigt dann das ganze Bild, als hätte das Ziehen nichts bewirkt. Der Schalter heißt deshalb *Zuschnitt anwenden*, die Legende nennt Orange „wird nicht angewendet (ausgeschaltet, unsicher oder nur die Bildhälfte)“, und die Seite meldet „Der Zuschnitt ist von Hand gesetzt, aber ausgeschaltet“ (Ampel, Filter „Nur unsichere“) mit einem Knopf *Zuschnitt anwenden* im Inspektor.
+
 === Wölbung ausgleichen
 
 Eine aufgeschlagene Buchseite liegt nicht flach, und auch der Zuschnitt auf das erkannte Viereck ist nie ganz rechtwinklig zu den Zeilen: Die Zeilen laufen oben anders als unten. An den linken Seiten der Serie „sagenbuch neu“ (13. November 2026) stieg der Zeilenwinkel von etwa 0° oben auf −1,0° bis −3,1° unten, in einer Ecke zusätzlich von links nach rechts; die rechten Seiten lagen gleichmäßig bei +0,5° bis +1,4°. Eine einzige Drehung kann das nicht beheben.

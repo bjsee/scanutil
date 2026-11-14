@@ -872,6 +872,9 @@ struct ScanDetailView: View {
                 Button("Ganzes Bild") { model.updateCorrections(id: item.id) { $0.setCrop(.full); if !$0.enabled { $0.setEnabled(true) } } }
                     .help("Setzt den Zuschnitt auf das ganze Bild")
                     .accessibilityIdentifier("scan-crop-full")
+                Button("Historisches Dokument") { Task { await model.setPaperCrop(scanID: item.id) } }
+                    .help("Nimmt das ganze Papier mit einem schmalen schwarzen Rand als Zuschnitt, auch wenn es eingerissen oder ausgefranst ist")
+                    .accessibilityIdentifier("scan-crop-historic")
                 Divider().frame(height: 16)
                 Button { Task { await model.turnScan(id: item.id, quarters: -1) } } label: { Label("Links drehen", systemImage: "rotate.left") }
                     .help("Dreht den Scan um 90° gegen den Uhrzeigersinn, zum Beispiel wenn er quer liegt")

@@ -1276,6 +1276,57 @@ public final class AppModel {
         return turned
     }
 
+    /// Der Rahmen „Historisches Dokument“ für einen Scan: das ganze Papier samt schmalem schwarzem Rand. `nil`, wenn kein Papier zu finden ist.
+    /// Hände, die die Handerkennung für diesen Scan gefunden hat, zählen nicht zum Papier.
+    nonisolated static func paperQuad(store: ArchiveStore, scanID: UUID, handMask: Data?) -> Quad? {
+        guard let record = try? store.load(id: scanID), let image = store.thumbnail(for: record, maxPixelSize: 1600) else { return nil }
+        return PaperBounds.detect(in: image, hands: handMask.flatMap { HandMask(pngData: $0) })
+    }
+
+    /// „Historisches Dokument“ für Seiten einer Serie: Der Zuschnitt wird das ganze Papier mit einem schmalen schwarzen Rand, auch bei
+    /// eingerissenen oder ausgefransten Blättern, bei denen die Dokumenterkennung Papier abschneidet. Gilt als von Hand gesetzt und
+    /// ist an. Hälften einer Doppelseite werden übersprungen (dort teilt der Falz). Bei einer verbundenen Seite wirkt es auf beide Teile.
+    /// Gibt zurück, bei wie vielen Seiten der Zuschnitt gesetzt wurde und bei wie vielen kein Papier zu finden war.
+    @discardableResult
+    public func setPaperCrop(documentID: UUID, pageIDs: [UUID], parts: [PagePart] = [.first, .second]) async -> (changed: Int, notFound: Int) {
+        guard let document = latestDocument(id: documentID) else { return (0, 0) }
+        let store = self.store
+        var quads: [String: Quad] = [:]
+        var notFound = 0
+        for id in pageIDs {
+            guard let page = document.page(id: id), page.region == .whole else { continue }
+            for part in parts {
+                if part == .second && page.joined == nil { continue }
+                let scanID = page.scanID(of: part), mask = page.corrections(of: part).handRemoval.mask
+                let quad = await Task.detached { Self.paperQuad(store: store, scanID: scanID, handMask: mask) }.value
+                if let quad { quads["\(id.uuidString)/\(part.rawValue)"] = quad } else { notFound += 1 }
+            }
+        }
+        var changed = 0
+        for part in parts {
+            changed += updatePages(documentID: documentID, pageIDs: pageIDs, parts: [part]) { page, c in
+                guard let quad = quads["\(page.id.uuidString)/\(part.rawValue)"] else { return }
+                c.setCrop(quad)
+                if !c.enabled { c.setEnabled(true) }
+            }
+        }
+        // Eine verbundene Seite zählt einmal, auch wenn beide Teile geändert wurden.
+        return (min(changed, pageIDs.count), notFound)
+    }
+
+    /// „Historisches Dokument“ für einen einzelnen Scan der Aufnahme. Gibt zurück, ob Papier gefunden wurde.
+    @discardableResult
+    public func setPaperCrop(scanID: UUID) async -> Bool {
+        guard let item = scans.first(where: { $0.id == scanID }) else { return false }
+        let store = self.store, mask = item.corrections.handRemoval.mask
+        guard let quad = await Task.detached(operation: { Self.paperQuad(store: store, scanID: scanID, handMask: mask) }).value else { return false }
+        updateCorrections(id: scanID) { c in
+            c.setCrop(quad)
+            if !c.enabled { c.setEnabled(true) }
+        }
+        return true
+    }
+
     /// Misst Schräglage und Wölbung eines Scans auf der zugeschnittenen und ausgerichteten Seite, ohne Drehung, Wölbung und Aufhellen.
     nonisolated static func measureGeometry(store: ArchiveStore, scanID: UUID, corrections: Corrections) -> (skew: SkewEstimate?, dewarp: DewarpEstimate?) {
         var c = corrections

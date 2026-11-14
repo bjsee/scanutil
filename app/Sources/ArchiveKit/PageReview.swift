@@ -91,6 +91,12 @@ public enum PageReviewer {
                 }
             }
 
+            // Ein Zuschnitt von Hand, der ausgeschaltet ist, wirkt nicht: Das Ergebnis zeigt das ganze Bild. Bei Buchseiten gilt immer
+            // mindestens die Bildhälfte (siehe `PageGeometry`), dort ist es kein Befund.
+            if !isBook, c.crop.source == .manual, c.crop.quad != nil, !c.crop.enabled {
+                add(.crop, .check, "Der Zuschnitt ist von Hand gesetzt, aber ausgeschaltet: Er wirkt nicht, das Ergebnis zeigt das ganze Bild.")
+            }
+
             // Drehung: nur eine automatische, nicht angewendete Messung ist ein Befund.
             if c.rotation.source == .automatic, !c.rotation.enabled {
                 if let confidence = c.rotation.confidence {
