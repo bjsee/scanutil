@@ -328,6 +328,9 @@ public struct SeriesEditorView: View {
                     .help(noneWhole ? "Setzt den Zuschnitt aller markierten Seiten auf die linke bzw. rechte Bildhälfte"
                                     : "Setzt den Zuschnitt auf das ganze Bild bzw. die linke oder rechte Hälfte")
                     .accessibilityIdentifier("editor-batch-crop")
+                    Button("Historisches Dokument") { paperCropMarked(document, ids) }
+                        .help("Nimmt bei allen markierten Seiten das ganze Papier mit einem schmalen schwarzen Rand als Zuschnitt (nicht bei Buchhälften)")
+                        .accessibilityIdentifier("editor-batch-crop-historic")
                 }
                 HStack(spacing: 6) {
                     Text("Ausrichtung").font(.callout)
@@ -373,6 +376,18 @@ public struct SeriesEditorView: View {
 
     private func batchButton(_ title: String, id: String, action: @escaping () -> Void) -> some View {
         Button(title, action: action).accessibilityIdentifier(id)
+    }
+
+    private func paperCropMarked(_ document: ScanDocument, _ ids: [UUID]) {
+        batchNote = "Suche das Papier bei \(ids.count) Seite\(ids.count == 1 ? "" : "n") …"
+        Task {
+            let r = await model.setPaperCrop(documentID: document.id, pageIDs: ids)
+            var note = "„Historisches Dokument“: Zuschnitt bei \(r.changed) von \(ids.count) Seiten gesetzt."
+            if r.notFound > 0 { note += " Bei \(r.notFound) war kein Papier zu finden." }
+            let halves = document.pages.filter { ids.contains($0.id) && $0.region != .whole }.count
+            if halves > 0 { note += " \(halves) Buchhälfte\(halves == 1 ? "" : "n") übersprungen." }
+            batchNote = note
+        }
     }
 
     private func turnMarked(_ document: ScanDocument, _ ids: [UUID], quarters: Int) {
@@ -545,9 +560,31 @@ public struct SeriesEditorView: View {
                 }
                 .help("Setzt den Zuschnitt auf das ganze Bild bzw. die linke oder rechte Hälfte")
                 .accessibilityIdentifier("editor-crop-half")
-                Toggle("anwenden", isOn: Binding(get: { c.crop.enabled }, set: { on in change { $0.setCropEnabled(on) } }))
+                if wholeLike {
+                    Button("Historisches Dokument") {
+                        Task {
+                            let r = await model.setPaperCrop(documentID: document.id, pageIDs: [page.id], parts: [part])
+                            if r.notFound > 0 { batchNote = "Kein Papier gefunden: Ist der Untergrund dunkel genug?" }
+                        }
+                    }
+                    .help("Nimmt das ganze Papier mit einem schmalen schwarzen Rand als Zuschnitt, auch wenn es eingerissen oder ausgefranst ist")
+                    .accessibilityIdentifier("editor-crop-historic")
+                }
+                Toggle("Zuschnitt anwenden", isOn: Binding(get: { c.crop.enabled }, set: { on in change { $0.setCropEnabled(on) } }))
                     .disabled(c.crop.quad == nil)
+                    .help("Aus: Das Ergebnis und das PDF zeigen das ganze Bild, der Rahmen wird nicht benutzt")
                     .accessibilityIdentifier("editor-crop")
+            }
+            // Ein Rahmen, der nicht wirkt, soll man nicht übersehen: Das Ergebnis sähe sonst aus, als hätte das Ziehen nichts bewirkt.
+            if c.crop.quad != nil, !c.crop.enabled, wholeLike {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Text("Der Zuschnitt ist ausgeschaltet: Das Ergebnis zeigt das ganze Bild.").font(.callout)
+                    Button("Zuschnitt anwenden") { change { $0.setCropEnabled(true) } }
+                        .accessibilityIdentifier("editor-crop-enable")
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("editor-crop-off-hint")
             }
             Text("Ausrichtung").font(.subheadline.bold())
             HStack(spacing: 8) {
@@ -793,7 +830,7 @@ struct PagePreview: View {
             .accessibilityIdentifier("editor-preview")
             }
             Text(mode == .original
-                 ? "Grün: Zuschnitt fürs PDF. Orange: unsicher oder nur die Bildhälfte. Gestrichelt: die andere Seite. Dunkel fällt weg."
+                 ? "Grün: Zuschnitt fürs PDF. Orange: wird nicht angewendet (ausgeschaltet, unsicher oder nur die Bildhälfte). Gestrichelt: die andere Seite. Dunkel fällt weg."
                  : mode == .result ? "So kommt die Seite ins PDF."
                  : "Ziehe die vier Ecken des Rahmens. Was außerhalb liegt, fällt weg. Die Änderung gilt sofort.")
                 .font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)

@@ -7,8 +7,8 @@ import Testing
 @Suite("Oberfläche: Serie bearbeiten", .serialized, .enabled(if: ProcessInfo.processInfo.environment["SCANUTIL_UI_TESTS"] != nil))
 struct SerieBearbeitenOberflaechenTests {
     /// Rauschen: Die Automatik ist bei jeder Aufnahme unsicher, so gibt es etwas zu prüfen.
-    private func recordedSeries(scans: Int) throws -> UISession {
-        let s = try UISession.launch(mode: "noise")
+    private func recordedSeries(scans: Int, mode: String = "noise") throws -> UISession {
+        let s = try UISession.launch(mode: mode)
         #expect(s.app.wait { s.app.string("status-text")?.hasPrefix("Bereit") == true }, "App wurde nicht bereit")
         #expect(s.app.press("series-start-button"))
         #expect(s.app.wait { s.app.element("series-page-count") != nil })
@@ -178,6 +178,50 @@ struct SerieBearbeitenOberflaechenTests {
         #expect(s.app.press("editor-join-split"))
         #expect(s.app.wait(timeout: 10) { s.pages.count == 2 && s.pages.first?["joined"] == nil }, "Seiten: \(s.pages.count)")
         #expect(s.app.wait { s.app.element("editor-page-2") != nil })
+    }
+
+    @Test func aCropThatIsSwitchedOffShowsAHintWithAButtonToTurnItOn() throws {
+        let s = try recordedSeries(scans: 1); defer { s.close() }
+        func crop() -> [String: Any]? { (s.pages.first?["corrections"] as? [String: Any])?["crop"] as? [String: Any] }
+        openEditor(s)
+        #expect(s.app.wait { s.app.element("editor-page-1") != nil })
+        #expect(s.app.press("editor-page-1"))
+        #expect(s.app.wait { s.app.element("editor-crop-half") != nil })
+        #expect(s.app.press("editor-crop-half"))                                   // „Ganzes Bild“: von Hand und an
+        #expect(s.app.wait(timeout: 10) { crop()?["enabled"] as? Bool == true && crop()?["source"] as? String == "manual" })
+        #expect(s.app.element("editor-crop-off-hint") == nil, "Solange der Zuschnitt wirkt, gibt es keinen Hinweis")
+
+        #expect(s.app.press("editor-crop"))                                        // „Zuschnitt anwenden“ ausschalten
+        #expect(s.app.wait(timeout: 10) { crop()?["enabled"] as? Bool == false })
+        #expect(s.app.wait { s.app.element("editor-crop-off-hint") != nil }, "Ein Rahmen, der nicht wirkt, wird gemeldet")
+        #expect(s.app.wait { s.app.string("editor-page-1") == "prüfen" || s.app.string("editor-page-1") == "problem" })
+
+        #expect(s.app.press("editor-crop-enable"))
+        #expect(s.app.wait(timeout: 10) { crop()?["enabled"] as? Bool == true })
+        #expect(s.app.wait { s.app.element("editor-crop-off-hint") == nil }, "Der Hinweis verschwindet")
+    }
+
+    @Test func theHistoricDocumentButtonSetsTheCropToThePaperOfOnePageAndOfMarkedPages() throws {
+        let s = try recordedSeries(scans: 2, mode: "document"); defer { s.close() }
+        func crop(_ page: Int) -> [String: Any]? {
+            let pages = s.pages
+            guard pages.indices.contains(page) else { return nil }
+            return (pages[page]["corrections"] as? [String: Any])?["crop"] as? [String: Any]
+        }
+        openEditor(s)
+        #expect(s.app.wait { s.app.element("editor-page-2") != nil })
+        #expect(s.app.press("editor-page-1"))
+        #expect(s.app.wait { s.app.element("editor-crop-historic") != nil }, "Kein Knopf „Historisches Dokument“ im Zuschnitt")
+        #expect(s.app.press("editor-crop-historic"))
+        #expect(s.app.wait(timeout: 20) { crop(0)?["source"] as? String == "manual" && crop(0)?["enabled"] as? Bool == true }, "Seite 1: \(String(describing: crop(0)))")
+        #expect(crop(1)?["source"] as? String != "manual", "Die andere Seite bleibt")
+
+        // Für markierte Seiten: Seite 2 mit der Leiste.
+        #expect(s.app.press("editor-mark-2"))
+        #expect(s.app.wait { s.app.element("editor-batch-crop-historic") != nil })
+        #expect(s.app.press("editor-batch-crop-historic"))
+        #expect(s.app.wait(timeout: 20) { crop(1)?["source"] as? String == "manual" && crop(1)?["enabled"] as? Bool == true }, "Seite 2: \(String(describing: crop(1)))")
+        #expect(s.app.wait { s.app.string("editor-batch-note")?.contains("Historisches Dokument") == true })
     }
 
     @Test func changingTheRotationInTheEditorIsSavedAsManualAndReopensThePage() throws {

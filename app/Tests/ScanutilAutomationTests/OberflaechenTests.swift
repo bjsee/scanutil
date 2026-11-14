@@ -147,6 +147,17 @@ struct OberflaechenTests {
         #expect((info?["ScanutilBuildCommit"] as? String)?.isEmpty == false, "Der Commit fehlt in der Info.plist")
     }
 
+    @Test func theCaptureViewHasTheHistoricDocumentCrop() throws {
+        let s = try launch(); defer { s.close(); try? FileManager.default.removeItem(at: s.dir) }
+        scanOnce(s)
+        #expect(s.app.wait { s.app.element("scan-crop-historic") != nil }, "Kein Knopf „Historisches Dokument“ in der Aufnahme")
+        #expect(s.app.press("scan-crop-historic"))
+        #expect(s.app.wait(timeout: 20) {
+            let crop = self.corrections(s.dir)?["crop"] as? [String: Any]
+            return (crop?["source"] as? String) == "manual" && (crop?["enabled"] as? Bool) == true && crop?["quad"] != nil
+        }, "„Historisches Dokument“ wurde nicht als Zuschnitt gespeichert")
+    }
+
     @Test func masterSwitchDisablesCorrectionsAndControls() throws {
         let s = try launch(); defer { s.close(); try? FileManager.default.removeItem(at: s.dir) }
         scanOnce(s)

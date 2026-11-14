@@ -55,6 +55,26 @@ struct PageReviewTests {
         #expect(!PageReviewer.review(sureBookPage()).findings.contains { $0.message.contains("Wölbung") }, "Ohne Messung kein Hinweis")
     }
 
+    // MARK: Ausgeschalteter Zuschnitt
+
+    @Test func aHandSetCropThatIsSwitchedOffIsAFindingBecauseItHasNoEffect() throws {
+        var page = DocumentPage(scanID: UUID())
+        page.analysis = PageAnalysis(outerDetected: true, outerPlausibility: 0.95)
+        page.corrections.crop = CropCorrection(quad: quad, enabled: false, source: .manual)
+        let review = PageReviewer.review(page)
+        let finding = try #require(review.findings.first { $0.kind == .crop })
+        #expect(finding.severity == .check && finding.message.contains("ausgeschaltet"), "\(finding.message)")
+        #expect(review.needsAttention, "Die Seite fällt auf, statt still ein anderes Ergebnis zu zeigen")
+
+        page.corrections.crop.enabled = true
+        #expect(!PageReviewer.review(page).findings.contains { $0.message.contains("ausgeschaltet") })
+
+        // Bei einer Buchhälfte gilt immer mindestens die Bildhälfte: dort kein Befund.
+        var half = sureBookPage()
+        half.corrections.crop = CropCorrection(quad: quad, enabled: false, source: .manual)
+        #expect(!PageReviewer.review(half).findings.contains { $0.message.contains("ausgeschaltet") })
+    }
+
     // MARK: Falz und Rand
 
     @Test func aShakyGutterIsAFindingToCheck() {
