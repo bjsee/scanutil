@@ -199,4 +199,93 @@ struct DocumentDeletionTests {
         try store.deleteDocument(id: a.id)
         #expect(try store.allDocuments().map(\.id) == [b.id])
     }
+
+    // MARK: Zwei Scans zu einer Seite
+
+    private func twoPages() -> (ScanDocument, DocumentPage, DocumentPage, DocumentPage) {
+        let a = DocumentPage(scanID: UUID()), b = DocumentPage(scanID: UUID()), c = DocumentPage(scanID: UUID())
+        var doc = ScanDocument(title: "Plan")
+        doc.append(a); doc.append(b); doc.append(c)
+        return (doc, a, b, c)
+    }
+
+    @Test func joiningTakesTheSecondScanIntoTheFirstPageAndRemovesTheSecondPage() {
+        var (doc, a, b, c) = twoPages()
+        var marked = b.corrections; marked.setRotation(degrees: 1.5)
+        doc.pages[1].corrections = marked
+        let r1 = doc.joinPages(first: a.id, second: b.id)
+        #expect(r1)
+        #expect(doc.pages.map(\.id) == [a.id, c.id], "Die zweite Seite ist aus der Liste")
+        let joined = try! #require(doc.pages[0].joined)
+        #expect(joined.scanID == b.scanID && joined.corrections.rotation.degrees == 1.5, "Der zweite Teil behält seine Korrekturen")
+        #expect(joined.gap == 0 && joined.shift == 0)
+        #expect(doc.pages[0].scanIDs == [a.scanID, b.scanID] && doc.pages[0].uses(scan: b.scanID) && !doc.pages[1].uses(scan: b.scanID))
+    }
+
+    @Test func joiningRefusesWhatMakesNoSense() {
+        var (doc, a, b, _) = twoPages()
+        let r2 = doc.joinPages(first: a.id, second: a.id)
+        #expect(!r2, "Nicht mit sich selbst")
+        let r3 = doc.joinPages(first: a.id, second: UUID())
+        #expect(!r3, "Unbekannte Seite")
+        var halves = ScanDocument(title: "Buch")
+        let scan = UUID()
+        halves.append(DocumentPage(scanID: scan, region: .left)); halves.append(DocumentPage(scanID: scan, region: .right))
+        let r4 = halves.joinPages(first: halves.pages[0].id, second: halves.pages[1].id)
+        #expect(!r4, "Buchhälften werden nicht verbunden")
+        let same = DocumentPage(scanID: a.scanID)
+        doc.append(same)
+        let r5 = doc.joinPages(first: a.id, second: same.id)
+        #expect(!r5, "Zwei Seiten desselben Scans")
+        let r6 = doc.joinPages(first: a.id, second: b.id)
+        #expect(r6)
+        let r7 = doc.joinPages(first: a.id, second: doc.pages[1].id)
+        #expect(!r7, "Eine schon verbundene Seite nimmt keinen dritten Teil")
+    }
+
+    @Test func unjoiningPutsTheSecondPartBackAsItsOwnPageRightBehind() {
+        var (doc, a, b, c) = twoPages()
+        _ = doc.joinPages(first: a.id, second: b.id)
+        doc.pages[0].joined?.corrections.setRotation(degrees: -0.7)
+        let r8 = doc.unjoinPage(id: a.id)
+        #expect(r8)
+        #expect(doc.pages.count == 3 && doc.pages[0].id == a.id && doc.pages[2].id == c.id)
+        #expect(doc.pages[1].scanID == b.scanID && doc.pages[1].corrections.rotation.degrees == -0.7, "Mit seinen Korrekturen, hinter der ersten")
+        #expect(doc.pages[0].joined == nil)
+        let r9 = doc.unjoinPage(id: a.id)
+        #expect(!r9, "Eine nicht verbundene Seite lässt sich nicht trennen")
+    }
+
+    @Test func swappingExchangesLeftAndRightAndKeepsEachOnesCorrections() {
+        var (doc, a, b, _) = twoPages()
+        doc.pages[0].corrections.setRotation(degrees: 1)
+        doc.pages[1].corrections.setRotation(degrees: 2)
+        _ = doc.joinPages(first: a.id, second: b.id)
+        doc.pages[0].joined?.shift = 0.03
+        let r10 = doc.swapJoinedParts(id: a.id)
+        #expect(r10)
+        #expect(doc.pages[0].scanID == b.scanID && doc.pages[0].corrections.rotation.degrees == 2)
+        #expect(doc.pages[0].joined?.scanID == a.scanID && doc.pages[0].joined?.corrections.rotation.degrees == 1)
+        #expect(doc.pages[0].joined?.shift == -0.03, "Die Höhenverschiebung kehrt sich um, damit dieselben Stellen zusammenpassen")
+    }
+
+    @Test func aJoinedPageSurvivesJSONAndOldFilesHaveNone_andReviewedFollowsBothParts() throws {
+        var (doc, a, b, _) = twoPages()
+        _ = doc.joinPages(first: a.id, second: b.id)
+        let data = try JSONEncoder().encode(doc)
+        #expect(try JSONDecoder().decode(ScanDocument.self, from: data) == doc)
+
+        var object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var pages = try #require(object["pages"] as? [[String: Any]])
+        pages[0].removeValue(forKey: "joined"); object["pages"] = pages
+        #expect(try JSONDecoder().decode(ScanDocument.self, from: JSONSerialization.data(withJSONObject: object)).pages[0].joined == nil)
+
+        doc.pages[0].reviewedKey = doc.pages[0].reviewKey
+        #expect(doc.pages[0].isReviewed)
+        doc.pages[0].joined?.corrections.setRotation(degrees: 0.4)
+        #expect(!doc.pages[0].isReviewed, "Ändert sich der zweite Teil, ist die Seite wieder ungeprüft")
+        doc.pages[0].reviewedKey = doc.pages[0].reviewKey
+        doc.pages[0].joined?.gap = 0.01
+        #expect(!doc.pages[0].isReviewed, "Auch die Naht gehört dazu")
+    }
 }

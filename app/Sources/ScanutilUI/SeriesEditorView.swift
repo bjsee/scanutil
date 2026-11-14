@@ -21,6 +21,11 @@ public struct SeriesEditorView: View {
     @State private var batchNote: String?
     /// Der Winkel im Feld der Leiste für markierte Seiten.
     @State private var batchRotationText = "0"
+    /// Welcher Teil einer verbundenen Seite gerade bearbeitet wird (Teil 1 links, Teil 2 rechts), je Seite.
+    @State private var parts: [UUID: PagePart] = [:]
+
+    /// Der bearbeitete Teil: bei einer Seite aus einem Scan immer der erste.
+    private func activePart(_ page: DocumentPage) -> PagePart { page.joined == nil ? .first : (parts[page.id] ?? .first) }
 
     public init(model: AppModel, documentID: UUID?, nav: Navigator) { self.model = model; self.documentID = documentID; self.nav = nav }
 
@@ -53,7 +58,8 @@ public struct SeriesEditorView: View {
             if let before = model.undoablePageRemoval, before.id == document.id {
                 let removed = before.pages.count - document.pages.count
                 HStack {
-                    Text(removed == 1 ? "Eine Seite wurde entfernt." : "\(removed) Seiten wurden entfernt.")
+                    Text(model.undoNote ?? (removed == 1 ? "Eine Seite wurde entfernt." : "\(removed) Seiten wurden entfernt."))
+                        .accessibilityIdentifier("editor-undo-note")
                     Button("Rückgängig") { model.undoPageRemoval() }.buttonStyle(.link)
                         .accessibilityIdentifier("editor-undo-remove")
                     Spacer()
@@ -299,6 +305,17 @@ public struct SeriesEditorView: View {
                 Text("\(ids.count) Seite\(ids.count == 1 ? "" : "n") markiert").font(.callout.bold())
                     .accessibilityIdentifier("editor-mark-count")
                 Button("Markierung aufheben") { editor.clearMarks(); batchNote = nil }.accessibilityIdentifier("editor-mark-none")
+                if ids.count == 2, pages.count == 2, pages.allSatisfy({ $0.region == .whole && $0.joined == nil }), pages[0].scanID != pages[1].scanID {
+                    Divider().frame(height: 16)
+                    Button("Zu einer Seite verbinden") {
+                        if model.joinPages(documentID: document.id, first: pages[0].id, second: pages[1].id) {
+                            editor.clearMarks(); editor.selectedPageID = pages[0].id
+                            batchNote = "Zwei Scans zu einer Seite verbunden. Die Naht stellst du rechts ein."
+                        }
+                    }
+                    .help("Legt den Scan der zweiten markierten Seite rechts neben den der ersten, etwa die zwei Hälften eines großen Plans")
+                    .accessibilityIdentifier("editor-batch-join")
+                }
                 Divider().frame(height: 16)
                 HStack(spacing: 6) {
                     Text("Zuschnitt").font(.callout)
@@ -408,10 +425,12 @@ public struct SeriesEditorView: View {
                     Button { editor.step(1, in: visible) } label: { Image(systemName: "chevron.right") }
                         .accessibilityLabel("Nächste Seite").accessibilityIdentifier("editor-next")
                 }
-                PagePreview(model: model, documentID: document.id, page: page, mode: $previewMode)
+                let part = activePart(page)
+                if page.joined != nil { joinedControls(document, page: page, part: part) }
+                PagePreview(model: model, documentID: document.id, page: page, part: part, mode: $previewMode)
                 findings(pageReview)
                 Divider()
-                tools(document, page: page)
+                tools(document, page: page, part: part)
                 if document.isInbox, let group = document.group(of: page.id), group.pageIDs.first != page.id {
                     Button("Ab dieser Seite als eigenes Dokument") { model.splitInboxPage(documentID: document.id, pageID: page.id) }
                         .help("Trennt diese und die folgenden Seiten vom Dokument ab")
@@ -434,7 +453,7 @@ public struct SeriesEditorView: View {
                     }
                     .help("Nimmt die Seite aus der Serie. Das Original bleibt im Archiv; „Rückgängig“ holt sie zurück")
                     .accessibilityIdentifier("editor-remove-page")
-                    Button("Neu erkennen") { Task { await model.reanalyzeScan(documentID: document.id, scanID: page.scanID) } }
+                    Button("Neu erkennen") { Task { await model.reanalyzeScan(documentID: document.id, scanID: page.scanID(of: part)) } }
                         .help("Verwirft die Änderungen von Hand und lässt die Automatik diesen Scan neu auswerten")
                         .accessibilityIdentifier("editor-reanalyze")
                 }
@@ -443,6 +462,57 @@ public struct SeriesEditorView: View {
         } else {
             Text("Wähle eine Seite.").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    /// Bei einer Seite aus zwei Scans: welcher Teil bearbeitet wird, die Naht dazwischen, Tauschen und Trennen.
+    private func joinedControls(_ document: ScanDocument, page: DocumentPage, part: PagePart) -> some View {
+        let joined = page.joined ?? JoinedPart(scanID: page.scanID)
+        func percent(_ value: Double) -> String { String(format: "%+.1f %%", value * 100).replacingOccurrences(of: ".", with: ",") }
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("Diese Seite besteht aus zwei Scans:").font(.callout)
+                ForEach(PagePart.allCases, id: \.self) { choice in
+                    Button(choice == .first ? "Teil 1 (links)" : "Teil 2 (rechts)") { parts[page.id] = choice }
+                        .buttonStyle(.bordered).tint(part == choice ? .accentColor : nil)
+                        .accessibilityValue(part == choice ? "gewählt" : "")
+                        .accessibilityIdentifier("editor-part-\(choice.rawValue)")
+                }
+            }
+            HStack(spacing: 6) {
+                Text("Naht").font(.callout.bold())
+                Text("Abstand").font(.callout)
+                Button { model.setSeam(documentID: document.id, pageID: page.id, gap: joined.gap - 0.005) } label: { Image(systemName: "minus") }
+                    .help("Teile näher zusammenrücken oder überlappen lassen (0,5 % der Breite)").accessibilityLabel("Abstand verkleinern")
+                    .accessibilityIdentifier("editor-seam-gap-minus")
+                Text(percent(joined.gap)).font(.callout.monospacedDigit()).frame(width: 64).accessibilityIdentifier("editor-seam-gap")
+                Button { model.setSeam(documentID: document.id, pageID: page.id, gap: joined.gap + 0.005) } label: { Image(systemName: "plus") }
+                    .help("Teile auseinanderrücken (0,5 % der Breite)").accessibilityLabel("Abstand vergrößern")
+                    .accessibilityIdentifier("editor-seam-gap-plus")
+                Text("Höhe").font(.callout)
+                Button { model.setSeam(documentID: document.id, pageID: page.id, shift: joined.shift - 0.0025) } label: { Image(systemName: "arrow.up") }
+                    .help("Teil 2 nach oben schieben (0,25 % der Höhe)").accessibilityLabel("Teil 2 höher")
+                    .accessibilityIdentifier("editor-seam-shift-up")
+                Text(percent(joined.shift)).font(.callout.monospacedDigit()).frame(width: 64).accessibilityIdentifier("editor-seam-shift")
+                Button { model.setSeam(documentID: document.id, pageID: page.id, shift: joined.shift + 0.0025) } label: { Image(systemName: "arrow.down") }
+                    .help("Teil 2 nach unten schieben (0,25 % der Höhe)").accessibilityLabel("Teil 2 tiefer")
+                    .accessibilityIdentifier("editor-seam-shift-down")
+            }
+            HStack(spacing: 8) {
+                Button("Teile tauschen") { parts[page.id] = nil; model.swapJoinedParts(documentID: document.id, pageID: page.id) }
+                    .help("Vertauscht links und rechts")
+                    .accessibilityIdentifier("editor-join-swap")
+                Button("Trennen") {
+                    parts[page.id] = nil
+                    model.unjoinPage(documentID: document.id, pageID: page.id)
+                }
+                .help("Macht aus der Seite wieder zwei Seiten")
+                .accessibilityIdentifier("editor-join-split")
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("editor-joined-controls")
     }
 
     private func findings(_ review: PageReview) -> some View {
@@ -459,17 +529,19 @@ public struct SeriesEditorView: View {
         .accessibilityIdentifier("editor-findings")
     }
 
-    private func tools(_ document: ScanDocument, page: DocumentPage) -> some View {
-        let c = page.corrections
-        let change: ((inout Corrections) -> Void) -> Void = { model.updatePage(documentID: document.id, pageID: page.id, $0) }
+    private func tools(_ document: ScanDocument, page: DocumentPage, part: PagePart) -> some View {
+        let c = page.corrections(of: part)
+        let change: ((inout Corrections) -> Void) -> Void = { model.updatePage(documentID: document.id, pageID: page.id, part: part, $0) }
+        // Der zweite Teil einer verbundenen Seite ist eine ganze Seite: Er hat keine Bildhälfte.
+        let wholeLike = part == .second || page.region == .whole
         return VStack(alignment: .leading, spacing: 10) {
             Text("Zuschnitt").font(.subheadline.bold())
             HStack {
                 Button("Rahmen ziehen") { previewMode = .crop }
                     .help("Zeigt das Original mit vier Ecken, die du mit der Maus ziehst")
                     .accessibilityIdentifier("editor-crop-edit")
-                Button(page.region == .whole ? "Ganzes Bild" : "Bildhälfte") {
-                    change { $0.setCrop(page.region == .whole ? .full : PageGeometry.half(of: .full, region: page.region)) }
+                Button(wholeLike ? "Ganzes Bild" : "Bildhälfte") {
+                    change { $0.setCrop(wholeLike ? .full : PageGeometry.half(of: .full, region: page.region)) }
                 }
                 .help("Setzt den Zuschnitt auf das ganze Bild bzw. die linke oder rechte Hälfte")
                 .accessibilityIdentifier("editor-crop-half")
@@ -479,12 +551,12 @@ public struct SeriesEditorView: View {
             }
             Text("Ausrichtung").font(.subheadline.bold())
             HStack(spacing: 8) {
-                Button { Task { await model.turnPages(documentID: document.id, pageIDs: [page.id], quarters: -1) } } label: {
+                Button { Task { await model.turnPages(documentID: document.id, pageIDs: [page.id], quarters: -1, parts: [part]) } } label: {
                     Label("Links drehen", systemImage: "rotate.left")
                 }
                 .help("Dreht die Seite um 90° gegen den Uhrzeigersinn, zum Beispiel wenn sie quer gescannt wurde")
                 .accessibilityIdentifier("editor-turn-left")
-                Button { Task { await model.turnPages(documentID: document.id, pageIDs: [page.id], quarters: 1) } } label: {
+                Button { Task { await model.turnPages(documentID: document.id, pageIDs: [page.id], quarters: 1, parts: [part]) } } label: {
                     Label("Rechts drehen", systemImage: "rotate.right")
                 }
                 .help("Dreht die Seite um 90° im Uhrzeigersinn")
@@ -544,14 +616,14 @@ struct PageCard: View {
                 .frame(height: height)
                 badge
             }
-            Text("\(number)\(page.region == .left ? " links" : page.region == .right ? " rechts" : "")")
+            Text("\(number)\(page.region == .left ? " links" : page.region == .right ? " rechts" : "")\(page.joined != nil ? " · 2 Scans" : "")")
                 .font(.caption.monospacedDigit())
         }
         .padding(4)
         .background(selected ? Color.accentColor.opacity(0.15) : (marked ? Color.accentColor.opacity(0.07) : Color.clear))
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(selected ? Color.accentColor : Color.clear, lineWidth: 2))
         
-        .task(id: "\(page.corrections.cacheKey)/\(AppModel.bucket(Int(height * 2.5)))") { image = await model.pagePreview(documentID: documentID, pageID: page.id, maxPixelSize: Int(height * 2.5)) }
+        .task(id: "\(PageGeometry.renderKey(for: page))/\(AppModel.bucket(Int(height * 2.5)))") { image = await model.pagePreview(documentID: documentID, pageID: page.id, maxPixelSize: Int(height * 2.5)) }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Seite \(number)")
         .accessibilityValue(state)
@@ -674,12 +746,14 @@ struct PagePreview: View {
     let model: AppModel
     let documentID: UUID
     let page: DocumentPage
+    /// Bei einer verbundenen Seite der Teil, dessen Original und Zuschnitt gezeigt werden; das Ergebnis zeigt immer die ganze Seite.
+    var part: PagePart = .first
     @Binding var mode: Mode
     @State private var image: CGImage?
 
     /// Wie viele Pixel des Originals ein Pixel der gezeigten Ansicht darstellt, für die Prozentanzeige des Zooms.
     private func pixelScale(of image: CGImage) -> Double {
-        guard mode == .original, let scan = model.scanPixelWidth(documentID: documentID, pageID: page.id) else { return 1 }
+        guard mode == .original, let scan = model.scanPixelWidth(documentID: documentID, pageID: page.id, part: part) else { return 1 }
         return Double(scan) / Double(max(image.width, 1))
     }
 
@@ -691,7 +765,7 @@ struct PagePreview: View {
             .pickerStyle(.segmented).labelsHidden()
             .accessibilityIdentifier("editor-preview-mode")
             if mode == .crop {
-                CropEditor(model: model, documentID: documentID, page: page)
+                CropEditor(model: model, documentID: documentID, page: page, part: part)
                     .frame(minHeight: 280, maxHeight: .infinity)
             } else {
             ZStack {
@@ -701,13 +775,13 @@ struct PagePreview: View {
                         image: image, identifier: "editor-preview", pixelScale: pixelScale(of: image),
                         fullResolution: {
                             switch mode {
-                            case .original: await model.pageOriginalWithCrop(documentID: documentID, pageID: page.id, fullResolution: true)
+                            case .original: await model.pageOriginalWithCrop(documentID: documentID, pageID: page.id, part: part, fullResolution: true)
                             case .result: await model.pagePreview(documentID: documentID, pageID: page.id, fullResolution: true)
                             case .crop: nil
                             }
                         },
-                        fullResolutionKey: "\(page.id)/\(mode.rawValue)/\(page.corrections.cacheKey)")
-                        .id("\(page.id)/\(mode.rawValue)")
+                        fullResolutionKey: "\(page.id)/\(mode.rawValue)/\(part.rawValue)/\(PageGeometry.renderKey(for: page))")
+                        .id("\(page.id)/\(mode.rawValue)/\(part.rawValue)")
                 } else {
                     ProgressView()
                 }
@@ -721,9 +795,9 @@ struct PagePreview: View {
                  : "Ziehe die vier Ecken des Rahmens. Was außerhalb liegt, fällt weg. Die Änderung gilt sofort.")
                 .font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
         }
-        .task(id: "\(page.id)/\(mode.rawValue)/\(page.corrections.cacheKey)") {
+        .task(id: "\(page.id)/\(mode.rawValue)/\(part.rawValue)/\(PageGeometry.renderKey(for: page))") {
             switch mode {
-            case .original: image = await model.pageOriginalWithCrop(documentID: documentID, pageID: page.id)
+            case .original: image = await model.pageOriginalWithCrop(documentID: documentID, pageID: page.id, part: part)
             case .result: image = await model.pagePreview(documentID: documentID, pageID: page.id, maxPixelSize: 1792)
             case .crop: break
             }
@@ -737,11 +811,14 @@ struct CropEditor: View {
     let model: AppModel
     let documentID: UUID
     let page: DocumentPage
+    var part: PagePart = .first
     @State private var image: CGImage?
     /// Der Rahmen während des Ziehens; sonst gilt der gespeicherte.
     @State private var draft: Quad?
 
-    private var stored: Quad { PageGeometry.effectiveCorrections(for: page).crop.quad ?? .full }
+    private var stored: Quad {
+        (part == .second ? page.corrections(of: .second) : PageGeometry.effectiveCorrections(for: page)).crop.quad ?? .full
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -775,7 +852,7 @@ struct CropEditor: View {
                                 .onEnded { value in
                                     let result = corner.moved(in: draft ?? stored, to: Self.normalized(value.location, rect))
                                     draft = nil
-                                    model.updatePage(documentID: documentID, pageID: page.id) { $0.setCrop(result) }
+                                    model.updatePage(documentID: documentID, pageID: page.id, part: part) { $0.setCrop(result) }
                                 })
                             .accessibilityLabel("Ecke \(corner.rawValue)")
                             .accessibilityIdentifier("editor-crop-handle-\(corner.rawValue)")
@@ -786,7 +863,7 @@ struct CropEditor: View {
             }
             .coordinateSpace(name: "crop-editor")
         }
-        .task(id: page.id) { image = await model.pageOriginal(documentID: documentID, pageID: page.id) }
+        .task(id: "\(page.id)/\(part.rawValue)") { image = await model.pageOriginal(documentID: documentID, pageID: page.id, part: part) }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("editor-crop-editor")
     }

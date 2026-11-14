@@ -32,6 +32,14 @@ public enum PageGeometry {
         return corrections
     }
 
+    /// Ändert sich dieser Schlüssel, sieht die gerechnete Seite anders aus: Korrekturen des ersten Teils, bei einer verbundenen Seite
+    /// auch die des zweiten, sein Scan und die Naht. Für Zwischenspeicher und die Frage, ob eine Vorschau neu gerechnet werden muss.
+    public static func renderKey(for page: DocumentPage) -> String {
+        let first = effectiveCorrections(for: page).cacheKey
+        guard let joined = page.joined else { return first }
+        return first + "|" + joined.corrections.cacheKey + "|\(joined.scanID)|\(joined.gap)|\(joined.shift)"
+    }
+
     /// Die linke oder rechte Hälfte eines Vierecks, geteilt in der Mitte der oberen und unteren Kante.
     public static func half(of quad: Quad, region: PageRegion) -> Quad {
         func mid(_ a: NormalizedPoint, _ b: NormalizedPoint) -> NormalizedPoint {

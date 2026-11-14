@@ -141,6 +141,45 @@ struct SerieBearbeitenOberflaechenTests {
         #expect(s.app.wait { s.app.string("editor-batch-note")?.contains("nach rechts") == true })
     }
 
+    @Test func twoMarkedPagesCanBeJoinedIntoOnePageWithSeamPartsSwapAndSplit() throws {
+        let s = try recordedSeries(scans: 2); defer { s.close() }
+        func joined() -> [String: Any]? { s.pages.first?["joined"] as? [String: Any] }
+        func part2Turns() -> Int? { (joined()?["corrections"] as? [String: Any])?["quarterTurns"] as? Int }
+        openEditor(s)
+        #expect(s.app.wait { s.app.element("editor-page-2") != nil })
+        #expect(s.app.element("editor-batch-join") == nil)
+
+        #expect(s.app.press("editor-mark-1")); #expect(s.app.press("editor-mark-2"))
+        #expect(s.app.wait { s.app.element("editor-batch-join") != nil }, "Mit genau zwei markierten Seiten gibt es „Zu einer Seite verbinden“")
+        #expect(s.app.press("editor-batch-join"))
+        #expect(s.app.wait(timeout: 15) { s.pages.count == 1 && joined() != nil }, "Aus zwei Seiten sollte eine werden: \(s.pages.count)")
+        #expect(s.app.wait { s.app.element("editor-page-2") == nil }, "Die zweite Seite ist aus dem Raster")
+        #expect(s.app.wait { s.app.element("editor-joined-controls") != nil }, "Die Steuerung der Naht erscheint")
+        #expect(s.app.wait { s.app.string("editor-undo-note") == "Zwei Seiten wurden zu einer verbunden." })
+
+        // Zweiten Teil wählen und links drehen: wirkt nur auf ihn.
+        #expect(s.app.press("editor-part-second"))
+        #expect(s.app.press("editor-turn-left"))
+        #expect(s.app.wait(timeout: 20) { part2Turns() == 3 }, "Der zweite Teil ist nicht gedreht: \(String(describing: part2Turns()))")
+        #expect((s.pages.first?["corrections"] as? [String: Any])?["quarterTurns"] as? Int == 0, "Der erste Teil bleibt aufrecht")
+
+        // Naht: Abstand vergrößern, Höhe verschieben.
+        #expect(s.app.press("editor-seam-gap-plus"))
+        #expect(s.app.wait(timeout: 10) { (joined()?["gap"] as? Double).map { abs($0 - 0.005) < 1e-9 } == true }, "Abstand: \(String(describing: joined()?["gap"]))")
+        #expect(s.app.press("editor-seam-shift-down"))
+        #expect(s.app.wait(timeout: 10) { (joined()?["shift"] as? Double).map { abs($0 - 0.0025) < 1e-9 } == true })
+
+        // Tauschen: Der zweite Scan ist danach der erste.
+        let secondScan = joined()?["scanID"] as? String
+        #expect(s.app.press("editor-join-swap"))
+        #expect(s.app.wait(timeout: 10) { s.pages.first?["scanID"] as? String == secondScan }, "Nach dem Tauschen ist der andere Scan der erste")
+
+        // Trennen: wieder zwei Seiten.
+        #expect(s.app.press("editor-join-split"))
+        #expect(s.app.wait(timeout: 10) { s.pages.count == 2 && s.pages.first?["joined"] == nil }, "Seiten: \(s.pages.count)")
+        #expect(s.app.wait { s.app.element("editor-page-2") != nil })
+    }
+
     @Test func changingTheRotationInTheEditorIsSavedAsManualAndReopensThePage() throws {
         let s = try recordedSeries(scans: 1); defer { s.close() }
         openEditor(s)

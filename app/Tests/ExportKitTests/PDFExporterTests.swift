@@ -56,6 +56,37 @@ struct PDFExporterTests {
         #expect(pageSizes(f.pdf) == [CGSize(width: 160, height: 120)])
     }
 
+    @Test func aPageFromTwoScansBecomesOneWidePdfPage() async throws {
+        let f = makeFixture(); defer { f.cleanup() }
+        let left = try await storeScan(f.store, width: 200, height: 300)
+        let right = try await storeScan(f.store, width: 150, height: 300)
+        var doc = ScanDocument(title: "Plan")
+        doc.append(DocumentPage(scanID: left.id)); doc.append(DocumentPage(scanID: right.id))
+        let joinedOK = doc.joinPages(first: doc.pages[0].id, second: doc.pages[1].id)
+        #expect(joinedOK)
+
+        try PDFExporter(store: f.store).export(doc, to: f.pdf, options: ExportOptions(dpi: 72))
+        #expect(pageSizes(f.pdf) == [CGSize(width: 350, height: 300)], "Eine Seite, so breit wie beide Teile zusammen")
+
+        // Ein Spalt macht die Seite breiter, eine Drehung des zweiten Teils vertauscht dessen Breite und Höhe.
+        doc.pages[0].joined?.gap = 0.1
+        try PDFExporter(store: f.store).export(doc, to: f.pdf, options: ExportOptions(dpi: 72))
+        #expect(pageSizes(f.pdf) == [CGSize(width: 370, height: 300)], "10 % von 200 Punkten Abstand")
+        doc.pages[0].joined?.gap = 0
+        doc.pages[0].joined?.corrections.turn(by: 1)
+        try PDFExporter(store: f.store).export(doc, to: f.pdf, options: ExportOptions(dpi: 72))
+        #expect(pageSizes(f.pdf) == [CGSize(width: 500, height: 300)], "Der zweite Teil quer: 300 breit statt 150")
+    }
+
+    @Test func aJoinedPageWithAMissingSecondScanFailsWithAClearError() async throws {
+        let f = makeFixture(); defer { f.cleanup() }
+        let left = try await storeScan(f.store)
+        var doc = ScanDocument(title: "Plan")
+        doc.append(DocumentPage(scanID: left.id, joined: JoinedPart(scanID: UUID())))
+        #expect(throws: (any Error).self) { try PDFExporter(store: f.store).export(doc, to: f.pdf) }
+        #expect(!FileManager.default.fileExists(atPath: f.pdf.path), "Keine halbe Datei")
+    }
+
     @Test func downscalingKeepsPageSize() async throws {
         let f = makeFixture(); defer { f.cleanup() }
         let scan = try await storeScan(f.store)

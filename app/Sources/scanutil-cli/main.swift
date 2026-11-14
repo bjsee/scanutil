@@ -161,6 +161,47 @@ do {
             }
             print(line)
         }
+    case "join":
+        // scanutil-cli join <Archivordner> <Scan 1> <Scan 2> <ausgabe.png> [--turn1 N] [--turn2 N] [--gap G] [--shift S]
+        // Rechnet eine Seite aus zwei Scans (der zweite rechts vom ersten) nur im Speicher, mit der automatischen Analyse jedes Scans.
+        // N = Vierteldrehungen im Uhrzeigersinn (3 = links drehen). Das Archiv bleibt unberührt. Die Scan-IDs genügen als Anfang.
+        guard args.count >= 5 else { fail("Aufruf: join <Archivordner> <Scan 1> <Scan 2> <ausgabe.png> [--turn1 N] [--turn2 N] [--gap G] [--shift S]") }
+        let store = ArchiveStore(root: URL(fileURLWithPath: args[1], isDirectory: true))
+        let records = try store.allRecords()
+        func record(_ prefix: String) -> ScanRecord {
+            guard let r = records.first(where: { $0.id.uuidString.lowercased().hasPrefix(prefix.lowercased()) }) else { fail("Scan nicht gefunden: \(prefix)") }
+            return r
+        }
+        let r1 = record(args[2]), r2 = record(args[3])
+        func load(_ r: ScanRecord) -> CGImage {
+            guard let source = CGImageSourceCreateWithURL(store.originalURL(for: r) as CFURL, nil),
+                  let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { fail("Original nicht lesbar: \(r.id)") }
+            return image
+        }
+        let images = [r1.id: load(r1), r2.id: load(r2)]
+        func corrections(_ r: ScanRecord, turns: Int) -> Corrections {
+            var c = ImageAnalyzer.corrections(from: ImageAnalyzer.analyze(images[r.id]!))
+            c.quarterTurns = turns
+            c.tone = ToneCorrection(enabled: true)
+            return c
+        }
+        let turn1 = Int(option("--turn1", in: args) ?? "0") ?? 0, turn2 = Int(option("--turn2", in: args) ?? "0") ?? 0
+        var page = DocumentPage(scanID: r1.id, corrections: corrections(r1, turns: turn1))
+        page.joined = JoinedPart(scanID: r2.id, corrections: corrections(r2, turns: turn2),
+                                 gap: Double(option("--gap", in: args) ?? "0") ?? 0, shift: Double(option("--shift", in: args) ?? "0") ?? 0)
+        let t0 = ContinuousClock.now
+        for (n, c, id) in [("Teil 1", page.corrections, r1.id), ("Teil 2", page.joined!.corrections, r2.id)] {
+            if let part = CorrectionRenderer.render(images[id]!, corrections: c) {
+                print("\(n) allein: \(part.width)x\(part.height), Zuschnitt \(c.crop.quad.map { "\($0.topLeft) … \($0.bottomRight)" } ?? "keiner")")
+            }
+        }
+        guard let result = PageRenderer.render(page, image: { images[$0] }),
+              let d = CGImageDestinationCreateWithURL(URL(fileURLWithPath: args[4]) as CFURL, UTType.png.identifier as CFString, 1, nil) else { fail("Rechnen fehlgeschlagen") }
+        CGImageDestinationAddImage(d, result, nil); CGImageDestinationFinalize(d)
+        for (n, c) in [("Teil 1", page.corrections), ("Teil 2", page.joined!.corrections)] {
+            print("\(n): Zuschnitt \(c.crop.enabled ? "an" : "aus"), Drehung \(String(format: "%+.2f", c.rotation.degrees))° (\(c.rotation.enabled ? "an" : "aus")), Vierteldrehungen \(c.quarterTurns)")
+        }
+        print("Seite: \(result.width)x\(result.height), gerechnet in \(ContinuousClock.now - t0)")
     case "usb-descriptor":
         // Gibt die Konfigurationsbeschreibung des Scanners als Hexzeichen aus, zur Untersuchung der UVC-Fähigkeiten.
         var bytes = [UInt8](repeating: 0, count: 4096)

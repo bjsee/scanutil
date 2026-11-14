@@ -638,7 +638,7 @@ public final class AppModel {
         undoableDeletion = nil
         guard let document = savedDocuments.first(where: { $0.id == id }) else { return }
         var seen = Set<UUID>()
-        let scanIDs = document.pages.map(\.scanID).filter { seen.insert($0).inserted }
+        let scanIDs = document.pages.flatMap(\.scanIDs).filter { seen.insert($0).inserted }
         do { try store.deleteDocument(id: id) } catch {
             post(.error, "Die Serie konnte nicht gelöscht werden: \(error.localizedDescription)")
             return
@@ -682,7 +682,7 @@ public final class AppModel {
 
     /// Die Serien, in denen ein Scan vorkommt. Ein gelöschter Scan verschwindet aus allen.
     public func documents(containing scanID: UUID) -> [ScanDocument] {
-        savedDocuments.filter { $0.pages.contains { $0.scanID == scanID } }
+        savedDocuments.filter { $0.pages.contains { $0.uses(scan: scanID) } }
     }
 
     /// Löscht einen Scan: Original, Eintrag und Korrekturen (in den Papierkorb, wenn die App ihn übergeben hat). Er verschwindet
@@ -707,10 +707,14 @@ public final class AppModel {
 
         // Seiten, die auf die gelöschten Scans verweisen, aus allen Serien nehmen. Die aktuellste Fassung zählt: die laufende
         // Serie oder das angesehene Dokument kann neuer sein als die Liste.
-        for listed in savedDocuments where listed.pages.contains(where: { gone.contains($0.scanID) }) {
+        for listed in savedDocuments where listed.pages.contains(where: { $0.scanIDs.contains { gone.contains($0) } }) {
             var document = [series, openedDocument].compactMap { $0 }.first { $0.id == listed.id } ?? listed
-            for page in document.pages where gone.contains(page.scanID) { pagePreviews[page.id] = nil }
+            for page in document.pages where page.scanIDs.contains(where: { gone.contains($0) }) { pagePreviews[page.id] = nil }
             document.pages.removeAll { gone.contains($0.scanID) }
+            // Fehlt nur der zweite Scan einer verbundenen Seite, bleibt die Seite mit ihrem ersten Teil.
+            for index in document.pages.indices where document.pages[index].joined.map({ gone.contains($0.scanID) }) == true {
+                document.pages[index].joined = nil
+            }
             document.revision += 1
             commit(document)
         }
@@ -732,13 +736,17 @@ public final class AppModel {
         let store = self.store, size = thumbnailSize
         var seen = Set<UUID>()
         var ids: [UUID] = []
-        for page in document.pages where seen.insert(page.scanID).inserted { ids.append(page.scanID) }
+        for page in document.pages { for id in page.scanIDs where seen.insert(id).inserted { ids.append(id) } }
         // Einzelseiten tragen ihre Korrekturen im Dokument, Doppelseiten je Seite.
         var wholePageCorrections: [UUID: Corrections] = [:]
         var wholePageAnalysis: [UUID: PageAnalysis] = [:]
         for page in document.pages where page.region == .whole {
             wholePageCorrections[page.scanID] = page.corrections
             if let analysis = page.analysis { wholePageAnalysis[page.scanID] = analysis }
+            if let part = page.joined {
+                wholePageCorrections[part.scanID] = part.corrections
+                if let analysis = part.analysis { wholePageAnalysis[part.scanID] = analysis }
+            }
         }
         let corrections = wholePageCorrections, analyses = wholePageAnalysis
         let items: [ScanItem] = await Task.detached {
@@ -890,11 +898,16 @@ public final class AppModel {
 
     /// Ändert die Korrekturen einer Seite einer beliebigen Serie und speichert sie, auch wenn die Serie gerade nicht angezeigt wird.
     /// Bei einer Einzelseite gelten dieselben Korrekturen für den Scan in der Miniaturleiste.
-    public func updatePage(documentID: UUID, pageID: UUID, _ change: (inout Corrections) -> Void) {
+    public func updatePage(documentID: UUID, pageID: UUID, part: PagePart = .first, _ change: (inout Corrections) -> Void) {
         guard var document = latestDocument(id: documentID), document.page(id: pageID) != nil else { return }
-        document.updateCorrections(pageID: pageID, change)
+        document.updateCorrections(pageID: pageID, part: part, change)
         guard let page = document.page(id: pageID) else { return }
         commit(document)
+        if part == .second {
+            // Der zweite Teil einer verbundenen Seite trägt seine Korrekturen in der Seite; die Ansichten der Seite rechnen neu.
+            if shownDocument?.id == documentID { for id in page.scanIDs { refreshPagePreviews(scanID: id) } }
+            return
+        }
         if page.region == .whole {
             try? store.saveCorrections(page.corrections, for: page.scanID)
             if let index = scans.firstIndex(where: { $0.id == page.scanID }) {
@@ -909,17 +922,28 @@ public final class AppModel {
     /// oder ganzes Bild) und ihre Korrekturen; wer nichts zu ändern hat, lässt sie unberührt. Gibt zurück, bei wie vielen Seiten sich
     /// etwas geändert hat. Bei einer Einzelseite gelten dieselben Korrekturen für den Scan in der Miniaturleiste (wie `updatePage`).
     @discardableResult
-    public func updatePages(documentID: UUID, pageIDs: [UUID], _ change: (DocumentPage, inout Corrections) -> Void) -> Int {
+    public func updatePages(documentID: UUID, pageIDs: [UUID], parts: [PagePart] = [.first, .second],
+                            _ change: (DocumentPage, inout Corrections) -> Void) -> Int {
         guard var document = latestDocument(id: documentID) else { return 0 }
         var changed: [DocumentPage] = []
         for id in pageIDs {
             guard let page = document.page(id: id) else { continue }
-            _ = document.updateCorrections(pageID: id) { change(page, &$0) }
+            if parts.contains(.first) { _ = document.updateCorrections(pageID: id) { change(page, &$0) } }
+            // Bei einer verbundenen Seite wirkt es auch auf den zweiten Teil, der als ganze Seite gilt.
+            if parts.contains(.second), let part = page.joined {
+                let pseudo = DocumentPage(id: page.id, scanID: part.scanID, corrections: part.corrections)
+                _ = document.updateCorrections(pageID: id, part: .second) { change(pseudo, &$0) }
+            }
             // `updateCorrections` zählt immer; geändert ist, was sich im Inhalt unterscheidet (ohne den Zähler der Korrekturen).
             guard let after = document.page(id: id) else { continue }
-            var a = after.corrections, b = page.corrections
-            a.revision = 0; b.revision = 0
-            if a == b { document.pages[document.pages.firstIndex { $0.id == id }!].corrections = page.corrections } else { changed.append(after) }
+            func content(_ c: Corrections) -> Corrections { var c = c; c.revision = 0; return c }
+            let firstSame = content(after.corrections) == content(page.corrections)
+            let secondSame = content(after.joined?.corrections ?? .none) == content(page.joined?.corrections ?? .none)
+            if firstSame && secondSame {
+                let index = document.pages.firstIndex { $0.id == id }!
+                document.pages[index].corrections = page.corrections
+                document.pages[index].joined = page.joined
+            } else { changed.append(after) }
         }
         guard !changed.isEmpty else { return 0 }
         commit(document)
@@ -930,7 +954,7 @@ public final class AppModel {
                 persistAndRender(index: index)
             }
         }
-        if shownDocument?.id == documentID { for scanID in Set(changed.map(\.scanID)) { refreshPagePreviews(scanID: scanID) } }
+        if shownDocument?.id == documentID { for scanID in Set(changed.flatMap(\.scanIDs)) { refreshPagePreviews(scanID: scanID) } }
         return changed.count
     }
 
@@ -951,7 +975,7 @@ public final class AppModel {
         guard var document = latestDocument(id: documentID) else { return }
         var changed = false
         for index in document.pages.indices where pageIDs.contains(document.pages[index].id) {
-            let key: String? = reviewed ? document.pages[index].corrections.cacheKey : nil
+            let key: String? = reviewed ? document.pages[index].reviewKey : nil
             if document.pages[index].reviewedKey != key { document.pages[index].reviewedKey = key; changed = true }
         }
         guard changed else { return }
@@ -961,6 +985,18 @@ public final class AppModel {
 
     /// Der Stand einer Serie vor dem letzten Entfernen von Seiten, damit sich das rückgängig machen lässt.
     public var undoablePageRemoval: ScanDocument?
+    /// Was die Zeile mit „Rückgängig“ sagt, etwa „2 Seiten wurden entfernt.“ oder „Zwei Seiten wurden verbunden.“
+    public var undoNote: String?
+
+    /// Räumt Namen, Ziele und Dateinamen entfernter Dokumente der Schnellablage aus den Angaben (Rückgängig stellt den ganzen Stand her).
+    private static func pruneInbox(_ document: inout ScanDocument) {
+        guard var inbox = document.inbox else { return }
+        let alive = Set(document.groups.map { $0.id.uuidString })
+        inbox.names = inbox.names.filter { alive.contains($0.key) }
+        inbox.targets = inbox.targets.filter { alive.contains($0.key) }
+        inbox.fileNames = inbox.fileNames.filter { alive.contains($0.key) }
+        document.inbox = inbox
+    }
 
     /// Nimmt Seiten aus der Serie. Die Originale bleiben im Archiv; die Seiten lassen sich mit `undoPageRemoval` zurückholen.
     /// Gibt zurück, wie viele Seiten entfernt wurden.
@@ -971,17 +1007,51 @@ public final class AppModel {
         var count = 0
         for id in pageIDs where document.removePage(id: id) != nil { count += 1 }
         guard count > 0 else { return 0 }
-        // Namen, Ziele und Dateinamen entfernter Dokumente der Schnellablage gehören nicht mehr dazu (Rückgängig stellt den ganzen Stand her).
-        if var inbox = document.inbox {
-            let alive = Set(document.groups.map { $0.id.uuidString })
-            inbox.names = inbox.names.filter { alive.contains($0.key) }
-            inbox.targets = inbox.targets.filter { alive.contains($0.key) }
-            inbox.fileNames = inbox.fileNames.filter { alive.contains($0.key) }
-            document.inbox = inbox
-        }
+        Self.pruneInbox(&document)
         undoablePageRemoval = before
+        undoNote = count == 1 ? "Eine Seite wurde entfernt." : "\(count) Seiten wurden entfernt."
         commit(document)
         return count
+    }
+
+    /// Fügt zwei Seiten zu einer zusammen (zwei Aufnahmen eines großen Plans): Der Scan der zweiten wird der rechte Teil der ersten.
+    /// Die zweite Seite verschwindet aus der Liste; „Rückgängig“ und `unjoinPage` bringen sie zurück. Gibt zurück, ob es ging.
+    @discardableResult
+    public func joinPages(documentID: UUID, first: UUID, second: UUID) -> Bool {
+        guard var document = latestDocument(id: documentID) else { return false }
+        let before = document
+        guard document.joinPages(first: first, second: second) else { return false }
+        pagePreviews[second] = nil
+        Self.pruneInbox(&document)
+        undoablePageRemoval = before
+        undoNote = "Zwei Seiten wurden zu einer verbunden."
+        commit(document)
+        return true
+    }
+
+    /// Trennt eine verbundene Seite: Der zweite Teil wird wieder eine eigene Seite hinter der ersten.
+    @discardableResult
+    public func unjoinPage(documentID: UUID, pageID: UUID) -> Bool {
+        guard var document = latestDocument(id: documentID), document.unjoinPage(id: pageID) else { return false }
+        commit(document)
+        return true
+    }
+
+    /// Vertauscht links und rechts einer verbundenen Seite.
+    @discardableResult
+    public func swapJoinedParts(documentID: UUID, pageID: UUID) -> Bool {
+        guard var document = latestDocument(id: documentID), document.swapJoinedParts(id: pageID) else { return false }
+        commit(document)
+        return true
+    }
+
+    /// Stellt die Naht einer verbundenen Seite ein: Abstand zwischen den Teilen (Anteil der Breite des ersten, negativ überlappt) und
+    /// Höhenversatz des zweiten (Anteil der Höhe des ersten). Beides auf ±20 % begrenzt.
+    @discardableResult
+    public func setSeam(documentID: UUID, pageID: UUID, gap: Double? = nil, shift: Double? = nil) -> Bool {
+        guard var document = latestDocument(id: documentID), document.setSeam(pageID: pageID, gap: gap, shift: shift) else { return false }
+        commit(document)
+        return true
     }
 
     /// Stellt die Serie wieder her, wie sie vor dem letzten Entfernen von Seiten war.
@@ -1013,15 +1083,31 @@ public final class AppModel {
         let result = await Task.detached { analyze(image) }.value
         analyzing.remove(scanID)
         guard var document = latestDocument(id: documentID) else { return }
-        for index in document.pages.indices where document.pages[index].scanID == scanID && document.pages[index].region == .whole {
-            document.pages[index].analysis = result.analysis
-            document.pages[index].reviewedKey = nil                       // neu erkannt heißt: wieder ungeprüft
-            let adjusted = document.effectiveProfile.adjusted(result.corrections)
-            document.updateCorrections(pageID: document.pages[index].id) { $0 = adjusted }
+        var turnedPages: [UUID] = []
+        for index in document.pages.indices {
+            let pageID = document.pages[index].id
+            // Die Ausrichtung (Vierteldrehung) kennt die Analyse nicht und bleibt; ist die Seite quer, wird die Schräglage danach neu gemessen.
+            if document.pages[index].scanID == scanID && document.pages[index].region == .whole {
+                document.pages[index].analysis = result.analysis
+                document.pages[index].reviewedKey = nil                       // neu erkannt heißt: wieder ungeprüft
+                let adjusted = document.effectiveProfile.adjusted(result.corrections)
+                document.updateCorrections(pageID: pageID) { var a = adjusted; a.quarterTurns = $0.quarterTurns; $0 = a }
+                if document.pages[index].corrections.quarterTurns != 0 { turnedPages.append(pageID) }
+            }
+            if document.pages[index].joined?.scanID == scanID {
+                document.pages[index].joined?.analysis = result.analysis
+                document.pages[index].reviewedKey = nil
+                let adjusted = document.effectiveProfile.adjusted(result.corrections)
+                document.updateCorrections(pageID: pageID, part: .second) { var a = adjusted; a.quarterTurns = $0.quarterTurns; $0 = a }
+                if document.pages[index].joined?.corrections.quarterTurns != 0 { turnedPages.append(pageID) }
+            }
         }
         document.revision += 1
         commit(document)
-        try? self.store.saveCorrections(document.effectiveProfile.adjusted(result.corrections), for: scanID)
+        var forScan = document.effectiveProfile.adjusted(result.corrections)
+        forScan.quarterTurns = document.pages.first { $0.scanID == scanID && $0.region == .whole }?.corrections.quarterTurns ?? 0
+        try? self.store.saveCorrections(forScan, for: scanID)
+        if !turnedPages.isEmpty { await remeasureGeometry(documentID: documentID, pageIDs: turnedPages) }
         if let index = scans.firstIndex(where: { $0.id == scanID }) {
             apply(result.corrections, warnings: result.warnings, analysis: result.analysis, at: index)
         } else {
@@ -1036,39 +1122,77 @@ public final class AppModel {
     /// Gemerkt wird je Seite, Größe und Korrekturstand. `nil`, wenn das Original fehlt.
     public func pagePreview(documentID: UUID, pageID: UUID, maxPixelSize: Int = 512, fullResolution: Bool = false) async -> CGImage? {
         guard let page = latestDocument(id: documentID)?.page(id: pageID) else { return nil }
-        let corrections = PageGeometry.effectiveCorrections(for: page)
+        let renderKey = PageGeometry.renderKey(for: page)
         let size = Self.bucket(maxPixelSize)
         let key = "\(pageID.uuidString)/\(fullResolution ? 0 : size)"
-        if !fullResolution, let cached = pagePreviewCache[key], cached.key == corrections.cacheKey { return cached.image }
-        let store = self.store, scanID = page.scanID
+        if !fullResolution, let cached = pagePreviewCache[key], cached.key == renderKey { return cached.image }
+        let store = self.store
         let image: CGImage? = await Task.detached {
-            guard let record = try? store.load(id: scanID) else { return nil }
-            let source: CGImage?
-            if fullResolution { source = Self.loadOriginal(store.originalURL(for: record)) }
-            else { source = store.thumbnail(for: record, maxPixelSize: Self.scanSize(forPage: size, corrections: corrections, record: record)) }
-            return source.flatMap { CorrectionRenderer.render($0, corrections: corrections) }
+            Self.renderPage(page, store: store, pageSize: size, fullResolution: fullResolution)
         }.value
-        if let image, !fullResolution { pagePreviewCache[key] = (corrections.cacheKey, image) }
+        if let image, !fullResolution { pagePreviewCache[key] = (renderKey, image) }
         return image
+    }
+
+    /// Rechnet eine Seite aus den Originalen im Archiv: die längste Kante der fertigen Seite etwa `size` Punkte, oder das Original in
+    /// voller Auflösung. Bei einer verbundenen Seite werden beide Scans mit demselben Anteil ihres Originals gelesen, damit die Teile
+    /// im selben Maßstab nebeneinander liegen.
+    nonisolated static func renderPage(_ page: DocumentPage, store: ArchiveStore, pageSize size: Int, fullResolution: Bool) -> CGImage? {
+        var records: [UUID: ScanRecord] = [:]
+        for id in page.scanIDs {
+            guard let record = try? store.load(id: id) else { return nil }
+            records[id] = record
+        }
+        let effective = PageGeometry.effectiveCorrections(for: page)
+        var fraction: Double?
+        if !fullResolution, let part = page.joined, let a = records[page.scanID], let b = records[part.scanID] {
+            fraction = joinedFraction(forPage: size, first: (effective, a), second: (part.corrections, b), gap: part.gap, shift: part.shift)
+        }
+        return PageRenderer.render(page) { id in
+            guard let record = records[id] else { return nil }
+            if fullResolution { return loadOriginal(store.originalURL(for: record)) }
+            if let fraction {
+                return store.thumbnail(for: record, maxPixelSize: Int((fraction * Double(max(record.original.width, record.original.height))).rounded(.up)))
+            }
+            return store.thumbnail(for: record, maxPixelSize: scanSize(forPage: size, corrections: effective, record: record))
+        }
+    }
+
+    /// Mit welchem Anteil ihrer Originale die beiden Scans einer verbundenen Seite gelesen werden müssen, damit die ganze Seite an der
+    /// längsten Kante etwa `page` Punkte hat (höchstens 1: nie größer als die Originale).
+    nonisolated static func joinedFraction(forPage page: Int, first: (Corrections, ScanRecord), second: (Corrections, ScanRecord),
+                                           gap: Double, shift: Double) -> Double {
+        func size(_ corrections: Corrections, _ record: ScanRecord) -> (w: Double, h: Double) {
+            var w = Double(record.original.width), h = Double(record.original.height)
+            if corrections.enabled, corrections.crop.enabled, let q = corrections.crop.quad {
+                let xs = [q.topLeft.x, q.topRight.x, q.bottomRight.x, q.bottomLeft.x], ys = [q.topLeft.y, q.topRight.y, q.bottomRight.y, q.bottomLeft.y]
+                w *= (xs.max() ?? 1) - (xs.min() ?? 0); h *= (ys.max() ?? 1) - (ys.min() ?? 0)
+            }
+            return corrections.quarterTurns % 2 == 1 ? (h, w) : (w, h)
+        }
+        let a = size(first.0, first.1), b = size(second.0, second.1)
+        let width = a.w * (1 + max(0, gap)) + b.w, height = max(a.h, b.h) * (1 + abs(shift))
+        return min(1, Double(page) * 1.05 / max(width, height, 1))
     }
 
     /// Das Original des Scans mit dem Zuschnitt, den die App für diese Seite verwendet (grün; orange, wenn die Automatik unsicher war
     /// oder nur die Bildhälfte gilt) und bei einer Doppelseite dem Rahmen der Nachbarseite (gestrichelt). Außerhalb des Rahmens
     /// ist das Bild abgedunkelt. `nil`, wenn das Original fehlt.
     /// - Parameter maxPixelSize: Die längste Kante des ganzen Scans. `fullResolution` liest stattdessen das ganze Original.
-    public func pageOriginalWithCrop(documentID: UUID, pageID: UUID, maxPixelSize: Int = 2400, fullResolution: Bool = false) async -> CGImage? {
+    public func pageOriginalWithCrop(documentID: UUID, pageID: UUID, part: PagePart = .first, maxPixelSize: Int = 2400,
+                                     fullResolution: Bool = false) async -> CGImage? {
         guard let document = latestDocument(id: documentID), let page = document.page(id: pageID) else { return nil }
-        let effective = PageGeometry.effectiveCorrections(for: page)
+        let effective = part == .second ? page.corrections(of: .second) : PageGeometry.effectiveCorrections(for: page)
         var frames: [CropOverlay.Frame] = []
         if let quad = effective.crop.quad {
-            let own = page.corrections.crop
+            let own = page.corrections(of: part).crop
             let sure = own.enabled && own.quad != nil && (own.source == .manual || (own.confidence ?? 0) >= PageReviewer.defaultThreshold)
             frames.append(.init(quad: quad, style: sure ? .used : .uncertain))
         }
-        for other in document.pages where other.scanID == page.scanID && other.id != page.id && other.region != .whole {
+        for other in document.pages where part == .first && other.scanID == page.scanID && other.id != page.id && other.region != .whole {
             if let quad = PageGeometry.effectiveCorrections(for: other).crop.quad { frames.append(.init(quad: quad, style: .neighbour)) }
         }
-        let store = self.store, scanID = page.scanID
+        let store = self.store, scanID = page.scanID(of: part)
         return await Task.detached {
             guard let record = try? store.load(id: scanID) else { return nil }
             let image = fullResolution ? Self.loadOriginal(store.originalURL(for: record)) : store.thumbnail(for: record, maxPixelSize: maxPixelSize)
@@ -1077,9 +1201,9 @@ public final class AppModel {
     }
 
     /// Das Original des Scans ohne Rahmen, zum Ziehen des Zuschnitts. `nil`, wenn es fehlt.
-    public func pageOriginal(documentID: UUID, pageID: UUID, maxPixelSize: Int = 2000) async -> CGImage? {
+    public func pageOriginal(documentID: UUID, pageID: UUID, part: PagePart = .first, maxPixelSize: Int = 2000) async -> CGImage? {
         guard let page = latestDocument(id: documentID)?.page(id: pageID) else { return nil }
-        let store = self.store, scanID = page.scanID
+        let store = self.store, scanID = page.scanID(of: part)
         return await Task.detached {
             guard let record = try? store.load(id: scanID) else { return nil }
             return store.thumbnail(for: record, maxPixelSize: maxPixelSize)
@@ -1087,9 +1211,9 @@ public final class AppModel {
     }
 
     /// Breite des Originals in Pixeln, für die Prozentanzeige des Zooms.
-    public func scanPixelWidth(documentID: UUID, pageID: UUID) -> Int? {
+    public func scanPixelWidth(documentID: UUID, pageID: UUID, part: PagePart = .first) -> Int? {
         guard let page = latestDocument(id: documentID)?.page(id: pageID) else { return nil }
-        return try? store.load(id: page.scanID).original.width
+        return try? store.load(id: page.scanID(of: part)).original.width
     }
 
     nonisolated private static func loadOriginal(_ url: URL) -> CGImage? {
@@ -1135,48 +1259,58 @@ public final class AppModel {
         return changed
     }
 
-    /// Dreht Seiten um Vierteldrehungen im Uhrzeigersinn (negativ: gegen den Uhrzeigersinn), für quer gescannte Seiten. Danach werden
-    /// Schräglage und Wölbung auf der aufrechten Seite neu gemessen: Die alten Werte galten für die alte Ausrichtung. Was von Hand
-    /// eingestellt ist (Drehwinkel, Wölbung), bleibt. Gibt zurück, bei wie vielen Seiten die Ausrichtung geändert wurde.
+    /// Dreht Seiten um Vierteldrehungen im Uhrzeigersinn (negativ: gegen den Uhrzeigersinn), für quer gescannte Seiten. Bei einer
+    /// verbundenen Seite wirkt es auf die genannten Teile (voreingestellt beide). Danach werden Schräglage und Wölbung auf der
+    /// aufrechten Seite neu gemessen: Die alten Werte galten für die alte Ausrichtung. Was von Hand eingestellt ist (Drehwinkel,
+    /// Wölbung), bleibt. Gibt zurück, bei wie vielen Seiten die Ausrichtung geändert wurde.
     @discardableResult
-    public func turnPages(documentID: UUID, pageIDs: [UUID], quarters: Int) async -> Int {
+    public func turnPages(documentID: UUID, pageIDs: [UUID], quarters: Int, parts: [PagePart] = [.first, .second]) async -> Int {
         guard Corrections.normalized(quarters) != 0 else { return 0 }
-        let turned = updatePages(documentID: documentID, pageIDs: pageIDs) { _, c in
+        let turned = updatePages(documentID: documentID, pageIDs: pageIDs, parts: parts) { _, c in
             c.turn(by: quarters)
             // Die alte Messung gilt nicht mehr; bis die neue da ist, wirkt sie nicht.
             if c.rotation.source == .automatic { c.rotation = RotationCorrection(degrees: 0, enabled: false, source: .automatic, confidence: nil) }
             if c.dewarp.source == .automatic { c.dewarp = .init() }
         }
-        guard turned > 0, let document = latestDocument(id: documentID) else { return turned }
+        if turned > 0 { await remeasureGeometry(documentID: documentID, pageIDs: pageIDs, parts: parts) }
+        return turned
+    }
 
-        // Neu messen: auf der gedrehten, zugeschnittenen Seite, ohne Drehung, Wölbung und Aufhellen.
+    /// Misst Schräglage und Wölbung der Seiten (und bei verbundenen Seiten der genannten Teile) auf der zugeschnittenen und
+    /// ausgerichteten Seite neu und trägt sie ein, wo sie nicht von Hand eingestellt sind.
+    func remeasureGeometry(documentID: UUID, pageIDs: [UUID], parts: [PagePart] = [.first, .second]) async {
+        guard let document = latestDocument(id: documentID) else { return }
         let store = self.store, scale = Self.curvatureMeasuringSize
-        var measured: [UUID: (skew: SkewEstimate?, dewarp: DewarpEstimate?)] = [:]
+        var measured: [String: (skew: SkewEstimate?, dewarp: DewarpEstimate?)] = [:]
         for id in pageIDs {
             guard let page = document.page(id: id) else { continue }
-            var corrections = PageGeometry.effectiveCorrections(for: page)
-            corrections.rotation.enabled = false; corrections.tone.enabled = false; corrections.dewarp.enabled = false
-            let scanID = page.scanID
-            let result: (SkewEstimate?, DewarpEstimate?) = await Task.detached {
-                guard let record = try? store.load(id: scanID),
-                      let image = store.thumbnail(for: record, maxPixelSize: scale),
-                      let flat = CorrectionRenderer.render(image, corrections: corrections) else { return (nil, nil) }
-                return (SkewEstimator.estimateAveraged(flat), DewarpEstimator.estimate(flat))
-            }.value
-            measured[id] = (result.0, result.1)
-        }
-        updatePages(documentID: documentID, pageIDs: pageIDs) { page, c in
-            guard let m = measured[page.id] else { return }
-            if c.rotation.source == .automatic, let skew = m.skew {
-                c.rotation = RotationCorrection(degrees: skew.degrees, enabled: skew.confidence >= Corrections.defaultConfidenceThreshold,
-                                                source: .automatic, confidence: skew.confidence)
-            }
-            if c.dewarp.source == .automatic {
-                c.dewarp = m.dewarp.map { DewarpCorrection(enabled: $0.worthApplying, source: .automatic, confidence: $0.reliableShare, field: $0.field) }
-                    ?? .notMeasurable
+            for part in parts {
+                if part == .second && page.joined == nil { continue }
+                var corrections = part == .first ? PageGeometry.effectiveCorrections(for: page) : (page.joined?.corrections ?? .none)
+                corrections.rotation.enabled = false; corrections.tone.enabled = false; corrections.dewarp.enabled = false
+                let scanID = page.scanID(of: part)
+                let result: (SkewEstimate?, DewarpEstimate?) = await Task.detached {
+                    guard let record = try? store.load(id: scanID),
+                          let image = store.thumbnail(for: record, maxPixelSize: scale),
+                          let flat = CorrectionRenderer.render(image, corrections: corrections) else { return (nil, nil) }
+                    return (SkewEstimator.estimateAveraged(flat), DewarpEstimator.estimate(flat))
+                }.value
+                measured["\(id.uuidString)/\(part.rawValue)"] = (result.0, result.1)
             }
         }
-        return turned
+        for part in parts {
+            updatePages(documentID: documentID, pageIDs: pageIDs, parts: [part]) { page, c in
+                guard let m = measured["\(page.id.uuidString)/\(part.rawValue)"] else { return }
+                if c.rotation.source == .automatic, let skew = m.skew {
+                    c.rotation = RotationCorrection(degrees: skew.degrees, enabled: skew.confidence >= Corrections.defaultConfidenceThreshold,
+                                                    source: .automatic, confidence: skew.confidence)
+                }
+                if c.dewarp.source == .automatic {
+                    c.dewarp = m.dewarp.map { DewarpCorrection(enabled: $0.worthApplying, source: .automatic, confidence: $0.reliableShare, field: $0.field) }
+                        ?? .notMeasurable
+                }
+            }
+        }
     }
 
     /// Seiten einer Serie, bei denen „Wölbung ausgleichen: alle Seiten“ etwas tut: Die Wölbung ist noch nicht gemessen, oder sie ist
@@ -1237,7 +1371,7 @@ public final class AppModel {
 
     /// Das Profil der Serie, zu der ein Scan gehört; ohne Serie gilt Dokument.
     func profile(forScan id: UUID) -> ScanProfile {
-        ([series, openedDocument].compactMap { $0 } + savedDocuments).first { $0.pages.contains { $0.scanID == id } }?.effectiveProfile ?? .document
+        ([series, openedDocument].compactMap { $0 } + savedDocuments).first { $0.pages.contains { $0.uses(scan: id) } }?.effectiveProfile ?? .document
     }
 
     /// Wechselt das Profil einer Serie. Das Aufhellen aller Seiten folgt dem neuen Profil; was der Nutzer an einer Seite von Hand
@@ -1288,11 +1422,14 @@ public final class AppModel {
         } else {
             return nil
         }
-        let key = "\(scanID.uuidString)/\(pageID?.uuidString ?? "-")"
+        // Eine verbundene Seite besteht aus zwei Scans: ihr Schlüssel enthält auch den zweiten Teil und die Naht.
+        let joinedPage = pageID.flatMap { shownDocument?.page(id: $0) }.flatMap { $0.joined != nil ? $0 : nil }
+        let key = "\(scanID.uuidString)/\(pageID?.uuidString ?? "-")" + (joinedPage.map { "/" + PageGeometry.renderKey(for: $0) } ?? "")
         if let cached = fullResolutionCache.first(where: { $0.key == key && $0.corrections == corrections }) { return cached.image }
 
         let store = self.store
         let image: CGImage? = await Task.detached {
+            if let joinedPage { return Self.renderPage(joinedPage, store: store, pageSize: 0, fullResolution: true) }
             guard let record = try? store.load(id: scanID),
                   let source = CGImageSourceCreateWithURL(store.originalURL(for: record) as CFURL, nil),
                   let original = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
@@ -1359,7 +1496,7 @@ public final class AppModel {
 
     /// Die Seiten eines Scans in der Reihenfolge des Dokuments.
     public func pages(of scanID: UUID) -> [DocumentPage] {
-        shownDocument?.pages.filter { $0.scanID == scanID } ?? []
+        shownDocument?.pages.filter { $0.uses(scan: scanID) } ?? []
     }
 
     /// `force` verwirft auch manuelle Änderungen, sonst gelten sie vor der Automatik.
@@ -1400,15 +1537,20 @@ public final class AppModel {
 
     /// Rendert die Ansicht der Seiten eines Scans neu: dieselben Korrekturen wie im PDF, nur kleiner.
     private func refreshPagePreviews(scanID: UUID) {
-        guard let image = scans.first(where: { $0.id == scanID })?.thumbnail else { return }
+        guard scans.contains(where: { $0.id == scanID && $0.thumbnail != nil }) else { return }
         let pages = self.pages(of: scanID)
+        // Die Miniaturen aller Scans, die diese Seiten brauchen (bei verbundenen Seiten zwei, im selben Maßstab).
+        var thumbnails: [UUID: CGImage] = [:]
+        for page in pages { for id in page.scanIDs { if let image = scans.first(where: { $0.id == id })?.thumbnail { thumbnails[id] = image } } }
+        let images = thumbnails
         Task {
             let rendered: [(UUID, CGImage?)] = await Task.detached {
-                pages.map { ($0.id, CorrectionRenderer.render(image, corrections: PageGeometry.effectiveCorrections(for: $0))) }
+                pages.map { page in (page.id, PageRenderer.render(page) { images[$0] }) }
             }.value
             for (id, preview) in rendered {
                 // Nur übernehmen, wenn die Seite noch dieselben Korrekturen hat wie beim Rendern.
-                guard let current = shownDocument?.page(id: id), pages.first(where: { $0.id == id })?.corrections == current.corrections else { continue }
+                guard let current = shownDocument?.page(id: id), let old = pages.first(where: { $0.id == id }),
+                      PageGeometry.renderKey(for: old) == PageGeometry.renderKey(for: current) else { continue }
                 pagePreviews[id] = preview
             }
         }
