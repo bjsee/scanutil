@@ -116,6 +116,31 @@ struct SerieBearbeitenOberflaechenTests {
         #expect(s.app.wait { s.app.string("editor-mark-count")?.hasPrefix("3") == true })
     }
 
+    @Test func pagesCanBeTurnedByNinetyDegreesSingleAndMarked() throws {
+        let s = try recordedSeries(scans: 2); defer { s.close() }
+        func turns(_ page: Int) -> Int? {
+            let pages = s.pages
+            guard pages.indices.contains(page) else { return nil }
+            return (pages[page]["corrections"] as? [String: Any])?["quarterTurns"] as? Int
+        }
+        openEditor(s)
+        #expect(s.app.wait { s.app.element("editor-page-2") != nil })
+        // Einzelne Seite: Seite 1 links drehen.
+        #expect(s.app.press("editor-page-1"))
+        #expect(s.app.wait { s.app.element("editor-turn-left") != nil })
+        #expect(s.app.press("editor-turn-left"))
+        #expect(s.app.wait(timeout: 20) { turns(0) == 3 }, "Links drehen ist nicht gespeichert: \(String(describing: turns(0)))")
+        #expect(turns(1) == 0, "Die andere Seite bleibt")
+        #expect(s.app.wait { s.app.string("editor-turn-state") != nil }, "Die Seite zeigt ihre Ausrichtung")
+
+        // Markierte Seiten: beide rechts drehen. Seite 1 geht von 3 auf 0, Seite 2 von 0 auf 1.
+        #expect(s.app.press("editor-mark-all"))
+        #expect(s.app.wait { s.app.element("editor-batch-turn-right") != nil })
+        #expect(s.app.press("editor-batch-turn-right"))
+        #expect(s.app.wait(timeout: 30) { turns(0) == 0 && turns(1) == 1 }, "Seiten: \(String(describing: turns(0))), \(String(describing: turns(1)))")
+        #expect(s.app.wait { s.app.string("editor-batch-note")?.contains("nach rechts") == true })
+    }
+
     @Test func changingTheRotationInTheEditorIsSavedAsManualAndReopensThePage() throws {
         let s = try recordedSeries(scans: 1); defer { s.close() }
         openEditor(s)

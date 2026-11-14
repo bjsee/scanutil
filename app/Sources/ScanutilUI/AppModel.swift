@@ -1135,6 +1135,50 @@ public final class AppModel {
         return changed
     }
 
+    /// Dreht Seiten um Vierteldrehungen im Uhrzeigersinn (negativ: gegen den Uhrzeigersinn), für quer gescannte Seiten. Danach werden
+    /// Schräglage und Wölbung auf der aufrechten Seite neu gemessen: Die alten Werte galten für die alte Ausrichtung. Was von Hand
+    /// eingestellt ist (Drehwinkel, Wölbung), bleibt. Gibt zurück, bei wie vielen Seiten die Ausrichtung geändert wurde.
+    @discardableResult
+    public func turnPages(documentID: UUID, pageIDs: [UUID], quarters: Int) async -> Int {
+        guard Corrections.normalized(quarters) != 0 else { return 0 }
+        let turned = updatePages(documentID: documentID, pageIDs: pageIDs) { _, c in
+            c.turn(by: quarters)
+            // Die alte Messung gilt nicht mehr; bis die neue da ist, wirkt sie nicht.
+            if c.rotation.source == .automatic { c.rotation = RotationCorrection(degrees: 0, enabled: false, source: .automatic, confidence: nil) }
+            if c.dewarp.source == .automatic { c.dewarp = .init() }
+        }
+        guard turned > 0, let document = latestDocument(id: documentID) else { return turned }
+
+        // Neu messen: auf der gedrehten, zugeschnittenen Seite, ohne Drehung, Wölbung und Aufhellen.
+        let store = self.store, scale = Self.curvatureMeasuringSize
+        var measured: [UUID: (skew: SkewEstimate?, dewarp: DewarpEstimate?)] = [:]
+        for id in pageIDs {
+            guard let page = document.page(id: id) else { continue }
+            var corrections = PageGeometry.effectiveCorrections(for: page)
+            corrections.rotation.enabled = false; corrections.tone.enabled = false; corrections.dewarp.enabled = false
+            let scanID = page.scanID
+            let result: (SkewEstimate?, DewarpEstimate?) = await Task.detached {
+                guard let record = try? store.load(id: scanID),
+                      let image = store.thumbnail(for: record, maxPixelSize: scale),
+                      let flat = CorrectionRenderer.render(image, corrections: corrections) else { return (nil, nil) }
+                return (SkewEstimator.estimateAveraged(flat), DewarpEstimator.estimate(flat))
+            }.value
+            measured[id] = (result.0, result.1)
+        }
+        updatePages(documentID: documentID, pageIDs: pageIDs) { page, c in
+            guard let m = measured[page.id] else { return }
+            if c.rotation.source == .automatic, let skew = m.skew {
+                c.rotation = RotationCorrection(degrees: skew.degrees, enabled: skew.confidence >= Corrections.defaultConfidenceThreshold,
+                                                source: .automatic, confidence: skew.confidence)
+            }
+            if c.dewarp.source == .automatic {
+                c.dewarp = m.dewarp.map { DewarpCorrection(enabled: $0.worthApplying, source: .automatic, confidence: $0.reliableShare, field: $0.field) }
+                    ?? .notMeasurable
+            }
+        }
+        return turned
+    }
+
     /// Seiten einer Serie, bei denen „Wölbung ausgleichen: alle Seiten“ etwas tut: Die Wölbung ist noch nicht gemessen, oder sie ist
     /// gemessen, lohnt sich und ist aus.
     public func pagesNeedingCurvature(documentID: UUID) -> Int {

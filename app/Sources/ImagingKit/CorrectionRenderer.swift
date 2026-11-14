@@ -9,7 +9,8 @@ public enum CorrectionRenderer {
 
     /// Reihenfolge: erst Zuschnitt mit Perspektive, dann Drehung, dann Beschnitt auf das größte Rechteck ohne leere Ecken.
     public static func render(_ image: CGImage, corrections: Corrections) -> CGImage? {
-        guard corrections.enabled else { return image }
+        // Die Ausrichtung gilt auch bei ausgeschalteten Korrekturen.
+        guard corrections.enabled else { return turned(image, quarterTurns: corrections.quarterTurns) }
         // Zuerst die Hände: Zuschnitt und Drehung arbeiten dann auf dem bereinigten Bild.
         var image = image
         if corrections.handRemoval.enabled, let data = corrections.handRemoval.mask, let mask = HandMask(pngData: data),
@@ -31,6 +32,9 @@ public enum CorrectionRenderer {
             guard let corrected = filter.outputImage else { return nil }
             ci = corrected.transformed(by: CGAffineTransform(translationX: -corrected.extent.minX, y: -corrected.extent.minY))
         }
+
+        // Ausrichtung: Alles Weitere (Wölbung, Drehung, Aufhellen) rechnet auf der aufrechten Seite.
+        if corrections.quarterTurns != 0 { ci = turned(ci, quarterTurns: corrections.quarterTurns) }
 
         // Wölbung: auf der zugeschnittenen Seite, vor der Drehung. Die Zeilen werden auf den Winkel der Drehung gebracht,
         // die Drehung stellt sie dann waagerecht.
@@ -69,6 +73,20 @@ public enum CorrectionRenderer {
             return ToneNormalizer.context.createCGImage(ci, from: extent, format: .RGBA8, colorSpace: ToneNormalizer.srgb)
         }
         return context.createCGImage(ci, from: extent)
+    }
+
+    /// Das Bild um Vierteldrehungen im Uhrzeigersinn gedreht (Core Image rechnet mit nach oben zeigender y-Achse).
+    static func turned(_ ci: CIImage, quarterTurns: Int) -> CIImage {
+        let turns = Corrections.normalized(quarterTurns)
+        guard turns != 0 else { return ci }
+        let rotated = ci.transformed(by: CGAffineTransform(rotationAngle: -.pi / 2 * CGFloat(turns)))
+        return rotated.transformed(by: CGAffineTransform(translationX: -rotated.extent.minX, y: -rotated.extent.minY))
+    }
+
+    static func turned(_ image: CGImage, quarterTurns: Int) -> CGImage? {
+        guard Corrections.normalized(quarterTurns) != 0 else { return image }
+        let ci = turned(CIImage(cgImage: image), quarterTurns: quarterTurns)
+        return context.createCGImage(ci, from: ci.extent.integral)
     }
 
     /// Größtes achsenparalleles Rechteck gleichen Seitenverhältnisses innerhalb eines um `angle` gedrehten Rechtecks.

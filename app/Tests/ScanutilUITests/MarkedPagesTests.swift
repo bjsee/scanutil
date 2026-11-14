@@ -200,4 +200,36 @@ struct MarkedPagesTests {
         #expect(model.latestDocument(id: doc.id)?.pages[0].corrections.rotation.degrees == 15)
         await model.disconnect()
     }
+
+    // MARK: Drehen um 90°
+
+    @Test func turningPagesSetsTheOrientationSavesItAndMeasuresAgainButKeepsWhatWasSetByHand() async throws {
+        let (model, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        model.startSeries(title: "Blätter")
+        await model.scan(); await model.scan()
+        // Warten, bis die Analyse beider Seiten da ist, sonst überschreibt sie später die Ausrichtung nicht, aber die Winkel.
+        for _ in 0..<160 {
+            if model.series?.pages.allSatisfy({ $0.analysis != nil }) == true { break }
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+        let doc = try #require(model.series)
+        let ids = doc.pages.map(\.id)
+        model.updatePage(documentID: doc.id, pageID: ids[1]) { $0.setRotation(degrees: 2) }     // von Hand
+
+        let n = await model.turnPages(documentID: doc.id, pageIDs: ids, quarters: -1)
+        #expect(n == 2)
+        let after = try #require(model.latestDocument(id: doc.id))
+        #expect(after.pages.map { $0.corrections.quarterTurns } == [3, 3], "Links drehen ist drei Vierteldrehungen im Uhrzeigersinn")
+        #expect(after.pages[1].corrections.rotation.degrees == 2 && after.pages[1].corrections.rotation.source == .manual, "Von Hand bleibt")
+        #expect(after.pages[0].corrections.rotation.source == .automatic, "Die Automatik misst auf der aufrechten Seite neu")
+        #expect(after.pages[0].corrections.dewarp.wasMeasured, "Auch die Wölbung ist neu gemessen (mit oder ohne Ergebnis)")
+        let saved = try ArchiveStore(root: dir).loadDocument(id: doc.id)
+        #expect(saved.pages.map { $0.corrections.quarterTurns } == [3, 3], "Gespeichert")
+
+        // Rechts drehen macht es rückgängig; eine volle Umdrehung ändert nichts.
+        #expect(await model.turnPages(documentID: doc.id, pageIDs: ids, quarters: 1) == 2)
+        #expect(model.latestDocument(id: doc.id)?.pages.map { $0.corrections.quarterTurns } == [0, 0])
+        #expect(await model.turnPages(documentID: doc.id, pageIDs: ids, quarters: 4) == 0)
+        await model.disconnect()
+    }
 }

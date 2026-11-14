@@ -169,6 +169,10 @@ struct FullResolutionTests {
 
     @Test func repeatedRequestWithSameCorrectionsComesFromTheCache() async throws {
         let (model, item, dir) = await makeModel(); defer { try? FileManager.default.removeItem(at: dir) }
+        // Die Analyse der Aufnahme läuft im Hintergrund und setzt ihre Korrekturen kurz nach `scan()`. Kommt sie zwischen den beiden
+        // Aufrufen, gelten andere Korrekturen und es gibt zu Recht ein neues Bild: also erst ihr Ergebnis abwarten (auf einem
+        // ausgelasteten Rechner dauert das länger, der Test war deshalb nicht stabil).
+        for _ in 0..<80 where model.scans[0].corrections == item.corrections { try? await Task.sleep(for: .milliseconds(25)) }
         let first = try #require(await model.fullResolutionImage(scanID: item.id))
         let second = try #require(await model.fullResolutionImage(scanID: item.id))
         #expect(first === second, "Dasselbe Bild muss aus dem Zwischenspeicher kommen")
